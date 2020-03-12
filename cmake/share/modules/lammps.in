@@ -1,0 +1,13 @@
+#%Module
+proc ModulesHelp {} {
+  puts stderr "set environment for LAMMPS and msi2lmp executables"
+  puts stderr "to find potential and force field files"
+}
+
+setenv LAMMPS_POTENTIALS [getenv LAMMPS_POTENTIALS @CMAKE_INSTALL_FULL_DATADIR@/potentials]
+setenv MSI2LMP_LIBRARY [getenv MSI2LMP_LIBRARY @CMAKE_INSTALL_FULL_DATADIR@/frc_files]
+
+prepend-path CPATH @CMAKE_INSTALL_FULL_INCLUDEDIR@
+prepend-path LD_LIBRARY_PATH @CMAKE_INSTALL_FULL_LIBDIR@
+prepend-path LD_RUN_PATH @CMAKE_INSTALL_FULL_LIBDIR@
+prepend-path PKG_CONFIG_PATH @CMAKE_INSTALL_FULL_LIBDIR@/pkgconfig

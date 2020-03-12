@@ -624,6 +624,11 @@ install(
         ${CMAKE_BINARY_DIR}/etc/profile.d/lammps.csh
   DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/profile.d
 )
+configure_file(share/modules/lammps.in ${CMAKE_BINARY_DIR}/share/modules/lammps @ONLY)
+install(
+  FILES ${CMAKE_BINARY_DIR}/share/modules/lammps
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/modules
+)
 
 ###############################################################################
 # Install LAMMPS lib and python module into site-packages folder with
