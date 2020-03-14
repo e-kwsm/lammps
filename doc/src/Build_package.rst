@@ -47,13 +47,13 @@ versus make.
 
 **CMake build**:
 
-.. code-block:: bash
+.. code-block:: csh
 
    -D PKG_NAME=value          # yes or no (default)
 
 Examples:
 
-.. code-block:: bash
+.. code-block:: csh
 
    -D PKG_MANYBODY=yes
    -D PKG_USER-INTEL=yes
@@ -185,7 +185,7 @@ one of them as a starting point and customize it to your needs.
 
 The following commands are useful for managing package source files
 and their installation when building LAMMPS via traditional make.
-Just type "make" in lammps/src to see a one-line summary.
+Just type ``make`` in lammps/src to see a one-line summary.
 
 These commands install/un-install sets of packages:
 
