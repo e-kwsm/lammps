@@ -163,7 +163,7 @@ Makefile if desired:
 
 The file Makefile.linux\_multi is set up to include support for multiple
 GPU architectures as supported by the CUDA toolkit in use. This is done
-through using the "--gencode " flag, which can be used multiple times and
+through using the ``--gencode`` flag, which can be used multiple times and
 thus support all GPU architectures supported by your CUDA compiler.
 
 If the library build is successful, 3 files should be created:
@@ -524,11 +524,11 @@ OPT package
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_OPT=yes".
+No additional settings are needed besides ``-D PKG_OPT=yes``.
 
 **Traditional make**\ :
 
-The compile flag "-restrict" must be used to build LAMMPS with the OPT
+The compile flag ``-restrict`` must be used to build LAMMPS with the OPT
 package when using Intel compilers.  It should be added to the CCFLAGS
 line of your Makefile.machine.  See src/MAKE/OPTIONS/Makefile.opt for
 an example.
@@ -542,7 +542,7 @@ POEMS package
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_OPT=yes".
+No additional settings are needed besides ``-D PKG_OPT=yes``.
 
 **Traditional make**\ :
 
@@ -691,8 +691,8 @@ The USER-ATC package requires the MANYBODY package also be installed.
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_USER-ATC=yes"
-and "-D PKG\_MANYBODY=yes".
+No additional settings are needed besides ``-D PKG_USER-ATC=yes``
+and ``-D PKG_MANYBODY=yes``.
 
 **Traditional make**\ :
 
@@ -739,7 +739,7 @@ USER-AWPMD package
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_USER-AQPMD=yes".
+No additional settings are needed besides ``-D PKG_USER-AQPMD=yes``.
 
 **Traditional make**\ :
 
@@ -800,7 +800,7 @@ C++11-only features.
 **CMake build**\ :
 
 This is the recommended build recipe: no additional settings are normally
-needed besides "-D PKG\_USER-COLVARS=yes".
+needed besides ``-D PKG_USER-COLVARS=yes``.
 
 Building and linking of Lepton (or other C++11-only features) is enabled
 automatically when compilation is carried out with C++11 support, and disabled
@@ -889,7 +889,7 @@ LAMMPS build.
 
 **CMake build**\ :
 
-When the "-D PKG\_USER-PLUMED" flag is included in the cmake command you
+When the ``-D PKG_USER-PLUMED`` flag is included in the cmake command you
 must ensure that GSL is installed in locations that are specified in
 your environment.  There are then two additional commands that control
 the manner in which PLUMED is obtained and linked into LAMMPS.
