@@ -69,7 +69,7 @@ re-compiled.
 
 The lammps/src/MAKE tree contains the Makefile.machine files included
 in the LAMMPS distribution.  Typing "make machine" uses
-*Makefile.machine*\ .  Thus the "make serial" or "make mpi" lines above
+*Makefile.machine*.  Thus the "make serial" or "make mpi" lines above
 use Makefile.serial and Makefile.mpi, respectively.  Other makefiles
 are in these directories:
 

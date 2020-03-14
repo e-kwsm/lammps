@@ -102,7 +102,7 @@ folder, recreate the directory and start over.
 
 ----------
 
-**Command-line version of CMake**\ :
+**Command-line version of CMake**:
 
 .. code-block:: bash
 
@@ -160,22 +160,22 @@ directory.
 
 ----------
 
-**Curses version (terminal-style menu) of CMake**\ :
+**Curses version (terminal-style menu) of CMake**:
 
 .. code-block:: bash
 
    ccmake ../cmake
 
 You initiate the configuration and build environment generation steps
-separately. For the first you have to type **c**\ , for the second you
-have to type **g**\ . You may need to type **c** multiple times, and may be
+separately. For the first you have to type **c**, for the second you
+have to type **g**. You may need to type **c** multiple times, and may be
 required to edit some of the entries of CMake configuration variables
 in between.  Please see the `ccmake manual <https://cmake.org/cmake/help/latest/manual/ccmake.1.html>`_ for
 more information.
 
 ----------
 
-**GUI version of CMake**\ :
+**GUI version of CMake**:
 
 .. code-block:: bash
 
