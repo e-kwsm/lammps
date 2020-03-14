@@ -8,7 +8,7 @@ below).  It can include various options for customizing your LAMMPS
 build with a number of global compilation options and features.
 
 Those makefiles are written for and tested with GNU make and may not
-be compatible with other make programs.  In most cases, if the "make"
+be compatible with other make programs.  In most cases, if the ``make``
 program is not GNU make, then there will be a GNU make program
 available under the name "gmake".  If GNU make or a compatible make is
 not available, you may have to first install it or switch to building
@@ -18,14 +18,14 @@ additional tools to be available and functioning.
 
   * a Bourne shell compatible "Unix" shell program (often this is bash)
   * a few shell utilities: ls, mv, ln, rm, grep, sed, tr, cat, touch, diff, dirname
-  * python (optional, required for "make lib-XXX" in the src folder)
+  * python (optional, required for ``make lib-XXX`` in the src folder)
 
 To include LAMMPS packages (i.e. optional commands and styles) you
 must enable them first, as discussed on the :doc:`Build package
 <Build_package>` doc page.  If a packages requires (provided or
 external) libraries, you must configure and build those libraries
 **before** building LAMMPS itself and especially **before** enabling
-such a package with "make yes-<package>".  Building :doc:`LAMMPS
+such a package with ``make yes-<package>``.  Building :doc:`LAMMPS
 with CMake <Build_cmake>` can automate much of this for many types of
 machines, especially workstations, desktops, and laptops, so we suggest
 you try it first when building LAMMPS in those cases.
@@ -42,7 +42,7 @@ executable lmp\_serial and lmp\_mpi in lammps/src:
 
 This initial compilation can take a long time, since LAMMPS is a large
 project with many features. If your machine has multiple CPU cores
-(most do these days), using a command like "make -jN mpi" (with N =
+(most do these days), using a command like ``make -jN mpi`` (with N =
 the number of available CPU cores) can be much faster.  If you plan to
 do development on LAMMPS or need to re-compile LAMMPS repeatedly, the
 installation of the ccache (= Compiler Cache) software may speed up
@@ -51,7 +51,7 @@ compilation even more.
 After the initial build, whenever you edit LAMMPS source files, or add
 or remove new files to the source directory (e.g. by installing or
 uninstalling packages), you must re-compile and relink the LAMMPS
-executable with the same "make" command.  This makefiles dependencies
+executable with the same ``make`` command.  This makefiles dependencies
 should insure that only the subset of files that need to be are
 re-compiled.
 
@@ -68,8 +68,8 @@ re-compiled.
 ----------
 
 The lammps/src/MAKE tree contains the Makefile.machine files included
-in the LAMMPS distribution.  Typing "make machine" uses
-*Makefile.machine*.  Thus the "make serial" or "make mpi" lines above
+in the LAMMPS distribution.  Typing ``make machine`` uses
+*Makefile.machine*.  Thus the ``make serial`` or ``make mpi`` lines above
 use Makefile.serial and Makefile.mpi, respectively.  Other makefiles
 are in these directories:
 
@@ -79,7 +79,7 @@ are in these directories:
    MACHINES     # Makefiles for specific machines
    MINE         # customized Makefiles you create (you may need to create this folder)
 
-Typing "make" lists all the available Makefile.machine files.  A file
+Typing ``make`` lists all the available Makefile.machine files.  A file
 with the same name can appear in multiple folders (not a good idea).
 The order the directories are searched is as follows: src/MAKE/MINE,
 src/MAKE, src/MAKE/OPTIONS, src/MAKE/MACHINES.  This gives preference
