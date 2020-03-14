@@ -404,7 +404,7 @@ setting its position from Python, which changes the dihedral angle.
 
 .. code-block:: Python
 
-   phi = [d \* math.pi / 180 for d in range(360)]
+   phi = [d * math.pi / 180 for d in range(360)]
 
    pos = [(1.0, math.cos(p), math.sin(p)) for p in phi]
 
@@ -442,8 +442,8 @@ It is then disordered by moving each atom by a random delta.
 
    for i in range(L.system.natoms):
        x, y = L.atoms[i].position
-       dx = deltaperturb \* random.uniform(-1, 1)
-       dy = deltaperturb \* random.uniform(-1, 1)
+       dx = deltaperturb * random.uniform(-1, 1)
+       dy = deltaperturb * random.uniform(-1, 1)
        L.atoms[i].position  = (x+dx, y+dy)
 
    L.run(0)
@@ -474,8 +474,8 @@ moves random atoms by a random delta and only accepts certain moves.
 
        x0, y0 = current_atom.position
 
-       dx = deltamove \* random.uniform(-1, 1)
-       dy = deltamove \* random.uniform(-1, 1)
+       dx = deltamove * random.uniform(-1, 1)
+       dy = deltamove * random.uniform(-1, 1)
 
        current_atom.position = (x0+dx, y0+dy)
 
@@ -487,7 +487,7 @@ moves random atoms by a random delta and only accepts certain moves.
        if e <= elast:
            naccept += 1
            elast = e
-       elif random.random() <= math.exp(natoms\*(elast-e)/kT):
+       elif random.random() <= math.exp(natoms*(elast-e)/kT):
            naccept += 1
            elast = e
        else:
