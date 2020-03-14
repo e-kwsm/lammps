@@ -195,7 +195,7 @@ squares with rounded circles at the vertices.  Special cases for N = 1
 One use of this body style is for 2d discrete element models, as
 described in :ref:`Fraige <body-Fraige>`.
 
-Similar to body style *nparticle*\ , the atom_style body command for
+Similar to body style *nparticle*, the atom_style body command for
 this body style takes two additional arguments:
 
 .. parsed-literal::
@@ -311,7 +311,7 @@ specified.
 This body style is for 3d discrete element models, as described in
 :ref:`Wang <body-Wang>`.
 
-Similar to body style *rounded/polygon*\ , the atom_style body command
+Similar to body style *rounded/polygon*, the atom_style body command
 for this body style takes two additional arguments:
 
 .. parsed-literal::

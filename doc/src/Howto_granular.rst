@@ -34,7 +34,7 @@ These commands implement fix options specific to granular systems:
 
 The fix style *freeze* zeroes both the force and torque of frozen
 atoms, and should be used for granular system instead of the fix style
-*setforce*\ .
+*setforce*.
 
 For computational efficiency, you can eliminate needless pairwise
 computations between frozen atoms by using this command:

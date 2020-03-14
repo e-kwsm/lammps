@@ -44,7 +44,7 @@ and make sure branch is set to "master", as shown in the figure below.
 .. image:: JPG/tutorial_branch.png
    :align: center
 
-If it is not, use the button to change it to *master*\ . Once it is, use the
+If it is not, use the button to change it to *master*. Once it is, use the
 fork button to create a fork.
 
 .. image:: JPG/tutorial_fork.png
@@ -64,7 +64,7 @@ LAMMPS development.
 **Adding changes to your own fork**
 
 Additions to the upstream version of LAMMPS are handled using *feature
-branches*\ .  For every new feature, a so-called feature branch is
+branches*.  For every new feature, a so-called feature branch is
 created, which contains only those modification relevant to one specific
 feature. For example, adding a single fix would consist of creating a
 branch with only the fix header and source file and nothing else.  It is
@@ -136,17 +136,17 @@ After everything is done, add the files to the branch and commit them:
 
 .. warning::
 
-   Do not use *git commit -a* (or *git add -A*\ ).  The -a flag (or -A
+   Do not use ``git commit -a`` (or ``git add -A``).  The ``-a`` flag (or ``-A``
    flag) will automatically include **all** modified **and** new files
    and that is rarely the behavior you want.  It can easily lead to
    accidentally adding unrelated and unwanted changes into the
-   repository.  Instead it is preferable to explicitly use *git add*\ ,
-   *git rm*\ , *git mv* for adding, removing, renaming individual files,
-   respectively, and then *git commit* to finalize the commit.
-   Carefully check all pending changes with *git status* before
+   repository.  Instead it is preferable to explicitly use ``git add``,
+   ``git rm``, ``git mv`` for adding, removing, renaming individual files,
+   respectively, and then ``git commit`` to finalize the commit.
+   Carefully check all pending changes with ``git status`` before
    committing them.  If you find doing this on the command line too
    tedious, consider using a GUI, for example the one included in git
-   distributions written in Tk, i.e. use *git gui* (on some Linux
+   distributions written in Tk, i.e. use ``git gui`` (on some Linux
    distributions it may be required to install an additional package to
    use it).
 

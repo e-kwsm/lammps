@@ -81,7 +81,7 @@ to their DC should appear in the data file as normal atoms and bonds.
 
 You can use the *polarizer* tool (Python script distributed with the
 USER-DRUDE package) to convert a non-polarizable data file (here
-*data.102494.lmp*\ ) to a polarizable data file (\ *data-p.lmp*\ )
+*data.102494.lmp*) to a polarizable data file (*data-p.lmp*)
 
 .. code-block:: bash
 
@@ -89,7 +89,7 @@ USER-DRUDE package) to convert a non-polarizable data file (here
 
 This will automatically insert the new atoms and bonds.
 The masses and charges of DCs and DPs are computed
-from *phenol.dff*\ , as well as the DC-DP bond constants.  The file
+from *phenol.dff*, as well as the DC-DP bond constants.  The file
 *phenol.dff* contains the polarizabilities of the atom types
 and the mass of the Drude particles, for instance:
 
@@ -104,7 +104,7 @@ and the mass of the Drude particles, for instance:
 
 The hydrogen atoms are absent from this file, so they will be treated
 as non-polarizable atoms.  In the non-polarizable data file
-*data.102494.lmp*\ , atom names corresponding to the atom type numbers
+*data.102494.lmp*, atom names corresponding to the atom type numbers
 have to be specified as comments at the end of lines of the *Masses*
 section.  You probably need to edit it to add these names. It should
 look like
@@ -123,13 +123,13 @@ look like
 
 **Basic input file**
 
-The atom style should be set to (or derive from) *full*\ , so that you
+The atom style should be set to (or derive from) *full*, so that you
 can define atomic charges and molecular bonds, angles, dihedrals...
 
 The *polarizer* tool also outputs certain lines related to the input
 script (the use of these lines will be explained below).  In order for
 LAMMPS to recognize that you are using Drude oscillators, you should
-use the fix *drude*\ . The command is
+use the fix *drude*. The command is
 
 .. code-block:: LAMMPS
 
@@ -141,7 +141,7 @@ and N for non-polarizable atoms.  Here the atom types 1 to 3 (C and O
 atoms) are DC, atom types 4 and 5 (H atoms) are non-polarizable and
 the atom types 6 to 8 are the newly created DPs.
 
-By recognizing the fix *drude*\ , LAMMPS will find and store matching
+By recognizing the fix *drude*, LAMMPS will find and store matching
 DC-DP pairs and will treat DP as equivalent to their DC in the
 *special bonds* relations.  It may be necessary to extend the space
 for storing such special relations.  In this case extra space should
@@ -274,7 +274,7 @@ style.  In our example, we would use
    pair_style hybrid/overlay lj/cut/coul/long 10.0 thole 2.6 10.0
 
 This tells LAMMPS that we are using two pair_styles.  The first one is
-as above (\ *lj/cut/coul/long 10.0*\ ).  The second one is a *thole*
+as above (*lj/cut/coul/long 10.0*).  The second one is a *thole*
 pair_style with default screening factor 2.6 (:ref:`Noskov <Noskov2>`) and
 cutoff 10.0.
 
@@ -330,11 +330,11 @@ For the *thole* pair style the coefficients are
 The special neighbors have charge-charge and charge-dipole
 interactions screened by the *coul* factors of the *special_bonds*
 command (0.0, 0.0, and 0.5 in the example above).  Without using the
-pair_style *thole*\ , dipole-dipole interactions are screened by the
-same factor.  By using the pair_style *thole*\ , dipole-dipole
+pair_style *thole*, dipole-dipole interactions are screened by the
+same factor.  By using the pair_style *thole*, dipole-dipole
 interactions are screened by Thole's function, whatever their special
 relationship (except within each DC-DP pair of course).  Consider for
-example 1-2 neighbors: using the pair_style *thole*\ , their dipoles
+example 1-2 neighbors: using the pair_style *thole*, their dipoles
 will see each other (despite the *coul* factor being 0.) and the
 interactions between these dipoles will be damped by Thole's function.
 
@@ -343,14 +343,14 @@ interactions between these dipoles will be damped by Thole's function.
 **Thermostats and barostats**
 
 Using a Nose-Hoover barostat with the *langevin/drude* thermostat is
-straightforward using fix *nph* instead of *nve*\ .  For example:
+straightforward using fix *nph* instead of *nve*.  For example:
 
 .. code-block:: LAMMPS
 
    fix NPH all nph iso 1. 1. 500
 
 It is also possible to use a Nose-Hoover instead of a Langevin
-thermostat.  This requires to use :doc:`\ *fix drude/transform*\ <fix_drude_transform>` just before and after the
+thermostat.  This requires to use :doc:`*fix drude/transform* <fix_drude_transform>` just before and after the
 time integration fixes.  The *fix drude/transform/direct* converts the
 atomic masses, positions, velocities and forces into a reduced
 representation, where the DCs transform into the centers of mass of
@@ -374,7 +374,7 @@ For our phenol example, the groups would be defined as
    group CORES  type 1 2 3     # DCs
    group DRUDES type 6 7 8     # DPs
 
-Note that with the fixes *drude/transform*\ , it is not required to
+Note that with the fixes *drude/transform*, it is not required to
 specify *comm_modify vel yes* because the fixes do it anyway (several
 times and for the forces also).  To avoid the flying ice cube artifact
 :ref:`(Lamoureux) <Lamoureux2>`, where the atoms progressively freeze and the

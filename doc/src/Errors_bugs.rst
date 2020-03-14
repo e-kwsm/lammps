@@ -18,7 +18,7 @@ If you are confident that you have found a bug in LAMMPS, please follow the step
    to see if the issue has been discussed before.
 
 If none of these steps yields any useful information, please file
-a new bug report on the `GitHub Issue page <gip_>`_\ .
+a new bug report on the `GitHub Issue page <gip_>`_.
 The website will offer you to select a suitable template with explanations
 and then you should replace those explanations with the information
 that you can provide to reproduce your issue.

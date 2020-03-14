@@ -162,7 +162,7 @@ Here is how you can run and visualize one of the sample problems:
    lmp_linux -in in.indent            # run the problem
 
 Running the simulation produces the files *dump.indent* and
-*log.lammps*\ .  You can visualize the dump file of snapshots with a
+*log.lammps*.  You can visualize the dump file of snapshots with a
 variety of 3rd-party tools highlighted on the
 `Visualization <https://lammps.sandia.gov/viz.html>`_ page of the LAMMPS
 web site.

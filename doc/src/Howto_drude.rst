@@ -46,7 +46,7 @@ There are two ways to thermostat the Drude particles at a low
 temperature: use either :doc:`fix langevin/drude <fix_langevin_drude>`
 for a Langevin thermostat, or :doc:`fix drude/transform/\* <fix_drude_transform>` for a Nose-Hoover
 thermostat. The former requires use of the command :doc:`comm_modify vel yes <comm_modify>`. The latter requires two separate integration
-fixes like *nvt* or *npt*\ . The correct temperatures of the reduced
+fixes like *nvt* or *npt*. The correct temperatures of the reduced
 degrees of freedom can be calculated using the :doc:`compute temp/drude <compute_temp_drude>`. This requires also to use the
 command *comm_modify vel yes*.
 

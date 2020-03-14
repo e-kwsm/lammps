@@ -76,7 +76,7 @@ Ubuntu on Windows" Icon. Start this program.
 
 .. image:: JPG/bow_tutorial_09.png
 
-Congratulations, you have installed **Bash on Ubuntu on Windows**\ .
+Congratulations, you have installed **Bash on Ubuntu on Windows**.
 
 .. image:: JPG/bow_tutorial_10.png
 
@@ -109,7 +109,7 @@ Files in Ubuntu on Windows
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When you launch "Bash on Ubuntu on Windows" you will start out in your Linux
-user home directory /home/[username]\ . You can access your Windows user directory
+user home directory /home/[username]. You can access your Windows user directory
 using the /mnt/c/Users/[username] folder.
 
 Download LAMMPS
