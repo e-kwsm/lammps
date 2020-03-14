@@ -45,7 +45,7 @@ packages:
 The mechanism for including packages is simple but different for CMake
 versus make.
 
-**CMake build**\ :
+**CMake build**:
 
 .. code-block:: bash
 
@@ -72,7 +72,7 @@ once with CMake.
    invoke cmake.  CMake will give an error if that is not the case,
    indicating how you can un-install all packages in the src dir.
 
-**Traditional make**\ :
+**Traditional make**:
 
 .. code-block:: bash
 
@@ -108,7 +108,7 @@ once with make.
    within the same command.  You can include or exclude multiple packages
    in a single make command, e.g. make yes-colloid no-manybody.
 
-**CMake and make info**\ :
+**CMake and make info**:
 
 Any package can be included or excluded in a LAMMPS build, independent
 of all other packages.  However, some packages include files derived
@@ -130,7 +130,7 @@ src directory.
 
 ----------
 
-**CMake shortcuts for installing many packages**\ :
+**CMake shortcuts for installing many packages**:
 
 Instead of specifying all the CMake options via the command-line,
 CMake allows initializing its settings cache using script files.
@@ -181,7 +181,7 @@ one of them as a starting point and customize it to your needs.
 
 ----------
 
-**Make shortcuts for installing many packages**\ :
+**Make shortcuts for installing many packages**:
 
 The following commands are useful for managing package source files
 and their installation when building LAMMPS via traditional make.
