@@ -49,7 +49,7 @@ Note that the following commands do not need to be repeated because
 their settings are included in the restart file: *units, atom_style,
 special_bonds, pair_style, bond_style*.  However these commands do
 need to be used, since their settings are not in the restart file:
-*neighbor, fix, timestep*\ .
+*neighbor, fix, timestep*.
 
 If you actually use this script to perform a restarted run, you will
 notice that the thermodynamic data match at step 50 (if you also put a

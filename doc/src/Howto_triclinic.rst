@@ -23,21 +23,21 @@ origin given by **a** = (xhi-xlo,0,0); **b** = (xy,yhi-ylo,0); **c** =
 and are called "tilt factors" because they are the amount of
 displacement applied to faces of an originally orthogonal box to
 transform it into the parallelepiped.  In LAMMPS the triclinic
-simulation box edge vectors **a**\ , **b**\ , and **c** cannot be arbitrary
+simulation box edge vectors **a**, **b**, and **c** cannot be arbitrary
 vectors.  As indicated, **a** must lie on the positive x axis.  **b** must
 lie in the xy plane, with strictly positive y component. **c** may have
 any orientation with strictly positive z component.  The requirement
-that **a**\ , **b**\ , and **c** have strictly positive x, y, and z components,
-respectively, ensures that **a**\ , **b**\ , and **c** form a complete
+that **a**, **b**, and **c** have strictly positive x, y, and z components,
+respectively, ensures that **a**, **b**, and **c** form a complete
 right-handed basis.  These restrictions impose no loss of generality,
 since it is possible to rotate/invert any set of 3 crystal basis
 vectors so that they conform to the restrictions.
 
-For example, assume that the 3 vectors **A**\ ,\ **B**\ ,\ **C** are the edge
+For example, assume that the 3 vectors **A**, **B**, **C** are the edge
 vectors of a general parallelepiped, where there is no restriction on
-**A**\ ,\ **B**\ ,\ **C** other than they form a complete right-handed basis i.e.
-**A** x **B** . **C** > 0.  The equivalent LAMMPS **a**\ ,\ **b**\ ,\ **c** are a linear
-rotation of **A**\ , **B**\ , and **C** and can be computed as follows:
+**A**, **B**, **C** other than they form a complete right-handed basis i.e.
+**A** x **B** . **C** > 0.  The equivalent LAMMPS **a**, **b**, **c** are a linear
+rotation of **A**, **B**, and **C** and can be computed as follows:
 
 .. math::
 
@@ -54,13 +54,13 @@ rotation of **A**\ , **B**\ , and **C** and can be computed as follows:
   c_y = & \mathbf{C} \cdot \widehat{(\mathbf{A} \times \mathbf{B})} \times \mathbf{\hat{A}} \quad = \quad \frac{\mathbf{B} \cdot \mathbf{C} - b_x c_x}{b_y} \\
   c_z = & |\mathbf{C} \cdot \widehat{(\mathbf{A} \times \mathbf{B})}|\quad = \quad \sqrt{C^2 - {c_x}^2 - {c_y}^2}
 
-where A = \| **A** \| indicates the scalar length of **A**\ . The hat symbol (\^)
+where A = \| **A** \| indicates the scalar length of **A**. The hat symbol (\^)
 indicates the corresponding unit vector. :math:`\beta` and :math:`\gamma` are angles
 between the vectors described below. Note that by construction,
-**a**\ , **b**\ , and **c** have strictly positive x, y, and z components, respectively.
+**a**, **b**, and **c** have strictly positive x, y, and z components, respectively.
 If it should happen that
-**A**\ , **B**\ , and **C** form a left-handed basis, then the above equations
-are not valid for **c**\ . In this case, it is necessary
+**A**, **B**, and **C** form a left-handed basis, then the above equations
+are not valid for **c**. In this case, it is necessary
 to first apply an inversion. This can be achieved
 by interchanging two basis vectors or by changing the sign of one of them.
 
@@ -95,7 +95,7 @@ for details.
 The 9 parameters (xlo,xhi,ylo,yhi,zlo,zhi,xy,xz,yz) are defined at the
 time the simulation box is created.  This happens in one of 3 ways.
 If the :doc:`create_box <create_box>` command is used with a region of
-style *prism*\ , then a triclinic box is setup.  See the
+style *prism*, then a triclinic box is setup.  See the
 :doc:`region <region>` command for details.  If the
 :doc:`read_data <read_data>` command is used to define the simulation
 box, and the header of the data file contains a line with the "xy xz

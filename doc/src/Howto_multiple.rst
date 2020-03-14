@@ -84,7 +84,7 @@ the :doc:`-partition command-line switch <Run_options>`.
 
 In the last 2 examples, if LAMMPS were run on 3 partitions, the same
 scripts could be used if the "index" and "loop" variables were
-replaced with *universe*\ -style variables, as described in the
+replaced with *universe*-style variables, as described in the
 :doc:`variable <variable>` command.  Also, the "next t" and "next a"
 commands would need to be replaced with a single "next a t" command.
 With these modifications, the 8 simulations of each script would run
