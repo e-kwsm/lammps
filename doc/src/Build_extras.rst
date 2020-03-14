@@ -805,7 +805,7 @@ needed besides ``-D PKG_USER-COLVARS=yes``.
 Building and linking of Lepton (or other C++11-only features) is enabled
 automatically when compilation is carried out with C++11 support, and disabled
 otherwise.  Optionally, Lepton build may be manually controlled with the flag
-"-D COLVARS\_LEPTON=yes\|no".
+``-D COLVARS_LEPTON=yes|no``.
 
 **Traditional make**\ :
 
@@ -960,7 +960,7 @@ portable, and thus set to be the default.
 
 If you want to change the linkage mode, you have to re-run "make
 lib-plumed" with the desired settings **and** do a re-install if the
-USER-PLUMED package with "make yes-user-plumed" to update the required
+USER-PLUMED package with ``make yes-user-plumed`` to update the required
 makefile settings with the changes in the lib/plumed folder.
 
 ----------
@@ -976,7 +976,7 @@ the HDF5 library.
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_USER-H5MD=yes".
+No additional settings are needed besides ``-D PKG_USER-H5MD=yes``.
 
 This should auto-detect the H5MD library on your system.  Several
 advanced CMake H5MD options exist if you need to specify where it is
@@ -1076,8 +1076,8 @@ USER-MOLFILE package
    -D MOLFILE_INCLUDE_DIRS=path   # (optional) path where VMD molfile plugin headers are installed
    -D PKG_USER-MOLFILE=yes
 
-Using "-D PKG\_USER-MOLFILE=yes" enables the package, and setting
-"-D MOLFILE\_INCLUDE DIRS" allows to provide a custom location for
+Using ``-D PKG_USER-MOLFILE=yes`` enables the package, and setting
+``-D MOLFILE_INCLUDE DIRS`` allows to provide a custom location for
 the molfile plugin header files. These should match the ABI of the
 plugin files used, and thus one typically sets them to include
 folder of the local VMD installation in use. LAMMPS ships with a
@@ -1109,7 +1109,7 @@ on your system.
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_USER-NETCDF=yes".
+No additional settings are needed besides ``-D PKG_USER-NETCDF=yes``.
 
 This should auto-detect the NETCDF library if it is installed on your
 system at standard locations.  Several advanced CMake NETCDF options
@@ -1133,7 +1133,7 @@ USER-OMP package
 
 **CMake build**\ :
 
-No additional settings are required besides "-D PKG\_USER-OMP=yes".  If
+No additional settings are required besides ``-D PKG_USER-OMP=yes``.  If
 CMake detects OpenMP support, the USER-OMP code will be compiled with
 multi-threading support enabled, otherwise as optimized serial code.
 
@@ -1221,7 +1221,7 @@ a corresponding Makefile.lammps.machine file.
 
 You can then install QMMM package and build LAMMPS in the usual
 manner.  After completing the LAMMPS build and compiling Quantum
-ESPRESSO with external library support (via "make couple"), go back to
+ESPRESSO with external library support (via ``make couple``), go back to
 the lib/qmmm folder and follow the instructions in the README file to
 build the combined LAMMPS/QE QM/MM executable (pwqmmm.x) in the
 lib/qmmm folder.
@@ -1246,7 +1246,7 @@ lib/quip/README file for details on how to do this.
    -D QUIP_LIBRARY=path     # path to libquip.a (only needed if a custom location)
 
 CMake will not download and build the QUIP library.  But once you have
-done that, a CMake build of LAMMPS with "-D PKG\_USER-QUIP=yes" should
+done that, a CMake build of LAMMPS with ``-D PKG_USER-QUIP=yes`` should
 work.  Set QUIP\_LIBRARY if CMake cannot find the QUIP library.
 
 **Traditional make**\ :
@@ -1354,7 +1354,7 @@ your system.
 
 **CMake build**\ :
 
-No additional settings are needed besides "-D PKG\_USER-VTK=yes".
+No additional settings are needed besides ``-D PKG_USER-VTK=yes``.
 
 This should auto-detect the VTK library if it is installed on your
 system at standard locations.  Several advanced VTK options exist if
