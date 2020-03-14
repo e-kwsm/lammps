@@ -192,7 +192,7 @@ default, then the 2,5 interaction will also be weighted by 0.5.
    the system).  If new bonds are created (or molecules added containing
    atoms with more special neighbors), the size of this list needs to
    grow.  Note that adding a single bond always adds a new 1st neighbor
-   but may also induce \*many\* new 2nd and 3rd neighbors, depending on the
+   but may also induce *many* new 2nd and 3rd neighbors, depending on the
    molecular topology of your system.  Using the *extra/special/per/atom*
    keyword to either :doc:`read_data <read_data>` or :doc:`create_box <create_box>`
    reserves empty space in the list for this N additional 1st, 2nd, or 3rd
