@@ -224,10 +224,10 @@ like this:
 
 .. code-block:: Python
 
-   from ctypes import \*
+   from ctypes import *
    natoms = lmp.get_natoms()
-   n3 = 3\*natoms
-   x = (n3\*c_double)()
+   n3 = 3*natoms
+   x = (n3*c_double)()
    x[0] = x coord of atom with ID 1
    x[1] = y coord of atom with ID 1
    x[2] = z coord of atom with ID 1
