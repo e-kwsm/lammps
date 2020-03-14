@@ -98,9 +98,9 @@ The code for these classes can use the per-atom properties defined by
 fix property/atom.  The Atom class has a find\_custom() method that is
 useful in this context:
 
-.. parsed-literal::
+.. code-block:: c
 
-   int index = atom->find_custom(char \*name, int &flag);
+   int index = atom->find_custom(char *name, int &flag);
 
 The "name" of a custom attribute, as specified in the :doc:`fix property/atom <fix_property_atom>` command, is checked to verify
 that it exists and its index is returned.  The method also sets flag =
@@ -108,10 +108,10 @@ that it exists and its index is returned.  The method also sets flag =
 The vector of values associated with the attribute can then be
 accessed using the returned index as
 
-.. parsed-literal::
+.. code-block:: c
 
-   int \*ivector = atom->ivector[index];
-   double \*dvector = atom->dvector[index];
+   int *ivector = atom->ivector[index];
+   double *dvector = atom->dvector[index];
 
 Ivector or dvector are vectors of length Nlocal = # of owned atoms,
 which store the attributes of individual atoms.
