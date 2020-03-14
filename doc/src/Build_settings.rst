@@ -129,7 +129,7 @@ version 3.X; the legacy version 2.1.X is no longer supported.
 Building FFTW for your box should be as simple as ./configure; make;
 make install.  The install command typically requires root privileges
 (e.g. invoke it via sudo), unless you specify a local directory with
-the "--prefix" option of configure.  Type "./configure --help" to see
+the ``--prefix`` option of configure.  Type ``./configure --help`` to see
 various options.
 
 The Intel MKL math library is part of the Intel compiler suite.  It
@@ -172,7 +172,7 @@ Size of LAMMPS data types
 ------------------------------------
 
 LAMMPS has a few integer data types which can be defined as 4-byte or
-8-byte integers.  The default setting of "smallbig" is almost always
+8-byte integers.  The default setting of ``smallbig`` is almost always
 adequate.
 
 **CMake variable**:
@@ -190,21 +190,21 @@ adequate.
 # default is LAMMPS\_SMALLBIG if not specified
 **CMake and make info**:
 
-The default "smallbig" setting allows for simulations with:
+The default ``smallbig`` setting allows for simulations with:
 
 * total atom count = 2\^63 atoms (about 9e18)
 * total timesteps = 2\^63 (about 9e18)
 * atom IDs = 2\^31 (about 2 billion)
 * image flags = roll over at 512
 
-The "bigbig" setting increases the latter two limits.  It allows for:
+The ``bigbig`` setting increases the latter two limits.  It allows for:
 
 * total atom count = 2\^63 atoms (about 9e18)
 * total timesteps = 2\^63 (about 9e18)
 * atom IDs = 2\^63 (about 9e18)
 * image flags = roll over at about 1 million (2\^20)
 
-The "smallsmall" setting is only needed if your machine does not
+The ``smallsmall`` setting is only needed if your machine does not
 support 8-byte integers.  It allows for:
 
 * total atom count = 2\^31 atoms (about 2 billion)
@@ -217,7 +217,7 @@ topology information, though IDs are enabled by default.  The
 :doc:`atom_modify id no <atom_modify>` command will turn them off.  Atom
 IDs are required for molecular systems with bond topology (bonds,
 angles, dihedrals, etc).  Thus if you model a molecular system with
-more than 2 billion atoms, you need the "bigbig" setting.
+more than 2 billion atoms, you need the ``bigbig`` setting.
 
 Image flags store 3 values per atom which count the number of times an
 atom has moved through the periodic box in each dimension.  See the
@@ -227,7 +227,7 @@ e.g. from 511 to -512, which can cause diagnostics like the
 mean-squared displacement, as calculated by the :doc:`compute msd <compute_msd>` command, to be faulty.
 
 Note that the USER-ATC package and the USER-INTEL package are currently
-not compatible with the "bigbig" setting. Also, there are limitations
+not compatible with the ``bigbig`` setting. Also, there are limitations
 when using the library interface. Some functions with known issues
 have been replaced by dummy calls printing a corresponding error rather
 than crashing randomly or corrupting data.
@@ -295,7 +295,7 @@ that is a directory in your PATH environment variable.
 **CMake and make info**:
 
 Using ffmpeg to output movie files requires that your machine
-supports the "popen" function in the standard runtime library.
+supports the ``popen`` function in the standard runtime library.
 
 .. note::
 
@@ -331,7 +331,7 @@ gzip compression by several LAMMPS commands, including
 
 **CMake and make info**:
 
-This option requires that your machine supports the "popen()" function
+This option requires that your machine supports the ``popen()`` function
 in the standard runtime library and that a gzip executable can be
 found by LAMMPS during a run.
 
@@ -390,9 +390,9 @@ manages its dynamical memory.
 Workaround for long long integers
 ------------------------------------------------
 
-If your system or MPI version does not recognize "long long" data
-types, the following setting will be needed.  It converts "long long"
-to a "long" data type, which should be the desired 8-byte integer on
+If your system or MPI version does not recognize ``long long`` data
+types, the following setting will be needed.  It converts ``long long``
+to a ``long`` data type, which should be the desired 8-byte integer on
 those systems:
 
 **CMake variable**:
