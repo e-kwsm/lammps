@@ -6,7 +6,6 @@ print command
 Syntax
 """"""
 
-
 .. parsed-literal::
 
    print string keyword value
@@ -14,21 +13,18 @@ Syntax
 * string = text string to print, which may contain variables
 * zero or more keyword/value pairs may be appended
 * keyword = *file* or *append* or *screen* or *universe*
-  
+
   .. parsed-literal::
-  
+
        *file* value = filename
        *append* value = filename
        *screen* value = *yes* or *no*
        *universe* value = *yes* or *no*
 
-
-
 Examples
 """"""""
 
-
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    print "Done with equilibration" file info.dat
    print Vol=$v append info.dat screen no
@@ -49,6 +45,20 @@ should be enclosed in single or double quotes.  To generate multiple
 lines of output, the string can be enclosed in triple quotes, as in
 the last example above.  If the text string contains variables, they
 will be evaluated and their current values printed.
+
+.. note::
+
+   As discussed on the :doc:`Commands parse <Commands_parse>` doc
+   page, the text string can use "immediate" variables, specified as
+   $(formula) with parenthesis, where the numeric formula has the same
+   syntax as equal-style variables described on the :doc:`variable
+   <variable>` doc page.  This is a convenient way to evaluate a
+   formula immediately without using the variable command to define a
+   named variable and then use that variable in the text string.  The
+   formula can include a trailing colon and format string which
+   determines the precision with which the numeric value is output.
+   This is also explained on the :doc:`Commands parse
+   <Commands_parse>` doc page.
 
 If the *file* or *append* keyword is used, a filename is specified to
 which the output will be written.  If *file* is used, then the

@@ -6,7 +6,6 @@ fix viscous command
 Syntax
 """"""
 
-
 .. parsed-literal::
 
    fix ID group-ID viscous gamma keyword values ...
@@ -15,21 +14,18 @@ Syntax
 * viscous = style name of this fix command
 * gamma = damping coefficient (force/velocity units)
 * zero or more keyword/value pairs may be appended
-  
+
   .. parsed-literal::
-  
+
      keyword = *scale*
        *scale* values = type ratio
          type = atom type (1-N)
          ratio = factor to scale the damping coefficient by
 
-
-
 Examples
 """"""""
 
-
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix 1 flow viscous 0.1
    fix 1 damp viscous 0.5 scale 3 2.5
@@ -61,12 +57,12 @@ multiple times to adjust :math:`\gamma` for several atom types.
    self-consistent.
 
 In a Brownian dynamics context, :math:`\gamma = \frac{k_B T}{D}`, where
-:math:`k_B =` Boltzmann's constant, *T* = temperature, and *D* = particle
-diffusion coefficient.  *D* can be written as :math:`\frac{k_B T}{3 \pi
-\eta d}`, where :math:`\eta =` dynamic viscosity of the frictional fluid
-and d = diameter of particle.  This means :math:`\gamma = 3 \pi \eta d`,
-and thus is proportional to the viscosity of the fluid and the particle
-diameter.
+:math:`k_B =` Boltzmann's constant, :math:`T` = temperature, and *D* =
+particle diffusion coefficient.  *D* can be written as :math:`\frac{k_B
+T}{3 \pi \eta d}`, where :math:`\eta =` dynamic viscosity of the
+frictional fluid and d = diameter of particle.  This means :math:`\gamma
+= 3 \pi \eta d`, and thus is proportional to the viscosity of the fluid
+and the particle diameter.
 
 In the current implementation, rather than have the user specify a
 viscosity, :math:`\gamma` is specified directly in force/velocity units.
@@ -88,7 +84,8 @@ more easily be used as a thermostat.
 
 ----------
 
-**Restart, fix\_modify, output, run start/stop, minimize info:**
+Restart, fix_modify, output, run start/stop, minimize info
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 No information about this fix is written to :doc:`binary restart files
 <restart>`.  None of the :doc:`fix_modify <fix_modify>` options are
@@ -109,11 +106,17 @@ for details.
 
 Restrictions
 """"""""""""
- none
+
+none
 
 Related commands
 """"""""""""""""
 
-:doc:`fix langevin <fix_langevin>`
+:doc:`fix langevin <fix_langevin>`,
+:doc:`fix viscous/sphere <fix_viscous_sphere>`,
+:doc:`fix damping/cundall <fix_damping_cundall>`
 
-**Default:** none
+Default
+"""""""
+
+none

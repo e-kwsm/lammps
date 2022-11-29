@@ -6,8 +6,7 @@ compute ke command
 Syntax
 """"""
 
-
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    compute ID group-ID ke
 
@@ -17,8 +16,7 @@ Syntax
 Examples
 """"""""
 
-
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    compute 1 all ke
 
@@ -29,7 +27,8 @@ Define a computation that calculates the translational kinetic energy
 of a group of particles.
 
 The kinetic energy of each particle is computed as :math:`\frac{1}{2} m
-v^2`, where *m* and *v* are the mass and velocity of the particle.
+v^2`, where *m* and *v* are the mass and velocity of the particle,
+respectively.
 
 There is a subtle difference between the quantity calculated by this
 compute and the kinetic energy calculated by the *ke* or *etotal*
@@ -40,12 +39,13 @@ formula above.  For thermodynamic output, the *ke* keyword infers
 kinetic energy from the temperature of the system with
 :math:`\frac{1}{2} k_B T` of energy for each degree of freedom.  For the
 default temperature computation via the :doc:`compute temp
-<compute_temp>` command, these are the same.  But different computes
-that calculate temperature can subtract out different non-thermal
-components of velocity and/or include different degrees of freedom
-(translational, rotational, etc).
+<compute_temp>` command, these are the same.
+However, different computes that calculate temperature can subtract out
+different non-thermal components of velocity and/or include different degrees
+of freedom (translational, rotational, etc.).
 
-**Output info:**
+Output info
+"""""""""""
 
 This compute calculates a global scalar (the summed KE).  This value
 can be used by any command that uses a global scalar value from a
@@ -64,4 +64,7 @@ Related commands
 
 :doc:`compute erotate/sphere <compute_erotate_sphere>`
 
-**Default:** none
+Default
+"""""""
+
+none

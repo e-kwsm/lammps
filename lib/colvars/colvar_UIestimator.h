@@ -63,15 +63,15 @@ namespace UIestimator {
             temp.resize(dimension);
         }
 
-        int inline get_value(const std::vector<double> & x, const std::vector<double> & y) {
+        int get_value(const std::vector<double> & x, const std::vector<double> & y) {
             return matrix[convert_x(x)][convert_y(x, y)];
         }
 
-        void inline set_value(const std::vector<double> & x, const std::vector<double> & y, const int value) {
+        void set_value(const std::vector<double> & x, const std::vector<double> & y, const int value) {
             matrix[convert_x(x)][convert_y(x,y)] = value;
         }
 
-        void inline increase_value(const std::vector<double> & x, const std::vector<double> & y, const int value) {
+        void increase_value(const std::vector<double> & x, const std::vector<double> & y, const int value) {
             matrix[convert_x(x)][convert_y(x,y)] += value;
         }
 
@@ -116,7 +116,7 @@ namespace UIestimator {
             int i;
 
             for (i = 0; i < dimension; i++) {
-                temp[i] = round((round(y[i] / width[i] + EPSILON) - round(x[i] / width[i] + EPSILON)) + (y_size - 1) / 2 + EPSILON);
+                temp[i] = int(round((round(y[i] / width[i] + EPSILON) - round(x[i] / width[i] + EPSILON)) + (y_size - 1) / 2 + EPSILON));
             }
 
             int index = 0;
@@ -164,17 +164,18 @@ namespace UIestimator {
             temp.resize(dimension);
         }
 
-        const T inline get_value(const std::vector<double> & x) {
+        T & get_value(const std::vector<double> & x) {
             return vector[convert_x(x)];
         }
 
-        void inline set_value(const std::vector<double> & x, const T value) {
+        void set_value(const std::vector<double> & x, const T value) {
             vector[convert_x(x)] = value;
         }
 
-        void inline increase_value(const std::vector<double> & x, const T value) {
+        void increase_value(const std::vector<double> & x, const T value) {
             vector[convert_x(x)] += value;
         }
+
     private:
         std::vector<double> lowerboundary;
         std::vector<double> upperboundary;
@@ -301,15 +302,10 @@ namespace UIestimator {
         ~UIestimator() {}
 
         // called from MD engine every step
-        bool update(cvm::step_number step, std::vector<double> x, std::vector<double> y) {
+        bool update(cvm::step_number /* step */,
+                    std::vector<double> x, std::vector<double> y) {
 
             int i;
-
-            if (step % output_freq == 0) {
-                calc_pmf();
-                write_files();
-                //write_interal_data();
-            }
 
             for (i = 0; i < dimension; i++) {
                 // for dihedral RC, it is possible that x = 179 and y = -179, should correct it
@@ -381,6 +377,7 @@ namespace UIestimator {
         bool written;
         bool written_1D;
 
+    public:
         // calculate gradients from the internal variables
         void calc_pmf() {
             int norm;

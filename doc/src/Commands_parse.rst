@@ -47,7 +47,7 @@ LAMMPS:
    named "x" followed by an "x" character.
 
    How the variable is converted to a text string depends on what style
-   of variable it is; see the :doc:`variable <variable>` doc page for
+   of variable it is; see the :doc:`variable <variable>` page for
    details.  It can be a variable that stores multiple text strings, and
    return one of them.  The returned text string can be multiple "words"
    (space separated) which will then be interpreted as multiple
@@ -77,19 +77,19 @@ LAMMPS:
    so that you do not have to define (or discard) a temporary variable,
    "X" in this case.
 
-   Additionally, the "immediate" variable expression may be followed by
-   a colon, followed by a C-style format string, e.g. ":%f" or ":%.10g".
-   The format string must be appropriate for a double-precision
-   floating-point value.  The format string is used to output the result
-   of the variable expression evaluation.  If a format string is not
-   specified a high-precision "%.20g" is used as the default.
+   Additionally, the entire "immediate" variable expression may be
+   followed by a colon, followed by a C-style format string,
+   e.g. ":%f" or ":%.10g".  The format string must be appropriate for
+   a double-precision floating-point value.  The format string is used
+   to output the result of the variable expression evaluation.  If a
+   format string is not specified, a high-precision "%.20g" is used as
+   the default format.
 
    This can be useful for formatting print output to a desired precision:
 
-
    .. code-block:: LAMMPS
 
-      print "Final energy per atom: $(pe/atoms:%10.3f) eV/atom"
+      print "Final energy per atom: $(v_ke_per_atom+v_pe_per_atom:%10.3f) eV/atom"
 
    Note that neither the curly-bracket or immediate form of variables
    can contain nested $ characters for other variables to substitute
@@ -102,7 +102,7 @@ LAMMPS:
       print           "B2 = ${b$a}"
 
    Nor can you specify an expression like "$($x-1.0)" for an immediate
-   variable, but you could use $(v\_x-1.0), since the latter is valid
+   variable, but you could use $(v_x-1.0), since the latter is valid
    syntax for an :doc:`equal-style variable <variable>`.
 
    See the :doc:`variable <variable>` command for more details of how
@@ -116,21 +116,22 @@ LAMMPS:
    underscores, or punctuation characters.
 
 .. _five:
-   
+
 5. The first word is the command name.  All successive words in the line
    are arguments.
 
 .. _six:
 
 6. If you want text with spaces to be treated as a single argument, it
-   can be enclosed in either single or double or triple quotes.  A long
-   single argument enclosed in single or double quotes can span multiple
-   lines if the "&" character is used, as described above.  When the
-   lines are concatenated together (and the "&" characters and line
-   breaks removed), the text will become a single line.  If you want
-   multiple lines of an argument to retain their line breaks, the text
-   can be enclosed in triple quotes, in which case "&" characters are
-   not needed.  For example:
+   can be enclosed in either single (') or double (") or triple (""")
+   quotes.  A long single argument enclosed in single or double quotes
+   can span multiple lines if the "&" character is used, as described
+   in :ref:`1 <one>` above.  When the lines are concatenated together
+   by LAMMPS (and the "&" characters and line breaks removed), the
+   combined text will become a single line.  If you want multiple lines
+   of an argument to retain their line breaks, the text can be enclosed
+   in triple quotes, in which case "&" characters are not needed and do
+   not function as line continuation character.  For example:
 
    .. code-block:: LAMMPS
 
@@ -144,8 +145,9 @@ LAMMPS:
       System temperature = $t
       """
 
-   In each case, the single, double, or triple quotes are removed when
-   the single argument they enclose is stored internally.
+   In each of these cases, the single, double, or triple quotes are
+   removed and the enclosed text stored internally as a single
+   argument.
 
    See the :doc:`dump modify format <dump_modify>`, :doc:`print
    <print>`, :doc:`if <if>`, and :doc:`python <python>` commands for
@@ -163,3 +165,26 @@ LAMMPS:
    triple quotes can be nested in the usual manner.  See the doc pages
    for those commands for examples.  Only one of level of nesting is
    allowed, but that should be sufficient for most use cases.
+
+.. admonition:: ASCII versus UTF-8
+   :class: note
+
+   LAMMPS expects and processes 7-bit ASCII format text internally.
+   Many modern environments use UTF-8 encoding, which is a superset
+   of the 7-bit ASCII character table and thus mostly compatible.
+   However, there are several non-ASCII characters that can look
+   very similar to their ASCII equivalents or are invisible (so they
+   look like a blank), but are encoded differently.  Web browsers,
+   PDF viewers, document editors are known to sometimes replace one
+   with the other for a better looking output.  However, that can
+   lead to problems, for instance, when using cut-n-paste of input
+   file examples from web pages, or when using a document editor
+   (not a dedicated plain text editor) for writing LAMMPS inputs.
+   LAMMPS will try to detect this and substitute the non-ASCII
+   characters with their ASCII equivalents where known.  There also
+   is going to be a warning printed, if this occurs.  It is
+   recommended to avoid such characters altogether in LAMMPS input,
+   data and potential files.  The replacement tables are likely
+   incomplete and dependent on users reporting problems processing
+   correctly looking input containing UTF-8 encoded non-ASCII
+   characters.

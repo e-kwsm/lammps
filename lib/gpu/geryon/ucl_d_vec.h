@@ -39,7 +39,7 @@ class UCL_D_Vec : public UCL_BaseMat {
   };
   typedef numtyp data_type;
 
-  UCL_D_Vec() : _cols(0) {}
+ UCL_D_Vec() : _row_bytes(0), _cols(0) {}
   ~UCL_D_Vec() { _device_free(*this); }
 
   /// Construct with n columns
@@ -375,7 +375,7 @@ class UCL_D_Vec : public UCL_BaseMat {
   /// Resize (only if bigger) the allocation to contain cols elements
   /** \note Cannot be used on views **/
   inline int resize_ib(const int cols)
-    { if (cols>_cols) return resize(cols); else return UCL_SUCCESS; }
+    { if (cols > (int)_cols) return resize(cols); else return UCL_SUCCESS; }
 
   /// Set each element to zero asynchronously in the default command_queue
   inline void zero() { zero(_cq); }
@@ -438,7 +438,7 @@ class UCL_D_Vec : public UCL_BaseMat {
     (*_tex_ptr).addressMode[1] = cudaAddressModeClamp;
     (*_tex_ptr).filterMode = cudaFilterModePoint;
     (*_tex_ptr).normalized = false;
-    CUDA_SAFE_CALL(cudaBindTexture(NULL,_tex_ptr,_array,&_channel));
+    CUDA_SAFE_CALL(cudaBindTexture(nullptr,_tex_ptr,_array,&_channel));
   }
   /// For CUDA-RT, unbind texture
   inline void unbind() { CUDA_SAFE_CALL(cudaUnbindTexture(_tex_ptr)); }

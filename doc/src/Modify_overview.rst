@@ -1,13 +1,14 @@
 Overview
 ========
 
-The best way to add a new feature to LAMMPS is to find a similar
-feature and look at the corresponding source and header files to figure
-out what it does.  You will need some knowledge of C++ to be able to
-understand the high-level structure of LAMMPS and its class
-organization, but functions (class methods) that do actual
-computations are written in vanilla C-style code and operate on simple
-C-style data structures (vectors and arrays).
+The best way to add a new feature to LAMMPS is to find a similar feature
+and look at the corresponding source and header files to figure out what
+it does.  You will need some knowledge of C++ to be able to understand
+the high-level structure of LAMMPS and its class organization, but
+functions (class methods) that do actual computations are mostly written
+in C-style code and operate on simple C-style data structures (vectors
+and arrays).  A high-level overview of the programming style choices in
+LAMMPS is :doc:`given elsewhere <Developer_code_design>`.
 
 Most of the new features described on the :doc:`Modify <Modify>` doc
 page require you to write a new C++ derived class (except for exceptions
@@ -22,49 +23,49 @@ src directory and re-building LAMMPS.
 
 The advantage of C++ and its object-orientation is that all the code
 and variables needed to define the new feature are in the 2 files you
-write, and thus shouldn't make the rest of LAMMPS more complex or
+write, and thus should not make the rest of LAMMPS more complex or
 cause side-effect bugs.
 
-Here is a concrete example.  Suppose you write 2 files pair\_foo.cpp
-and pair\_foo.h that define a new class PairFoo that computes pairwise
+Here is a concrete example.  Suppose you write 2 files pair_foo.cpp
+and pair_foo.h that define a new class PairFoo that computes pairwise
 potentials described in the classic 1997 :ref:`paper <Foo>` by Foo, et al.
 If you wish to invoke those potentials in a LAMMPS input script with a
 command like
-
 
 .. code-block:: LAMMPS
 
    pair_style foo 0.1 3.5
 
-then your pair\_foo.h file should be structured as follows:
-
+then your pair_foo.h file should be structured as follows:
 
 .. code-block:: c++
 
    #ifdef PAIR_CLASS
-   PairStyle(foo,PairFoo)
+   // clang-format off
+   PairStyle(foo,PairFoo);
    #else
+   // clanf-format on
    ...
    (class definition for PairFoo)
    ...
    #endif
 
-where "foo" is the style keyword in the pair\_style command, and
-PairFoo is the class name defined in your pair\_foo.cpp and pair\_foo.h
+where "foo" is the style keyword in the pair_style command, and
+PairFoo is the class name defined in your pair_foo.cpp and pair_foo.h
 files.
 
 When you re-build LAMMPS, your new pairwise potential becomes part of
-the executable and can be invoked with a pair\_style command like the
+the executable and can be invoked with a pair_style command like the
 example above.  Arguments like 0.1 and 3.5 can be defined and
 processed by your new class.
 
-.. note:
+.. note::
 
-  With the traditional make process, simply adding the new files to the
-  src folder and compiling LAMMPS again for the desired configuration
-  with "make machine" is sufficient.  When using CMake, you need to
-  re-run CMake with "cmake ." in the build folder to have it recognize
-  the added files and include them into the build system.
+   With the traditional make process, simply adding the new files to the
+   src folder and compiling LAMMPS again for the desired configuration
+   with "make machine" is sufficient.  When using CMake, you need to
+   re-run CMake with "cmake ." in the build folder to have it recognize
+   the added files and include them into the build system.
 
 As illustrated by this example pair style, many kinds of options are
 referred to in the LAMMPS documentation as the "style" of a particular
@@ -82,7 +83,7 @@ that are not set to 0 are functions you may override or not.  Those
 are usually defined with an empty function body.
 
 Additionally, new output options can be added directly to the
-thermo.cpp, dump\_custom.cpp, and variable.cpp files.  These are also
+thermo.cpp, dump_custom.cpp, and variable.cpp files.  These are also
 listed on the :doc:`Modify page <Modify>`.
 
 Here are additional guidelines for modifying LAMMPS and adding new
@@ -102,6 +103,5 @@ functionality:
 ----------
 
 .. _Foo:
-
 
 **(Foo)** Foo, Morefoo, and Maxfoo, J of Classic Potentials, 75, 345 (1997).

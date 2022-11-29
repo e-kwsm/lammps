@@ -1,15 +1,17 @@
 .. index:: dihedral_style zero
 
 dihedral_style zero command
-============================
+===========================
 
 Syntax
 """"""
 
-
 .. code-block:: LAMMPS
 
-   dihedral_style zero [nocoeff]
+   dihedral_style zero keyword
+
+* zero or more keywords may be appended
+* keyword = *nocoeff*
 
 Examples
 """"""""
@@ -34,7 +36,7 @@ command.  If no dihedral style is defined, this command cannot be
 used.
 
 The optional *nocoeff* flag allows to read data files with a DihedralCoeff
-section for any dihedral style. Similarly, any dihedral\_coeff commands
+section for any dihedral style. Similarly, any dihedral_coeff commands
 will only be checked for the dihedral type number and the rest ignored.
 
 Note that the :doc:`dihedral_coeff <dihedral_coeff>` command must be
@@ -45,8 +47,15 @@ Restrictions
 """"""""""""
  none
 
-**Related commands:** none
+Related commands
+""""""""""""""""
+
+none
+
 
 :doc:`dihedral_style none <dihedral_none>`
 
-**Default:** none
+Default
+"""""""
+
+none

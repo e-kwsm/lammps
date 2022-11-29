@@ -3,27 +3,14 @@ Howto discussions
 
 These doc pages describe how to perform various tasks with LAMMPS,
 both for users and developers.  The
-`glossary <http://lammps.sandia.gov>`_ website page also lists MD
+`glossary <https://www.lammps.org/glossary.html>`_ website page also lists MD
 terminology with links to corresponding LAMMPS manual pages.  The
 example input scripts included in the examples directory of the LAMMPS
 distribution and highlighted on the :doc:`Examples <Examples>` doc page
 also show how to setup and run various kinds of simulations.
 
-Tutorials howto
-===============
-
-
-.. toctree::
-   :name: tutorials
-   :maxdepth: 1
-
-   Howto_github
-   Howto_pylammps
-   Howto_bash
-
 General howto
 =============
-
 
 .. toctree::
    :name: general_howto
@@ -35,17 +22,19 @@ General howto
    Howto_replica
    Howto_library
    Howto_couple
-   Howto_client_server
+   Howto_mdi
+   Howto_bpm
+   Howto_broken_bonds
 
 Settings howto
 ==============
-
 
 .. toctree::
    :name: settings_howto
    :maxdepth: 1
 
    Howto_2d
+   Howto_type_labels
    Howto_triclinic
    Howto_thermostat
    Howto_barostat
@@ -55,7 +44,6 @@ Settings howto
 
 Analysis howto
 ==============
-
 
 .. toctree::
    :name: analysis_howto
@@ -68,23 +56,23 @@ Analysis howto
    Howto_kappa
    Howto_viscosity
    Howto_diffusion
+   Howto_structured_data
 
 Force fields howto
 ==================
-
 
 .. toctree::
    :name: force_howto
    :maxdepth: 1
 
    Howto_bioFF
+   Howto_amoeba
    Howto_tip3p
    Howto_tip4p
    Howto_spc
 
 Packages howto
 ==============
-
 
 .. toctree::
    :name: packages_howto
@@ -97,5 +85,19 @@ Packages howto
    Howto_coreshell
    Howto_drude
    Howto_drude2
+   Howto_peri
    Howto_manifold
    Howto_spins
+
+Tutorials howto
+===============
+
+.. toctree::
+   :name: tutorials
+   :maxdepth: 1
+
+   Howto_cmake
+   Howto_github
+   Howto_pylammps
+   Howto_wsl
+

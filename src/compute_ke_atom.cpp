@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   http://lammps.sandia.gov, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -27,7 +28,7 @@ using namespace LAMMPS_NS;
 
 ComputeKEAtom::ComputeKEAtom(LAMMPS *lmp, int narg, char **arg) :
   Compute(lmp, narg, arg),
-  ke(NULL)
+  ke(nullptr)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute ke/atom command");
 
@@ -103,6 +104,6 @@ void ComputeKEAtom::compute_peratom()
 
 double ComputeKEAtom::memory_usage()
 {
-  double bytes = nmax * sizeof(double);
+  double bytes = (double)nmax * sizeof(double);
   return bytes;
 }
