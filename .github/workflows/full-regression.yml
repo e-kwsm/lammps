@@ -92,7 +92,7 @@ jobs:
         tar -cvf full-regression-test-${{ matrix.idx }}.tar run-${{ matrix.idx }}.log progress-${{ matrix.idx }}.yaml output-${{ matrix.idx }}.xml
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: full-regression-test-artifact-${{ matrix.idx }}
         path: full-regression-test-${{ matrix.idx }}.tar
@@ -102,7 +102,7 @@ jobs:
     needs: build
     steps:
       - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v6
         with:
           name: merged-full-regresssion-artifact
           pattern: full-regression-test-artifact-*

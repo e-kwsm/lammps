@@ -110,7 +110,7 @@ jobs:
         tar -cvf kokkos-regression-test-${{ matrix.idx }}.tar run-${{ matrix.idx }}.log progress-${{ matrix.idx }}.yaml output-${{ matrix.idx }}.xml
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: kokkos-regression-test-artifact-${{ matrix.idx }}
         path: kokkos-regression-test-${{ matrix.idx }}.tar
@@ -120,7 +120,7 @@ jobs:
     needs: build
     steps:
       - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v6
         with:
           name: merged-kokkos-regresssion-artifact
           pattern: kokkos-regression-test-artifact-*
