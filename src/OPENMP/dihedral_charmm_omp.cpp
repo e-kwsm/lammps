@@ -30,8 +30,7 @@
 #include "suffix.h"
 using namespace LAMMPS_NS;
 
-#define TOLERANCE 0.05
-#define SMALL     0.001
+static constexpr double TOLERANCE = 0.05;
 
 /* ---------------------------------------------------------------------- */
 
@@ -47,7 +46,7 @@ void DihedralCharmmOMP::compute(int eflag, int vflag)
 {
   ev_init(eflag,vflag);
 
-  // insure pair->ev_tally() will use 1-4 virial contribution
+  // ensure pair->ev_tally() will use 1-4 virial contribution
 
   if (weightflag && vflag_global == VIRIAL_FDOTR)
     force->pair->vflag_either = force->pair->vflag_global = 1;

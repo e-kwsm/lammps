@@ -6,8 +6,8 @@ molecular dynamics computations.  Additional pre- and post-processing
 steps are often necessary to setup and analyze a simulation.  A list
 of such tools can be found on the `LAMMPS webpage <lws_>`_ at these links:
 
-* `Pre/Post processing <https://www.lammps.org/prepost.html>`_
-* `External LAMMPS packages & tools <https://www.lammps.org/external.html>`_
+* `Pre/Post processing <https://www.lammps.org/ecosystem/prepost/>`_
+* `External LAMMPS packages & tools <https://www.lammps.org/ecosystem/tools/>`_
 * `Pizza.py toolkit <pizza_>`_
 
 The last link for `Pizza.py <pizza_>`_ is a Python-based tool developed at
@@ -15,7 +15,7 @@ Sandia which provides tools for doing setup, analysis, plotting, and
 visualization for LAMMPS simulations.
 
 .. _lws: https://www.lammps.org
-.. _pizza: https://lammps.github.io/pizza
+.. _pizza: https://lammps.github.io/pizza/
 .. _python: https://www.python.org
 
 Additional tools included in the LAMMPS distribution are described on
@@ -29,11 +29,11 @@ actively supported by the LAMMPS developers, as they were contributed
 by LAMMPS users.  If you have problems using them, we can direct you
 to the authors.
 
-The source code for each of these codes is in the tools sub-directory
+The source code for each of these codes is in the tools subdirectory
 of the LAMMPS distribution.  There is a Makefile (which you may need
 to edit for your platform) which will build several of the tools which
 reside in that directory.  Most of them are larger packages in their
-own sub-directories with their own Makefiles and/or README files.
+own subdirectories with their own Makefiles and/or README files.
 
 ----------
 
@@ -43,7 +43,6 @@ Pre-processing tools
 .. table_from_list::
    :columns: 6
 
-   * :ref:`amber2lmp <amber>`
    * :ref:`ch2lmp <charmm>`
    * :ref:`chain <chain>`
    * :ref:`createatoms <createatoms>`
@@ -57,7 +56,9 @@ Pre-processing tools
    * :ref:`msi2lmp <msi>`
    * :ref:`polybond <polybond>`
    * :ref:`stl_bin2txt <stlconvert>`
-
+   * :ref:`tabulate <tabulate>`
+   * :ref:`tinker <tinker>`
+   * :doc:`AMBER2LAMMPS <Howto_amber2lammps>`
 
 Post-processing tools
 =====================
@@ -65,7 +66,6 @@ Post-processing tools
 .. table_from_list::
    :columns: 6
 
-   * :ref:`amber2lmp <amber>`
    * :ref:`binary2txt <binary>`
    * :ref:`ch2lmp <charmm>`
    * :ref:`colvars <colvars_tools>`
@@ -90,37 +90,22 @@ Miscellaneous tools
 
    * :ref:`LAMMPS coding standards <coding_standard>`
    * :ref:`emacs <emacs>`
-   * :ref:`i-pi <ipi>`
+   * :ref:`i-PI <ipi>`
+   * :ref:`JSON support <json>`
    * :ref:`kate <kate>`
-   * :ref:`LAMMPS shell <lammps_shell>`
+   * :ref:`LAMMPS-GUI <lammps_gui>`
    * :ref:`LAMMPS magic patterns for file(1) <magic>`
    * :ref:`Offline build tool <offline>`
+   * :ref:`Regression tester <regression>`
    * :ref:`singularity/apptainer <singularity_tool>`
    * :ref:`SWIG interface <swig>`
+   * :ref:`valgrind <valgrind>`
    * :ref:`vim <vim>`
 
 ----------
 
 Tool descriptions
 =================
-
-.. _amber:
-
-amber2lmp tool
---------------------------
-
-The amber2lmp sub-directory contains two Python scripts for converting
-files back-and-forth between the AMBER MD code and LAMMPS.  See the
-README file in amber2lmp for more information.
-
-These tools were written by Keir Novik while he was at Queen Mary
-University of London.  Keir is no longer there and cannot support
-these tools which are out-of-date with respect to the current LAMMPS
-version (and maybe with respect to AMBER as well).  Since we don't use
-these tools at Sandia, you will need to experiment with them and make
-necessary modifications yourself.
-
-----------
 
 .. _binary:
 
@@ -145,7 +130,7 @@ since binary files are not compatible across all platforms.
 ch2lmp tool
 ------------------------
 
-The ch2lmp sub-directory contains tools for converting files
+The ch2lmp subdirectory contains tools for converting files
 back-and-forth between the CHARMM MD code and LAMMPS.
 
 They are intended to make it easy to use CHARMM as a builder and as a
@@ -156,7 +141,7 @@ CHARMM22 and later is available as an option. This tool can also add
 solvent water molecules and Na+ or Cl- ions to the system.
 Using lammps2pdb.pl you can convert LAMMPS atom dumps into PDB files.
 
-See the README file in the ch2lmp sub-directory for more information.
+See the README file in the ch2lmp subdirectory for more information.
 
 These tools were created by Pieter in't Veld (pjintve at sandia.gov)
 and Paul Crozier (pscrozi at sandia.gov) at Sandia.
@@ -302,7 +287,7 @@ The parameters for Cr were taken from:
 Lin Z B, Johnson R A and Zhigilei L V, Phys. Rev. B 77 214108 (2008).
 
 The Python version of the tool was authored  by Germain Clavier
-(TU Eindhoven) g.m.g.c.clavier at tue.nl or germain.clavier at gmail.com
+(Unicaen) germain.clavier at unicaen.fr
 
 .. note::
 
@@ -320,7 +305,8 @@ eam generate tool
 -----------------------------
 
 The tools/eam_generate directory contains several one-file C programs
-that convert an analytic formula into a tabulated :doc:`embedded atom method (EAM) <pair_eam>` setfl potential file.  The potentials they
+that convert an analytic formula into a tabulated :doc:`embedded atom
+method (EAM) <pair_eam>` setfl potential file.  The potentials they
 produce are in the potentials directory, and can be used with the
 :doc:`pair_style eam/alloy <pair_eam>` command.
 
@@ -360,7 +346,7 @@ These tools were provided by Aidan Thompson at Sandia
 .. _fep:
 
 fep tool
-------------------
+--------
 
 The tools/fep directory contains Python scripts useful for
 post-processing results from performing free-energy perturbation
@@ -374,21 +360,40 @@ See README file in the tools/fep directory.
 
 .. _ipi:
 
-i-pi tool
--------------------
+i-PI tool
+---------
 
-The tools/i-pi directory contains a version of the i-PI package, with
-all the LAMMPS-unrelated files removed.  It is provided so that it can
-be used with the :doc:`fix ipi <fix_ipi>` command to perform
-path-integral molecular dynamics (PIMD).
+.. versionchanged:: 27June2024
+
+The tools/i-pi directory used to contain a bundled version of the i-PI
+software package for use with LAMMPS.  This version, however, was
+removed in 06/2024.
 
 The i-PI package was created and is maintained by Michele Ceriotti,
 michele.ceriotti at gmail.com, to interface to a variety of molecular
 dynamics codes.
 
-See the tools/i-pi/manual.pdf file for an overview of i-PI, and the
-:doc:`fix ipi <fix_ipi>` page for further details on running PIMD
-calculations with LAMMPS.
+i-PI is now available via PyPI using the pip package manager at:
+https://pypi.org/project/ipi/
+
+Here are the commands to set up a virtual environment and install
+i-PI into it with all its dependencies.
+
+.. code-block:: sh
+
+   python -m venv ipienv
+   source ipienv/bin/activate
+   pip install --upgrade pip
+   pip install ipi
+
+To install the development version from GitHub, please use:
+
+.. code-block:: sh
+
+   pip install git+https://github.com/i-pi/i-pi.git
+
+For further information, please consult the [i-PI home
+page](https://ipi-code.org).
 
 ----------
 
@@ -409,6 +414,101 @@ tools/createatoms tool's input file.
 
 ----------
 
+.. _json:
+
+JSON support files
+------------------
+
+.. versionadded:: 12June2025
+
+The ``tools/json`` directory contains files and tools to support
+using `JSON format <https://www.json.org/>`_ files in LAMMPS.
+Currently only the :doc:`molecule command <molecule>` supports
+files in JSON format directly, but this is planned to be expanded
+in the future.
+
+JSON file validation
+^^^^^^^^^^^^^^^^^^^^
+
+The JSON syntax is independent of its content, and thus the data in the
+file must follow suitable conventions to be correctly parsed during
+input.  This can be done in a portable fashion using a `JSON schema file
+<https://json-schema.org/>`_ (which is in JSON format as well) to define
+those conventions.  A suitable JSON validator software can then validate
+JSON files against the requirements.  Validating a particular JSON file
+against a schema ensures that both, the syntax *and* the conventions
+are followed.  This is useful when writing or editing JSON files in a
+text editor or when writing a pre-processing script or tool to create
+JSON files for a specific purpose in LAMMPS.  It **cannot** check
+whether the file contents are physically meaningful, though.
+
+One such validator tool is `check-jsonschema
+<https://check-jsonschema.readthedocs.io/>`_ which is written in Python
+and can be installed using the `pip Python package manager
+<https://pypi.org/>`_, best in a virtual environment as shown below (for
+a Bourne Shell command line):
+
+.. code-block:: sh
+
+   python -m venv validate-json
+   source validate-json/bin/activate
+   pip install --upgrade pip
+   pip install check-jsonschema
+
+To validate a specific JSON file against a provided schema (here for
+a :doc:`molecule command file <molecule>` you would then run for example:
+
+.. code-block:: sh
+
+   check-jsonschema --schemafile molecule-schema.json tip3p.json
+
+The latest schema files are also maintained and available for download
+at https://download.lammps.org/json/ .  This enables validation of JSON
+files even if the LAMMPS sources are not locally available. Example:
+
+.. code-block:: sh
+
+   check-jsonschema --schemafile https://download.lammps.org/json/molecule-schema.json tip3p.json
+
+Because YAML is a superset of JSON, the same tool and mechanism can also
+validate YAML files against a JSON schema.  This is used for the force-style
+regression test reference files in the ``unittest/force-styles`` folder, which
+are described by ``force-style-test-schema.json``.  For example, to validate
+all of them:
+
+.. code-block:: sh
+
+   check-jsonschema --schemafile force-style-test-schema.json \
+       unittest/force-styles/tests/*.yaml
+
+See the :doc:`unit test developer documentation <Developer_unittest>` for a
+description of the available keys in these reference files.
+
+JSON file format normalization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There are extensions to the strict JSON format that allow for comments
+or ignore additional (dangling) commas. The ``reformat-json.cpp`` tool
+will read JSON files in relaxed format, but write it out in strict format.
+It is also possible to change the level of indentation from -1 (all data
+one long line) to any positive integer value.  The original file will be
+backed up (.bak added to file name) and then overwritten.
+
+Manual compilation (it will be automatically included in the CMake build
+if building tools is requested during CMake configuration):
+
+.. code-block:: sh
+
+   g++ -I <path/to/lammps/src> -o reformat-json reformat-json.cpp
+
+Usage:
+
+.. parsed-literal::
+
+   reformat-json <indent-width> <json-file-1> [<json-file-2> ...]
+
+----------
+
 .. _kate:
 
 kate tool
@@ -423,213 +523,21 @@ The file was provided by Alessandro Luigi Sellerio
 
 ----------
 
-.. _lammps_shell:
+.. _lammps_gui:
 
-LAMMPS shell
-------------
+LAMMPS-GUI
+----------
 
-.. versionadded:: 9Oct2020
+.. versionchanged:: 10Sep2025
 
-Overview
-^^^^^^^^
+LAMMPS-GUI is a graphical text editor customized for editing LAMMPS
+input files that is linked to the :ref:`LAMMPS C-library
+<lammps_c_api>`.  It used to be included with LAMMPS in the
+``tools/lammps-gui`` folder, but it is now hosted in its own git
+repository at https://github.com/akohlmey/lammps-gui/ and the online
+documentation is at https://lammps-gui.lammps.org/
 
-The LAMMPS Shell, ``lammps-shell`` is a program that functions very
-similar to the regular LAMMPS executable but has several modifications
-and additions that make it more powerful for interactive sessions,
-i.e. where you type LAMMPS commands from the prompt instead of reading
-them from a file.
-
-- It uses the readline and history libraries to provide command line
-  editing and context aware TAB-expansion (details on that below).
-
-- When processing an input file with the '-in' or '-i' flag from the
-  command line, it does not exit at the end of that input file but
-  stops at a prompt, so that additional commands can be issued
-
-- Errors will not abort the shell but return to the prompt.
-
-- It has additional commands aimed at interactive use (details below).
-
-- Interrupting a calculation with CTRL-C will not terminate the
-  session but rather enforce a timeout to cleanly stop an ongoing
-  run (more info on timeouts is in the :doc:`timer command <timer>`
-  documentation).
-
-These enhancements make the LAMMPS shell an attractive choice for
-interactive LAMMPS sessions in graphical desktop environments
-(e.g. Gnome, KDE, Cinnamon, XFCE, Windows).
-
-TAB-expansion
-^^^^^^^^^^^^^
-
-When writing commands interactively at the shell prompt, you can hit
-the TAB key at any time to try and complete the text.  This completion
-is context aware and will expand any first word only to commands
-available in that executable.
-
-- For style commands it will expand to available styles of the
-  corresponding category (e.g. pair styles after a
-  :doc:`pair_style <pair_style>` command).
-
-- For :doc:`compute <compute>`, :doc:`fix <fix>`, or :doc:`dump <dump>`
-  it will also expand only to already defined groups for the group-ID
-  keyword.
-
-- For commands like :doc:`compute_modify <compute_modify>`,
-  :doc:`fix_modify <fix_modify>`, or :doc:`dump_modify <dump_modify>`
-  it will expand to known compute/fix/dump IDs only.
-
-- When typing references to computes, fixes, or variables with a
-  "c\_", "f\_", or "v\_" prefix, respectively, then the expansion will
-  be to known compute/fix IDs and variable names. Variable name
-  expansion is also available for the ${name} variable syntax.
-
-- In all other cases TAB expansion will complete to names of files
-  and directories.
-
-Command line editing and history
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-When typing commands, command line editing similar to what BASH
-provides is available.  Thus it is possible to move around the
-currently line and perform various cut and insert and edit operations.
-Previous commands can be retrieved by scrolling up (and down)
-or searching (e.g. with CTRL-r).
-
-Also history expansion through using the exclamation mark '!'
-can be performed.  Examples: '!!' will be replaced with the previous
-command, '!-2' will repeat the command before that, '!30' will be
-replaced with event number 30 in the command history list, and
-'!run' with the last command line that started with "run".  Adding
-a ":p" to such a history expansion will result that the expansion is
-printed and added to the history list, but NOT executed.
-On exit the LAMMPS shell will write the history list to a file
-".lammps_history" in the current working directory.  If such a
-file exists when the LAMMPS shell is launched it will be read to
-populate the history list.
-
-This is realized via the readline library and can thus be customized
-with an ``.inputrc`` file in the home directory.  For application
-specific customization, the LAMMPS shell uses the name "lammps-shell".
-For more information about using and customizing an application using
-readline, please see the available documentation at:
-https://www.gnu.org/software/readline/
-
-
-Additional commands
-^^^^^^^^^^^^^^^^^^^
-
-The following commands are added to the LAMMPS shell on top of the
-regular LAMMPS commands:
-
-.. parsed-literal::
-
-   help (or ?)    print a brief help message
-   history        display the current command history list
-   clear_history  wipe out the current command history list
-   save_history <range> <file>
-                  write commands from the history to file.
-                  The range is given as <from>-<to>, where <from> and <to>
-                  may be empty. Example: save_history 100- in.recent
-   source <file>  read commands from file (same as "include")
-   pwd            print current working directory
-   cd <directory> change current working directory (same as pwd if no directory)
-   mem            print current and maximum memory usage
-   \|<command>     execute <command> as a shell command and return to the command prompt
-   exit           exit the LAMMPS shell cleanly (unlike the "quit" command)
-
-Please note that some known shell operations are implemented in the
-LAMMPS :doc:`shell command <shell>` in a platform neutral fashion,
-while using the '\|' character will always pass the following text
-to the operating system's shell command.
-
-Compilation
-^^^^^^^^^^^
-
-Compilation of the LAMMPS shell can be enabled by setting the CMake
-variable ``BUILD_LAMMPS_SHELL`` to "on" or using the makefile in the
-``tools/lammps-shell`` folder to compile after building LAMMPS using
-the conventional make procedure.  The makefile will likely need
-customization depending on the features and settings used for
-compiling LAMMPS.
-
-Limitations
-^^^^^^^^^^^
-
-The LAMMPS shell was not designed for use with MPI parallelization
-via ``mpirun`` or ``mpiexec`` or ``srun``.
-
-Readline customization
-^^^^^^^^^^^^^^^^^^^^^^
-
-The behavior of the readline functionality can be customized in the
-``${HOME}/.inputrc`` file.  This can be used to alter the default
-settings or change the key-bindings.  The LAMMPS Shell sets the
-application name ``lammps-shell``, so settings can be either applied
-globally or only for the LAMMPS shell by bracketing them between
-``$if lammps-shell`` and ``$endif`` like in the following example:
-
-.. code-block:: bash
-
-   $if lammps-shell
-   # disable "beep" or "screen flash"
-   set bell-style none
-   # bind the "Insert" key to toggle overwrite mode
-   "\e[2~": overwrite-mode
-   $endif
-
-More details about this are in the `readline documentation <https://tiswww.cwru.edu/php/chet/readline/rluserman.html#SEC9>`_.
-
-
-LAMMPS Shell tips and tricks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Below are some suggestions for how to use and customize the LAMMPS shell.
-
-Enable tilde expansion
-""""""""""""""""""""""
-
-Adding ``set expand-tilde on`` to ``${HOME}/.inputrc`` is recommended as
-this will change the filename expansion behavior to replace any text
-starting with "~" by the full path to the corresponding user's home
-directory.  While the expansion of filenames **will** happen on all
-arguments where the context is not known (e.g. ``~/compile/lamm<TAB>``
-will expand to ``~/compile/lammps/``), it will not replace the tilde by
-default.  But since LAMMPS does not do tilde expansion itself (unlike a
-shell), this will result in errors.  Instead the tilde-expression should
-be expanded into a valid path, where the plain "~/" stands for the
-current user's home directory and "~someuser/" stands for
-"/home/someuser" or whatever the full path to that user's home directory
-is.
-
-File extension association
-""""""""""""""""""""""""""
-
-Since the LAMMPS shell (unlike the regular LAMMPS executable) does not
-exit when an input file is passed on the command line with the "-in" or
-"-i" flag (the behavior is like for ``python -i <filename>``), it makes
-the LAMMPS shell suitable for associating it with input files based on
-their filename extension (e.g. ".lmp").  Since ``lammps-shell`` is a
-console application, you have to run it inside a terminal program with a
-command line like this:
-
-.. code-block:: bash
-
-   xterm -title "LAMMPS Shell" -e /path/to/lammps-shell -i in.file.lmp
-
-
-Use history to create an input file
-"""""""""""""""""""""""""""""""""""
-
-When experimenting with commands to interactively to figure out a
-suitable choice of settings or simply the correct syntax, you may want
-to record part of your commands to a file for later use.  This can be
-done with the ``save_history`` commands, which allows to selectively
-write a section of the command history to a file (Example:
-``save_history 25-30 in.run``).  This file can be further edited
-(Example: ``|vim in.run``) and then the file read back in and tried out
-(Example: ``source in.run``).  If the input also creates a system box,
-you first need to use the :doc:`clear` command.
+It is still possible to compile :ref:`LAMMPS-GUI together with LAMMPS <tools>`.
 
 ----------
 
@@ -638,7 +546,7 @@ you first need to use the :doc:`clear` command.
 lmp2arc tool
 ------------
 
-The lmp2arc sub-directory contains a tool for converting LAMMPS output
+The lmp2arc subdirectory contains a tool for converting LAMMPS output
 files to the format for Accelrys' Insight MD code (formerly
 MSI/Biosym and its Discover MD code).  See the README file for more
 information.
@@ -657,7 +565,7 @@ Greathouse at Sandia (jagreat at sandia.gov).
 lmp2cfg tool
 ----------------------
 
-The lmp2cfg sub-directory contains a tool for converting LAMMPS output
+The lmp2cfg subdirectory contains a tool for converting LAMMPS output
 files into a series of \*.cfg files which can be read into the
 `AtomEye <http://li.mit.edu/Archive/Graphics/A/>`_ visualizer.  See
 the README file for more information.
@@ -683,7 +591,7 @@ or (as administrator) to ``/etc/magic`` (for a system-wide
 installation).  Afterwards the ``file`` command should be able to
 detect most LAMMPS restarts, dump, data and log files. Examples:
 
-.. code-block:: bash
+.. code-block:: console
 
    $ file *.*
    dihedral-quadratic.restart:   LAMMPS binary restart file (rev 2), Version 10 Mar 2021, Little Endian
@@ -704,7 +612,7 @@ detect most LAMMPS restarts, dump, data and log files. Examples:
 matlab tool
 ------------------------
 
-The matlab sub-directory contains several `MATLAB <matlabhome_>`_ scripts for
+The matlab subdirectory contains several `MATLAB <matlabhome_>`_ scripts for
 post-processing LAMMPS output.  The scripts include readers for log
 and dump files, a reader for EAM potential files, and a converter that
 reads LAMMPS dump files and produces CFG files that can be visualized
@@ -747,7 +655,7 @@ definition file.  This tool was used to create the system for the
 moltemplate tool
 ----------------------------------
 
-The moltemplate sub-directory contains instructions for installing
+The moltemplate subdirectory contains instructions for installing
 moltemplate, a Python-based tool for building molecular systems based
 on a text-file description, and creating LAMMPS data files that encode
 their molecular topology as lists of bonds, angles, dihedrals, etc.
@@ -765,7 +673,7 @@ The latest sources can be found `on its GitHub page <https://github.com/jewettai
 msi2lmp tool
 ----------------------
 
-The msi2lmp sub-directory contains a tool for creating LAMMPS template
+The msi2lmp subdirectory contains a tool for creating LAMMPS template
 input and data files from BIOVIA's Materias Studio files (formerly
 Accelrys' Insight MD code, formerly MSI/Biosym and its Discover MD code).
 
@@ -815,8 +723,8 @@ the same ``LAMMPS_CACHING_DIR``. This script does the following:
     ``pip`` and ``git``
  #. Start a simple local HTTP server using Python to host files for CMake
 
-Afterwards, it will print out instruction on how to modify the CMake
-command line to make sure it uses the local HTTP server.
+Afterwards, it will print out instructions on how to modify the CMake
+commands to make sure it uses the local HTTP server.
 
 To undo the environment changes and shutdown the local HTTP server,
 run the ``deactivate_caches`` command.
@@ -870,7 +778,7 @@ dependencies and redirects the download to the local cache.
 
    mkdir build
    cd build
-   cmake -D LAMMPS_DOWNLOADS_URL=${HTTP_CACHE_URL} -C "${LAMMPS_HTTP_CACHE_CONFIG}" -C ../cmake/presets/most.cmake ../cmake
+   cmake -D LAMMPS_DOWNLOADS_URL=${HTTP_CACHE_URL} -C "${LAMMPS_HTTP_CACHE_CONFIG}" -C ../cmake/presets/most.cmake -D DOWNLOAD_POTENTIALS=off ../cmake
    make -j 8
 
    deactivate_caches
@@ -882,13 +790,13 @@ dependencies and redirects the download to the local cache.
 phonon tool
 ------------------------
 
-The phonon sub-directory contains a post-processing tool useful for
-analyzing the output of the :doc:`fix phonon <fix_phonon>` command in
-the PHONON package.
+The phonon subdirectory contains a post-processing tool, *phana*, useful
+for analyzing the output of the :doc:`fix phonon <fix_phonon>` command
+in the PHONON package.
 
-See the README file for instruction on building the tool and what
-library it needs.  And see the examples/PACKAGES/phonon directory
-for example problems that can be post-processed with this tool.
+See the README file for instructions on building the tool and what
+library it needs.  And see the examples/PACKAGES/phonon directory for
+example problems that can be post-processed with this tool.
 
 This tool was written by Ling-Ti Kong at Shanghai Jiao Tong
 University.
@@ -900,7 +808,7 @@ University.
 polybond tool
 ----------------------------
 
-The polybond sub-directory contains a Python-based tool useful for
+The polybond subdirectory contains a Python-based tool useful for
 performing "programmable polymer bonding".  The Python file
 lmpsdata.py provides a "Lmpsdata" class with various methods which can
 be invoked by a user-written Python script to create data files with
@@ -917,7 +825,7 @@ This tool was written by Zachary Kraus at Georgia Tech.
 pymol_asphere tool
 -------------------------------
 
-The pymol_asphere sub-directory contains a tool for converting a
+The pymol_asphere subdirectory contains a tool for converting a
 LAMMPS dump file that contains orientation info for ellipsoidal
 particles into an input file for the `PyMol visualization package <pymolhome_>`_ or its `open source variant <pymolopen_>`_.
 
@@ -938,7 +846,7 @@ This tool was written by Mike Brown at Sandia.
 python tool
 -----------------------------
 
-The python sub-directory contains several Python scripts
+The python subdirectory contains several Python scripts
 that perform common LAMMPS post-processing tasks, such as:
 
 * extract thermodynamic info from a log file as columns of numbers
@@ -949,6 +857,30 @@ that perform common LAMMPS post-processing tasks, such as:
 
 These are simple scripts built on `Pizza.py <pizza_>`_ modules.  See the
 README for more info on Pizza.py and how to use these scripts.
+
+----------
+
+.. _regression:
+
+Regression tester tool
+----------------------
+
+The regression-tests subdirectory contains a tool for performing
+regression tests with a given LAMMPS binary.  The tool launches the
+LAMMPS binary with any given input script under one of the `examples`
+subdirectories, and compares the thermo output in the generated log file
+with those in the provided log file with the same number of processors
+in the same subdirectory. If the differences between the actual and
+reference values are within specified tolerances, the test is considered
+passed.  For each test batch, that is, a set of example input scripts,
+the ``mpirun`` command, the LAMMPS command-line arguments, and the
+tolerances for individual thermo quantities can be specified in a
+configuration file in YAML format.
+
+The tool also reports if and how the run fails, and if a reference log file
+is missing.  See the README file for more information.
+
+This tool was written by Trung Nguyen at U of Chicago (ndactrung at gmail.com).
 
 ----------
 
@@ -975,7 +907,7 @@ while at the Shell lab at UC Santa Barbara. (tanmoy dot 7989 at gmail.com)
 smd tool
 ------------------
 
-The smd sub-directory contains a C++ file dump2vtk_tris.cpp and
+The smd subdirectory contains a C++ file dump2vtk_tris.cpp and
 Makefile which can be compiled and used to convert triangle output
 files created by the Smooth-Mach Dynamics (MACHDYN) package into a
 VTK-compatible unstructured grid file.  It could then be read in and
@@ -994,7 +926,7 @@ Ernst Mach Institute in Germany (georg.ganzenmueller at emi.fhg.de).
 spin tool
 --------------------
 
-The spin sub-directory contains a C file interpolate.c which can
+The spin subdirectory contains a C file interpolate.c which can
 be compiled and used to perform a cubic polynomial interpolation of
 the MEP following a GNEB calculation.
 
@@ -1011,7 +943,7 @@ Ivanov, at University of Iceland (ali5 at hi.is).
 singularity/apptainer tool
 --------------------------
 
-The singularity sub-directory contains container definitions files that
+The singularity subdirectory contains container definitions files that
 can be used to build container images for building and testing LAMMPS on
 specific OS variants using the `Apptainer <https://apptainer.org>`_ or
 `Singularity <https://sylabs.io>`_ container software. Contributions for
@@ -1071,7 +1003,7 @@ getting started, but not as a fully tested and supported feature of the
 LAMMPS distribution.  Any contributions to complete this are, of course,
 welcome.  Please also note, that for the case of creating a Python wrapper,
 a fully supported :doc:`Ctypes based lammps module <Python_module>`
-already exists.  That module is designed to be object oriented while
+already exists.  That module is designed to be object-oriented while
 SWIG will generate a 1:1 translation of the functions in the interface file.
 
 Building the wrapper
@@ -1085,13 +1017,13 @@ necessary development headers and libraries are present.
 
 .. code-block:: bash
 
-   -D WITH_SWIG=on         # to enable building any SWIG wrapper
-   -D BUILD_SWIG_JAVA=on   # to enable building the Java wrapper
-   -D BUILD_SWIG_LUA=on    # to enable building the Lua wrapper
-   -D BUILD_SWIG_PERL5=on  # to enable building the Perl 5.x wrapper
-   -D BUILD_SWIG_PYTHON=on # to enable building the Python wrapper
-   -D BUILD_SWIG_RUBY=on   # to enable building the Ruby wrapper
-   -D BUILD_SWIG_TCL=on    # to enable building the Tcl wrapper
+   -D WITH_SWIG=on          # to enable building any SWIG wrapper
+   -D BUILD_SWIG_JAVA=on    # to enable building the Java wrapper
+   -D BUILD_SWIG_LUA=on     # to enable building the Lua wrapper
+   -D BUILD_SWIG_PERL5=on   # to enable building the Perl 5.x wrapper
+   -D BUILD_SWIG_PYTHON=on  # to enable building the Python wrapper
+   -D BUILD_SWIG_RUBY=on    # to enable building the Ruby wrapper
+   -D BUILD_SWIG_TCL=on     # to enable building the Tcl wrapper
 
 
 Manual building allows a little more flexibility. E.g. one can choose
@@ -1100,20 +1032,20 @@ for Tcl with:
 
 .. code-block:: bash
 
-   $ swig -tcl -module tcllammps lammps.i
-   $ gcc -fPIC -shared $(pkgconf --cflags tcl) -o tcllammps.so \
+   swig -tcl -module tcllammps lammps.i
+   gcc -fPIC -shared $(pkg-config tcl --cflags) -o tcllammps.so \
                lammps_wrap.c -L ../src/ -llammps
-   $ tclsh
+   tclsh
 
 Or one can build an extended Tcl shell command with the wrapped
 functions included with:
 
 .. code-block:: bash
 
-   $ swig -tcl -module tcllmps lammps_shell.i
-   $ gcc -o tcllmpsh lammps_wrap.c -Xlinker -export-dynamic \
-            -DHAVE_CONFIG_H $(pkgconf --cflags tcl) \
-            $(pkgconf --libs tcl) -L ../src -llammps
+   swig -tcl -module tcllmps lammps_shell.i
+   gcc -o tcllmpsh lammps_wrap.c -Xlinker -export-dynamic \
+            -DHAVE_CONFIG_H $(pkg-config tcl --cflags) \
+            $(pkg-config tcl --libs) -L ../src -llammps
 
 In both cases it is assumed that the LAMMPS library was compiled
 as a shared library in the ``src`` folder. Otherwise the last
@@ -1142,20 +1074,64 @@ For illustration purposes below is a part of the Tcl example script.
 
 .. code-block:: tcl
 
-   % load ./tcllammps.so
-   % set lmp [lammps_open_no_mpi 0 NULL NULL]
-   % lammps_command $lmp "units real"
-   % lammps_command $lmp "lattice fcc 2.5"
-   % lammps_command $lmp "region box block -5 5 -5 5 -5 5"
-   % lammps_command $lmp "create_box 1 box"
-   % lammps_command $lmp "create_atoms 1 box"
-   %
-   % set dt [doublep_value [voidp_to_doublep [lammps_extract_global $lmp dt]]]
-   % puts "LAMMPS version $ver"
-   % puts [format "Number of created atoms: %g" [lammps_get_natoms $lmp]]
-   % puts "Current size of timestep: $dt"
-   % puts "LAMMPS version: [lammps_version $lmp]"
-   % lammps_close $lmp
+   load ./tcllammps.so
+   set lmp [lammps_open_no_mpi 0 NULL NULL]
+   lammps_command $lmp "units real"
+   lammps_command $lmp "lattice fcc 2.5"
+   lammps_command $lmp "region box block -5 5 -5 5 -5 5"
+   lammps_command $lmp "create_box 1 box"
+   lammps_command $lmp "create_atoms 1 box"
+
+   set dt [doublep_value [voidp_to_doublep [lammps_extract_global $lmp dt]]]
+   puts "LAMMPS version $ver"
+   puts [format "Number of created atoms: %g" [lammps_get_natoms $lmp]]
+   puts "Current size of timestep: $dt"
+   puts "LAMMPS version: [lammps_version $lmp]"
+   lammps_close $lmp
+
+----------
+
+.. _tabulate:
+
+tabulate tool
+--------------
+
+.. versionadded:: 22Dec2022
+
+The ``tabulate`` folder contains Python scripts to generate and
+visualize tabulated potential files for LAMMPS.  The bulk of the code is
+in the ``tabulate`` module in the ``tabulate.py`` file.  Some example
+files demonstrating its use are included.  See the README file for more
+information.
+
+----------
+
+.. _tinker:
+
+tinker tool
+--------------
+
+The ``tinker`` folder contains Python scripts to convert Tinker input
+files to LAMMPS.
+
+See the README file for more information.
+
+Those scripts were written by Steve Plimpton sjplimp at gmail.com
+
+----------
+
+.. _valgrind:
+
+valgrind tool
+-------------
+
+The ``valgrind`` folder contains additional suppressions for LAMMPS when
+using `valgrind's <https://valgrind.org/>`_ ` `memcheck tool
+<https://valgrind.org/info/tools.html#memcheck>`_ to search for memory
+access violation and memory leaks.  These suppressions are automatically
+invoked when running tests through CMake "ctest -T memcheck".  See the
+instructions in the ``README`` file to add these suppressions when using
+valgrind with LAMMPS or other programs.
 
 ----------
 
@@ -1164,8 +1140,8 @@ For illustration purposes below is a part of the Tcl example script.
 vim tool
 ------------------
 
-The files in the tools/vim directory are add-ons to the VIM editor
-that allow easier editing of LAMMPS input scripts.  See the README.txt
+The files in the ``tools/vim`` directory are add-ons to the VIM editor
+that allow easier editing of LAMMPS input scripts.  See the ``README.txt``
 file for details.
 
 These files were provided by Gerolf Ziegenhain (gerolf at

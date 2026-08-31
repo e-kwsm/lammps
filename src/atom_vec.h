@@ -15,7 +15,6 @@
 #define LMP_ATOM_VEC_H
 
 #include "pointers.h"    // IWYU pragma: export
-#include <vector>
 
 namespace LAMMPS_NS {
 
@@ -39,8 +38,7 @@ class AtomVec : protected Pointers {
   int size_data_atom;    // number of values in Atom line
   int size_data_vel;     // number of values in Velocity line
   int xcol_data;         // column (1-N) where x is in Atom line
-  int maxexchange;       // max size of exchanged atom
-                         // only needs to be set if size > BUFEXTRA
+  int maxexchange;       // max size of exchanged atom from bonds, angles, etc.
 
   int bonus_flag;                // 1 if stores bonus data
   int size_forward_bonus;        // # in forward bonus comm
@@ -79,6 +77,7 @@ class AtomVec : protected Pointers {
   virtual void grow(int);
   virtual void grow_pointers() {}
   virtual void copy(int, int, int);
+  void grow_default_pointers(tagint *, int *, int *, imageint *, double **, double **, double **);
 
   virtual void copy_bonus(int, int, int) {}
   virtual void clear_bonus() {}
@@ -151,26 +150,16 @@ class AtomVec : protected Pointers {
   virtual int pack_data_bonus(double *, int) { return 0; }
   virtual void write_data_bonus(FILE *, int, double *, int) {}
 
+  virtual void read_data_general_to_restricted(int, int);
+  virtual void write_data_restricted_to_general();
+  virtual void write_data_restore_restricted();
+
   virtual int property_atom(const std::string &) { return -1; }
   virtual void pack_property_atom(int, double *, int, int) {}
 
   virtual double memory_usage();
   virtual double memory_usage_bonus() { return 0; }
-
-  // old hybrid functions, needed by Kokkos package
-
-  virtual int pack_comm_hybrid(int, int *, double *) { return 0; }
-  virtual int unpack_comm_hybrid(int, int, double *) { return 0; }
-  virtual int pack_reverse_hybrid(int, int, double *) { return 0; }
-  virtual int unpack_reverse_hybrid(int, int *, double *) { return 0; }
-  virtual int pack_border_hybrid(int, int *, double *) { return 0; }
-  virtual int unpack_border_hybrid(int, int, double *) { return 0; }
-  virtual int data_atom_hybrid(int, const std::vector<std::string> &, int) { return 0; }
-  virtual int data_vel_hybrid(int, const std::vector<std::string> &, int) { return 0; }
-  virtual int pack_data_hybrid(int, double *) { return 0; }
-  virtual int write_data_hybrid(FILE *, double *) { return 0; }
-  virtual int pack_vel_hybrid(int, double *) { return 0; }
-  virtual int write_vel_hybrid(FILE *, double *) { return 0; }
+  double **x, **v, **f;  // Note, these pointers will be undefined by default in hybridized child classes
 
  protected:
   int nmax;             // local copy of atom->nmax
@@ -178,10 +167,15 @@ class AtomVec : protected Pointers {
   int deform_groupbit;
   double *h_rate;
 
+  // Note, these pointers will be undefined by default in hybridized child classes
   tagint *tag;    // peratom fields common to all styles
   int *type, *mask;
   imageint *image;
-  double **x, **v, **f;
+
+  // copies of original unrotated fields for write_data for general triclinic
+
+  double **x_hold;
+  double **v_hold, **omega_hold, **angmom_hold;
 
   // standard list of peratom fields always operated on by different methods
   // common to all styles, so not listed in field strings

@@ -19,16 +19,12 @@
 #include "tokenizer.h"
 
 #include <cstring>
+#include <exception>
 #include <utility>
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 1024        // max line length in dump file
-
-// also in read_dump.cpp
-
-enum{ID,TYPE,X,Y,Z,VX,VY,VZ,Q,IX,IY,IZ,FX,FY,FZ};
-enum{UNSET,NOSCALE_NOWRAP,NOSCALE_WRAP,SCALE_NOWRAP,SCALE_WRAP};
+static constexpr int MAXLINE = 1024;        // max line length in dump file
 
 /* ---------------------------------------------------------------------- */
 
@@ -91,13 +87,13 @@ int ReaderNative::read_time(bigint &ntimestep)
 
     // skip over unit and time information, if present.
 
-    if (utils::strmatch(line,"^\\s*ITEM: UNITS\\s*$"))
+    if (utils::strmatch(line, R"(^\s*ITEM: UNITS\s*$)"))
       read_lines(2);
 
-    if (utils::strmatch(line,"^\\s*ITEM: TIME\\s*$"))
+    if (utils::strmatch(line, R"(^\s*ITEM: TIME\s*$)"))
       read_lines(2);
 
-    if (!utils::strmatch(line,"^\\s*ITEM: TIMESTEP\\s*$"))
+    if (!utils::strmatch(line, R"(^\s*ITEM: TIMESTEP\s*$)"))
       error->one(FLERR,"Dump file is incorrectly formatted");
 
     read_lines(1);
@@ -133,6 +129,7 @@ void ReaderNative::skip()
     int n;
     for (int i = 0; i < nchunk; i++) {
       read_buf(&n, sizeof(int), 1);
+      if (n < 0) error->one(FLERR,"Dump file is invalid or corrupted");
       skip_buf(n*sizeof(double));
     }
 
@@ -143,10 +140,10 @@ void ReaderNative::skip()
 
     // invoke read_lines() in chunks no larger than MAXSMALLINT
 
-    int nchunk;
+    bigint nchunk;
     while (nremain) {
       nchunk = MIN(nremain,MAXSMALLINT);
-      read_lines(nchunk);
+      read_lines((int)nchunk);
       nremain -= nchunk;
     }
   }
@@ -241,6 +238,7 @@ bigint ReaderNative::read_header(double box[3][3], int &boxinfo, int &triclinic,
       }
 
       read_buf(&len, sizeof(int), 1);
+      if (len < 0) error->one(FLERR,"Dump file is invalid or corrupted");
       labelline = read_binary_str(len);
     } else {
       error->one(FLERR, "Unsupported old binary dump format");
@@ -258,7 +256,11 @@ bigint ReaderNative::read_header(double box[3][3], int &boxinfo, int &triclinic,
     triclinic = 0;
     box[0][2] = box[1][2] = box[2][2] = 0.0;
     read_lines(1);
-    if (line[strlen("ITEM: BOX BOUNDS ")] == 'x') triclinic = 1;
+    if (utils::strmatch(line, R"(ITEM: BOX BOUNDS.*abc\s+origin)")) {
+      error->one(FLERR, Error::NOLASTLINE,
+                 "Dump files in general triclinic format are not (yet) supported");
+    }
+    if (utils::strmatch(line, R"(ITEM: BOX BOUNDS.*xy\s+xz\s+yz)")) triclinic = 1;
 
     try {
       read_lines(1);
@@ -293,7 +295,7 @@ bigint ReaderNative::read_header(double box[3][3], int &boxinfo, int &triclinic,
     labelline = line + strlen("ITEM: ATOMS ");
   }
 
-  Tokenizer tokens(labelline);
+  Tokenizer tokens(std::move(labelline));
   std::map<std::string, int> labels;
   nwords = 0;
 
@@ -417,12 +419,18 @@ bigint ReaderNative::read_header(double box[3][3], int &boxinfo, int &triclinic,
     else if (fieldtype[i] == Q)
       fieldindex[i] = find_label("q", labels);
 
+    else if (fieldtype[i] == MOL)
+      fieldindex[i] = find_label("mol", labels);
+
     else if (fieldtype[i] == IX)
       fieldindex[i] = find_label("ix", labels);
     else if (fieldtype[i] == IY)
       fieldindex[i] = find_label("iy", labels);
     else if (fieldtype[i] == IZ)
       fieldindex[i] = find_label("iz", labels);
+
+    else if (fieldtype[i] == APIP_LAMBDA)
+      fieldindex[i] = find_label("apip_lambda", labels);
   }
 
   // set fieldflag = -1 if any unfound fields
@@ -455,6 +463,7 @@ void ReaderNative::read_atoms(int n, int nfield, double **fields)
       // if the last chunk has finished
       if (iatom_chunk == 0) {
           read_buf(&natom_chunk, sizeof(int), 1);
+          if (natom_chunk < 0) error->one(FLERR,"Dump file is invalid or corrupted");
           read_double_chunk(natom_chunk);
           natom_chunk /= size_one;
           m = 0;
@@ -488,7 +497,7 @@ void ReaderNative::read_atoms(int n, int nfield, double **fields)
       // convert selected fields to floats
 
       for (int m = 0; m < nfield; m++)
-        fields[i][m] = atof(words[fieldindex[m]].c_str());
+        fields[i][m] = std::stod(words[fieldindex[m]]);
     }
   }
 }
@@ -528,7 +537,7 @@ void ReaderNative::read_buf(void * ptr, size_t size, size_t count)
 std::string ReaderNative::read_binary_str(size_t size)
 {
   std::string str(size, '\0');
-  read_buf(&str[0], sizeof(char), size);
+  read_buf((char *)str.data(), sizeof(char), size);
   return str;
 }
 
@@ -546,7 +555,7 @@ void ReaderNative::skip_buf(size_t size)
 {
   bigint pos = platform::ftell(fp);
   pos += size;
-  platform::fseek(fp,pos);
+  (void) platform::fseek(fp,pos);
 }
 
 bool ReaderNative::is_known_magic_str() const

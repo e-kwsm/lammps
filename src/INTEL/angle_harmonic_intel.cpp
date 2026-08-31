@@ -51,12 +51,6 @@ AngleHarmonicIntel::AngleHarmonicIntel(LAMMPS *lmp) : AngleHarmonic(lmp)
 
 void AngleHarmonicIntel::compute(int eflag, int vflag)
 {
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (_use_base) {
-    AngleHarmonic::compute(eflag, vflag);
-    return;
-  }
-  #endif
 
   if (fix->precision() == FixIntel::PREC_MODE_MIXED)
     compute<float,double>(eflag, vflag, fix->get_mixed_buffers(),
@@ -111,7 +105,7 @@ void AngleHarmonicIntel::eval(const int vflag,
   const int inum = neighbor->nanglelist;
   if (inum == 0) return;
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
+  ATOM_T * _noalias const x = buffers->get_x();
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
 
@@ -122,7 +116,7 @@ void AngleHarmonicIntel::eval(const int vflag,
   int tc;
   FORCE_T * _noalias f_start;
   acc_t * _noalias ev_global;
-  IP_PRE_get_buffers(0, buffers, fix, tc, f_start, ev_global);
+  IP_PRE_get_buffers(buffers, fix, tc, f_start, ev_global);
   const int nthreads = tc;
 
   acc_t oeangle, ov0, ov1, ov2, ov3, ov4, ov5;
@@ -178,7 +172,7 @@ void AngleHarmonicIntel::eval(const int vflag,
       const flt_t delz1 = x[i1].z - x[i2].z;
 
       const flt_t rsq1 = delx1*delx1 + dely1*dely1 + delz1*delz1;
-      const flt_t r1 = (flt_t)1.0/sqrt(rsq1);
+      const flt_t r1 = (flt_t)1.0/std::sqrt(rsq1);
 
       // 2nd bond
 
@@ -187,7 +181,7 @@ void AngleHarmonicIntel::eval(const int vflag,
       const flt_t delz2 = x[i3].z - x[i2].z;
 
       const flt_t rsq2 = delx2*delx2 + dely2*dely2 + delz2*delz2;
-      const flt_t r2 = (flt_t)1.0/sqrt(rsq2);
+      const flt_t r2 = (flt_t)1.0/std::sqrt(rsq2);
 
       // angle (cos and sin)
 
@@ -199,12 +193,12 @@ void AngleHarmonicIntel::eval(const int vflag,
       if (c < (flt_t)-1.0) c = (flt_t)-1.0;
 
       const flt_t sd = (flt_t)1.0 - c * c;
-      flt_t s = (flt_t)1.0/sqrt(sd);
+      flt_t s = (flt_t)1.0/std::sqrt(sd);
       if (sd < SMALL2) s = INVSMALL;
 
       // harmonic force & energy
 
-      const flt_t dtheta = acos(c) - fc.fc[type].theta0;
+      const flt_t dtheta = std::acos(c) - fc.fc[type].theta0;
       const flt_t tk = fc.fc[type].k * dtheta;
 
       flt_t eangle;
@@ -296,13 +290,6 @@ void AngleHarmonicIntel::init_style()
   fix = static_cast<FixIntel *>(modify->get_fix_by_id("package_intel"));
   if (!fix) error->all(FLERR, "The 'package intel' command is required for /intel styles");
 
-  #ifdef _LMP_INTEL_OFFLOAD
-  _use_base = 0;
-  if (fix->offload_balance() != 0.0) {
-    _use_base = 1;
-    return;
-  }
-  #endif
 
   fix->bond_init_check();
 

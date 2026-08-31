@@ -14,6 +14,7 @@
 #ifdef PAIR_CLASS
 // clang-format off
 PairStyle(hybrid/overlay,PairHybridOverlay);
+PairStyle(hybrid/overlay/omp,PairHybridOverlay);
 // clang-format on
 #else
 
@@ -30,6 +31,7 @@ class PairHybridOverlay : public PairHybrid {
 
   void coeff(int, char **) override;
 
+ protected:
   void init_svector() override;
   void copy_svector(int, int) override;
 };

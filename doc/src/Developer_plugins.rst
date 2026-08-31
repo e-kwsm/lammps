@@ -53,7 +53,7 @@ Members of ``lammpsplugin_t``
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 15 85
 
    * - Member
      - Description
@@ -68,24 +68,25 @@ Members of ``lammpsplugin_t``
    * - author
      - String with the name and email of the author
    * - creator.v1
-     - Pointer to factory function for pair, bond, angle, dihedral, improper, kspace, or command styles
+     - Pointer to factory function for pair, bond, angle, dihedral, improper, kspace, command, or minimize styles
    * - creator.v2
-     - Pointer to factory function for compute, fix, or region styles
+     - Pointer to factory function for compute, fix, region, or run styles
    * - handle
      - Pointer to the open DSO file handle
 
 Only one of the two alternate creator entries can be used at a time and
 which of those is determined by the style of plugin. The "creator.v1"
 element is for factory functions of supported styles computing forces
-(i.e. pair, bond, angle, dihedral, or improper styles) or command styles
-and the function takes as single argument the pointer to the LAMMPS
-instance. The factory function is cast to the ``lammpsplugin_factory1``
-type before assignment.  The "creator.v2" element is for factory
-functions creating an instance of a fix, compute, or region style and
-takes three arguments: a pointer to the LAMMPS instance, an integer with
-the length of the argument list and a ``char **`` pointer to the list of
-arguments. The factory function pointer needs to be cast to the
-``lammpsplugin_factory2`` type before assignment.
+(i.e. pair, bond, angle, dihedral, or improper styles), command styles,
+or minimize styles and the function takes as single argument the pointer
+to the LAMMPS instance. The factory function is cast to the
+``lammpsplugin_factory1`` type before assignment.  The "creator.v2"
+element is for factory functions creating an instance of a fix, compute,
+region, or run style and takes three arguments: a pointer to the LAMMPS
+instance, an integer with the length of the argument list and a ``char
+**`` pointer to the list of arguments. The factory function pointer
+needs to be cast to the ``lammpsplugin_factory2`` type before
+assignment.
 
 Pair style example
 ^^^^^^^^^^^^^^^^^^
@@ -95,7 +96,7 @@ a class ``PairMorse2`` in the files ``pair_morse2.h`` and
 ``pair_morse2.cpp`` with the factory function and initialization
 function would look like this:
 
-.. code-block:: C++
+.. code-block:: c++
 
   #include "lammpsplugin.h"
   #include "version.h"
@@ -135,13 +136,13 @@ unique inside the entire LAMMPS executable.
 Fix style example
 ^^^^^^^^^^^^^^^^^
 
-If the factory function would be for a fix or compute, which take three
+If the factory function is for a fix or compute, which take three
 arguments (a pointer to the LAMMPS class, the number of arguments and the
 list of argument strings), then the pointer type is ``lammpsplugin_factory2``
 and it must be assigned to the *creator.v2* member of the plugin struct.
 Below is an example for that:
 
-.. code-block:: C++
+.. code-block:: c++
 
   #include "lammpsplugin.h"
   #include "version.h"
@@ -176,7 +177,7 @@ demonstrated in the following example, which also shows that the
 implementation of the plugin class may be within the same source
 file as the plugin interface code:
 
-.. code-block:: C++
+.. code-block:: c++
 
    #include "lammpsplugin.h"
 
@@ -246,9 +247,9 @@ style, info string, author string, pointer to factory function, and the
 DSO handle.  The registration function is called with a pointer to the address
 of this struct and the pointer of the LAMMPS class.  The registration function
 will then add the factory function of the plugin style to the respective
-style map under the provided name.  It will also make a copy of the struct
-in a list of all loaded plugins and update the reference counter for loaded
-plugins from this specific DSO file.
+process-global style registry under the provided name.  It will also make a copy of the struct
+in a global list of all loaded plugins and update the reference counter for
+loaded plugins from this specific DSO file.
 
 The pair style itself (i.e. the PairMorse2 class in this example) can be
 written just like any other pair style that is included in LAMMPS.  For
@@ -263,6 +264,27 @@ the plugin will override the existing code.  This can be used to modify
 the behavior of existing styles or to debug new versions of them without
 having to re-compile or re-install all of LAMMPS.
 
+.. versionchanged:: 12Jun2025
+
+When using the :doc:`clear <clear>` command, plugins are not unloaded.
+
+.. versionchanged:: TBD
+
+Style factory functions are stored in a process-global registry instead of in
+per-instance style maps.  As a result, a loaded plugin persists across the
+:doc:`clear <clear>` command, and a plugin loaded by any LAMMPS instance is
+immediately available to all other LAMMPS instances in the same process; no
+explicit restore step is needed (the :doc:`plugin restore <plugin>` command is
+retained only for backward compatibility and does nothing).  The :doc:`plugin
+load <plugin>` command may be issued again, but already-loaded plugins are
+skipped; to replace a plugin it must first be explicitly unloaded with
+:doc:`plugin unload <plugin>`.  Plugins are removed only when they are
+explicitly unloaded or the LAMMPS library interface is "finalized".  Concurrent
+plugin load and unload operations from multiple instances are serialized
+internally so that the shared plugin registry cannot be corrupted.  The
+:doc:`info styles <info>` command and the ``-help`` command-line output mark a
+style currently provided by a plugin with a trailing asterisk (``*``).
+
 Compiling plugins
 ^^^^^^^^^^^^^^^^^
 
@@ -271,7 +293,7 @@ Plugins need to be compiled with the same compilers and libraries
 as the LAMMPS executable and library.  Otherwise the plugin will likely
 not load due to mismatches in the function signatures (LAMMPS is C++ so
 scope, type, and number of arguments are encoded into the symbol names
-and thus differences in them will lead to failed plugin load commands.
+and thus differences in them will lead to failed plugin load commands).
 Compilation of the plugin can be managed via both, CMake or traditional
 GNU makefiles.  Some examples that can be used as a template are in the
 ``examples/plugins`` folder.  The CMake script code has some small
@@ -283,7 +305,7 @@ in the ``examples/kim/plugin`` folder.  No changes to the sources of the
 KIM package themselves are needed; only the plugin interface and loader
 code needs to be added.  This example only supports building with CMake,
 but is probably a more typical example. To compile you need to run CMake
-with -DLAMMPS_SOURCE_DIR=<path/to/lammps/src/folder>.  Other
+with ``-DLAMMPS_SOURCE_DIR=<path/to/lammps/src/folder>``.  Other
 configuration setting are identical to those for compiling LAMMPS.
 
 A second example for a plugin from a package is in the
@@ -300,3 +322,8 @@ license).  This will automatically set the required environment variable
 and launching a (compatible) LAMMPS binary will load and register the
 plugin and the ML-PACE package can then be used as it was linked into
 LAMMPS.
+
+---------
+
+You can find additional LAMMPS plugins in the `LAMMPS plugins source
+code repository on GitHub <https://github.com/lammps/lammps-plugins>`_

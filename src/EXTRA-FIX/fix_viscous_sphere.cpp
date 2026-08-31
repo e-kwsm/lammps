@@ -14,11 +14,9 @@
 #include "fix_viscous_sphere.h"
 
 #include "atom.h"
-#include "comm.h"
 #include "error.h"
 #include "input.h"
 #include "memory.h"
-#include "modify.h"
 #include "respa.h"
 #include "update.h"
 #include "variable.h"
@@ -40,7 +38,7 @@ FixViscousSphere::FixViscousSphere(LAMMPS *_lmp, int narg, char **arg) :
 {
   dynamic_group_allow = 1;
 
-  if (!atom->sphere_flag) error->all(FLERR, "Fix viscous/sphere requires atom style sphere");
+  if (!atom->omega_flag) error->all(FLERR, "Fix viscous/sphere requires atom attribute omega");
 
   if (narg < 4) error->all(FLERR, "Illegal fix viscous/sphere command");
 
@@ -91,6 +89,7 @@ FixViscousSphere::FixViscousSphere(LAMMPS *_lmp, int narg, char **arg) :
 
 FixViscousSphere::~FixViscousSphere()
 {
+  if (copymode) return;
   memory->destroy(scaleval);
   delete[] scalegamma;
   delete[] scalevarid;

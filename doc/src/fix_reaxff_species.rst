@@ -9,7 +9,7 @@ Accelerator Variants: *reaxff/species/kk*
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID reaxff/species Nevery Nrepeat Nfreq filename keyword value ...
 
@@ -20,12 +20,12 @@ Syntax
 * Nfreq = calculate average bond-order every this many timesteps
 * filename = name of output file
 * zero or more keyword/value pairs may be appended
-* keyword = *cutoff* or *element* or *position* or *delete*
+* keyword = *cutoff* or *element* or *position* or *delete* or *delete_rate_limit*
 
   .. parsed-literal::
 
        *cutoff* value = I J Cutoff
-         I, J = atom types
+         I, J = atom types (see asterisk form below)
          Cutoff = Bond-order cutoff value for this pair of atom types
        *element* value = Element1, Element2, ...
        *position* value = posfreq filepos
@@ -39,6 +39,11 @@ Syntax
            *masslimit* value = massmin massmax
              massmin = minimum molecular weight of species to delete
              massmax = maximum molecular weight of species to delete
+       *delete_rate_limit* value = Nlimit Nsteps
+             Nlimit = maximum number of deletions allowed to occur within interval
+             Nsteps = the interval (number of timesteps) over which to count deletions
+       *delete_subgroup* value = group-ID
+             group-ID = name of a :doc:`group <group>`
 
 Examples
 """"""""
@@ -46,7 +51,7 @@ Examples
 .. code-block:: LAMMPS
 
    fix 1 all reaxff/species 10 10 100 species.out
-   fix 1 all reaxff/species 1 2 20 species.out cutoff 1 1 0.40 cutoff 1 2 0.55
+   fix 1 all reaxff/species 1 2 20 species.out cutoff 1 1 0.40 cutoff 1 2*3 0.55
    fix 1 all reaxff/species 1 100 100 species.out element Au O H position 1000 AuOH.pos
    fix 1 all reaxff/species 1 100 100 species.out delete species.del masslimit 0 50
 
@@ -81,25 +86,37 @@ the first line.
    calculations, reneighboring only every 100 steps is already quite a
    low frequency.
 
-If the filename ends with ".gz", the output file is written in gzipped
-format.  A gzipped dump file will be about 3x smaller than the text version,
-but will also take longer to write.
+If the filename ends with ".gz" or some :ref:`other supported
+compression format suffix <gzip>`, the output file is written in
+compressed format.  A compressed output file can be significantly
+smaller than the text version, but will also take longer to write.
+
+.. versionadded:: 15Jun2023
+
+   Support for wildcards added
 
 Optional keyword *cutoff* can be assigned to change the minimum
 bond-order values used in identifying chemical bonds between pairs of
 atoms.  Bond-order cutoffs should be carefully chosen, as bond-order
-cutoffs that are too small may include too many bonds (which will
-result in an error), while cutoffs that are too large will result in
-fragmented molecules.  The default cutoff of 0.3 usually gives good
-results.
+cutoffs that are too small may include too many bonds (which will result
+in an error), while cutoffs that are too large will result in fragmented
+molecules.  The default cutoff of 0.3 usually gives good results.  A
+wildcard asterisk can be used in place of or in conjunction with the I,J
+arguments to set the bond-order cutoff for multiple pairs of atom types.
+This takes the form "\*" or "\*n" or "n\*" or "m\*n".  If :math:`N` is
+the number of atom types, then an asterisk with no numeric values means
+all types from 1 to :math:`N`.  A leading asterisk means all types from
+1 to n (inclusive).  A trailing asterisk means all types from n to
+:math:`N` (inclusive).  A middle asterisk means all types from m to n
+(inclusive).
 
 The optional keyword *element* can be used to specify the chemical
 symbol printed for each LAMMPS atom type. The number of symbols must
 match the number of LAMMPS atom types and each symbol must consist of
-1 or 2 alphanumeric characters. Normally, these symbols should be
-chosen to match the chemical identity of each LAMMPS atom type, as
-specified using the :doc:`reaxff pair_coeff <pair_reaxff>` command and
-the ReaxFF force field file.
+1 or 2 alphanumeric characters. By default, these symbols are the same
+as the chemical identity of each LAMMPS atom type, as specified by the
+:doc:`ReaxFF pair_coeff <pair_reaxff>` command and the ReaxFF force
+field file.
 
 The optional keyword *position* writes center-of-mass positions of
 each identified molecules to file *filepos* every *posfreq* timesteps.
@@ -118,29 +135,107 @@ character appears in *filepos*, then one file per snapshot is written
 at *posfreq* and the "\*" character is replaced with the timestep
 value.  For example, AuO.pos.\* becomes AuO.pos.0, AuO.pos.1000, etc.
 
-The optional keyword *delete* enables the periodic removal of
-molecules from the system.  Criteria for deletion can be either a list
-of specific chemical formulae or a range of molecular weights.
-Molecules are deleted every *Nfreq* timesteps, and bond connectivity
-is determined using the *Nevery* and *Nrepeat* keywords.  The
-*filedel* argument is the name of the output file that records the
-species that are removed from the system.  The *specieslist* keyword
-permits specific chemical species to be deleted.  The *Nspecies*
-argument specifies how many species are eligible for deletion and is
-followed by a list of chemical formulae, whose strings are compared to
-species identified by this fix.  For example, "specieslist 2 CO CO2"
+.. versionadded:: 3Aug2022
+
+The optional keyword *delete* enables the periodic removal of molecules
+from the system :ref:`(Gissinger2) <Delete>`.  Criteria for deletion can
+be either a list of specific chemical formulae or a range of molecular
+weights.  Molecules are deleted every *Nfreq* timesteps, and bond
+connectivity is determined using the *Nevery* and *Nrepeat* keywords.  The
+*filedel* argument is the name of the output file that records the species
+that are removed from the system (see below for output file format options).
+The *specieslist* keyword permits specific chemical species to be deleted.
+The *Nspecies* argument specifies how many species are eligible for deletion
+and is followed by a list of chemical formulae, whose strings are compared
+to species identified by this fix.  For example, "specieslist 2 CO CO2"
 deletes molecules that are identified as "CO" and "CO2" in the species
-output file.  When using the *specieslist* keyword, the *filedel* file
-has the following format: the first line lists the chemical formulae
-eligible for deletion, and each additional line contains the timestep
-on which a molecule deletion occurs and the number of each species
-deleted on that timestep.  The *masslimit* keyword permits deletion of
-molecules with molecular weights between *massmin* and *massmax*.
-When using the *masslimit* keyword, each line of the *filedel* file
-contains the timestep on which deletions occurs, followed by how many
-of each species are deleted (with quantities preceding chemical
-formulae).  The *specieslist* and *masslimit* keywords cannot both be
-used in the same *reaxff/species* fix.
+output file.  The *masslimit* keyword permits deletion of molecules with
+molecular weights between *massmin* and *massmax*.  The *specieslist* and
+*masslimit* keywords cannot both be used in the same *reaxff/species* fix.
+
+The *delete_rate_limit* keyword can enforce an upper limit on the overall
+rate of molecule deletion. The number of deletion occurrences is limited to
+Nlimit within an interval of Nsteps timesteps. Nlimit can be specified with
+an equal-style :doc:`variable <variable>`. When using the
+*delete_rate_limit* keyword, no deletions are permitted to occur within the
+first Nsteps timesteps of the first run (after reading either a data or
+restart file).
+
+.. versionadded:: 10Dec2025
+
+The *delete_subgroup* keyword enforces a requirement that deleted molecules
+must have at least one atom in the group specified by the keyword's
+*group-ID* argument.  For example, this keyword can be used to delete an
+entire molecule when it is partially inside a :doc:`region <region>`, as
+long as the molecule is fully contained with the overall fix group.
+
+The *delete* keyword can output information about the deleted molecules in
+either the legacy format or in JSON format.  The latter is activated when the
+*filedel* argument has a '.json' extension.  The legacy format lists how
+many of each species are deleted, while the JSON format provides the atom ID,
+atom type, and coordinates of deleted atoms within each molecule.  The
+format for legacy output changes depending on the keyword used.  When using
+the *specieslist* keyword and legacy format, the *filedel* file has the
+following format: the first line lists the chemical formulae eligible for
+deletion, and each additional line contains the timestep on which a molecule
+deletion occurs and the number of each species deleted on that timestep.
+When using the *masslimit* keyword and the legacy format, each line of the
+*filedel* file contains the timestep on which deletions occurs, followed by
+how many of each species are deleted (with quantities preceding chemical
+formulae).  The JSON format is the same regardless of the keyword, and lists
+deleted molecules in the style of the :doc:`JSON molecule file <molecule>`,
+where more discussion of JSON schema can be found. Here is an example of a
+JSON output file from a simulation during which one water molecule was
+deleted on the first timestep:
+
+.. code-block:: json
+
+   {
+       "application": "LAMMPS",
+       "units": "real",
+       "format": "dump",
+       "style": "molecules",
+       "revision": 1,
+       "title": "fix reaxff/species: delete keyword",
+       "timesteps": [
+           {
+               "timestep": 1,
+               "molecules": [
+                   {
+                       "types": {
+                           "format": ["atom-id", "type"],
+                           "data": [
+                               [1368, "H"],
+                               [1366, "O"],
+                               [1367, "H"]
+                           ]
+                       },
+                       "coords": {
+                           "format": ["atom-id", "x", "y", "z"],
+                           "data": [
+                               [1368, 26.787767440427466, 29.785528640296768, 25.85197353660144],
+                               [1366, 26.641801222582824, 29.868106247702887, 24.91285138212243],
+                               [1367, 25.69611192416744, 30.093425787807448, 24.914380215672846]
+                           ]
+                       }
+                   }
+               ]
+           }
+       ]
+   }
+
+The required first-level keys of the JSON format output are "application",
+"format", "style", "revision", and "timesteps", and optional keys are
+"units" and "title".  The value of the "timesteps" key is an array of
+objects that contain data for each timestep on which a molecule was
+deleted, and the other first-level keys identify this JSON schema.  The
+objects in "timesteps" contains two keys, "timestep" and "molecules".  The
+"molecules" key is an array of :doc:`LAMMPS molecule JSON <molecule>`
+objects, one for each deleted molecule.  The "format" keys within molecule
+JSON objects are only listed once per output file, for brevity.  The
+"atom-id" values are atom IDs from the simulation, and the "type" values
+are atom types.  In the above example, the types were reported as strings
+corresponding to elements using :doc:`type labels <labelmap>`.
 
 ----------
 
@@ -173,18 +268,21 @@ The values in the global vector are "intensive".
 
 The 2 values in the global vector are as follows:
 
-* 1 = total number of molecules
-* 2 = total number of distinct species
+  #. total number of molecules
+  #. total number of distinct species
 
 The per-atom vector stores the molecule ID for each atom as identified
 by the fix.  If an atom is not in a molecule, its ID will be 0.
 For atoms in the same molecule, the molecule ID for all of them
-will be the same and will be equal to the smallest atom ID of
-any atom in the molecule.
+will be the same, and molecule IDs will range from 1 to the number
+of molecules.
 
 No parameter of this fix can be used with the *start/stop* keywords of
 the :doc:`run <run>` command.
 This fix is not invoked during :doc:`energy minimization <minimize>`.
+
+This fix supports dynamic groups only if the *Nrepeat* setting is 1,
+i.e. there is no averaging.
 
 ----------
 
@@ -199,7 +297,9 @@ The "fix reaxff/species" requires that :doc:`pair_style reaxff <pair_reaxff>` is
 This fix is part of the REAXFF package.  It is only enabled if LAMMPS was built with that
 package.  See the :doc:`Build package <Build_package>` page for more info.
 
-To write gzipped species files, you must compile LAMMPS with the -DLAMMPS_GZIP option.
+To write compressed species files, you must compile LAMMPS with the
+``-DLAMMPS_GZIP`` option.  See the :doc:`Build settings <Build_settings>`
+doc page for details.
 
 Related commands
 """"""""""""""""
@@ -210,5 +310,9 @@ Default
 """""""
 
 The default values for bond-order cutoffs are 0.3 for all I-J pairs.
-The default element symbols are C, H, O, N.
+The default element symbols are taken from the ReaxFF pair_coeff command.
 Position files are not written by default.
+
+.. _Delete:
+
+**(Gissinger2)** Jacob R. Gissinger, Scott R. Zavada, Joseph G. Smith, Josh Kemppainen, Ivan Gallegos, Gregory M. Odegard, Emilie J. Siochi, and Kristopher E. Wise, Carbon, 202, 336-347 (2023).

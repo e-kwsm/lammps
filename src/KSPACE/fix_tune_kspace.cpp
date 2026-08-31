@@ -33,8 +33,8 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
-#define SWAP(a,b) {temp=(a);(a)=(b);(b)=temp;}
 #define SIGN(a,b) ((b) >= 0.0 ? fabs(a) : -fabs(a))
 static constexpr double GOLD = 1.618034;
 
@@ -102,7 +102,7 @@ void FixTuneKspace::init()
   acc_str = std::to_string(old_acc);
 
   int itmp;
-  auto p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   pair_cut_coul = *p_cutoff;
 }
 
@@ -118,7 +118,7 @@ void FixTuneKspace::pre_exchange()
   if (next_reneighbor != update->ntimestep) return;
   next_reneighbor = update->ntimestep + nevery;
 
-  auto info = new Info(lmp);
+  auto *info = new Info(lmp);
   bool has_msm = info->has_style("pair", base_pair_style + "/msm");
   delete info;
 
@@ -228,7 +228,7 @@ void FixTuneKspace::update_pair_style(const std::string &new_pair_style,
                                       double pair_cut_coul)
 {
   int itmp;
-  auto p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   *p_cutoff = pair_cut_coul;
 
   // check to see if we need to change pair styles
@@ -248,7 +248,7 @@ void FixTuneKspace::update_pair_style(const std::string &new_pair_style,
   // restore current pair settings from temporary file
   force->pair->read_restart(p_pair_settings_file);
 
-  auto pcutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *pcutoff = (double *) force->pair->extract("cut_coul",itmp);
   double current_cutoff = *pcutoff;
   if (comm->me == 0)
     utils::logmesg(lmp,"Coulomb cutoff for real space: {}\n",current_cutoff);
@@ -266,7 +266,7 @@ void FixTuneKspace::update_kspace_style(const std::string &new_kspace_style,
 {
   // delete old kspace style and create new one
 
-  auto tmp_acc_str = (char *)new_acc_str.c_str();
+  auto *tmp_acc_str = (char *)new_acc_str.c_str();
   force->create_kspace(new_kspace_style,1);
   force->kspace->settings(1,&tmp_acc_str);
   force->kspace->differentiation_flag = old_differentiation_flag;
@@ -278,15 +278,19 @@ void FixTuneKspace::update_kspace_style(const std::string &new_kspace_style,
   force->init();
 
   // set up grid
-  force->kspace->setup_grid();
 
-  // Re-init neighbor list. Probably only needed when redefining the pair style. Should happen after pair->init() to get pair style neighbor list request registered
+  force->kspace->reset_grid();
+
+  // re-init neighbor list
+  // probably only needed when redefining the pair style
+  // should happen after pair->init() to get pair style
+  //   neighbor list request registered
 
   neighbor->init();
 
   // Re-init computes to update pointers to virials, etc.
 
-  for (int i = 0; i < modify->ncompute; i++) modify->compute[i]->init();
+  for (const auto &icompute : modify->get_compute_list()) icompute->init();
 }
 
 /* ----------------------------------------------------------------------
@@ -298,12 +302,11 @@ void FixTuneKspace::adjust_rcut(double time)
   if (utils::strmatch(force->kspace_style,"^msm")) return;
   if (converged) return;
 
-  double temp;
-  const double TINY = 1.0e-20;
+  constexpr double TINY = 1.0e-20;
 
   // get the current cutoff
   int itmp;
-  auto p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   double current_cutoff = *p_cutoff;
   if (comm->me == 0)
     utils::logmesg(lmp,"Old Coulomb cutoff for real space: {}\n",current_cutoff);
@@ -324,8 +327,8 @@ void FixTuneKspace::adjust_rcut(double time)
       bx_brent = current_cutoff;
       fb_brent = time;
       if (fb_brent > fa_brent) {
-        SWAP(ax_brent,bx_brent);
-        SWAP(fb_brent,fa_brent);
+        std::swap(ax_brent,bx_brent);
+        std::swap(fb_brent,fa_brent);
         pair_cut_coul /= 4;
       } else {
         pair_cut_coul *= 2;
@@ -374,7 +377,7 @@ void FixTuneKspace::adjust_rcut(double time)
   *p_cutoff = pair_cut_coul;
 
   // report the new cutoff
-  auto new_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *new_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   current_cutoff = *new_cutoff;
   if (comm->me == 0)
     utils::logmesg(lmp,"Adjusted Coulomb cutoff for real space: {}\n", current_cutoff);

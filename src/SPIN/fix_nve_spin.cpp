@@ -45,7 +45,7 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 
 static const char cite_fix_nve_spin[] =
-  "fix nve/spin command: doi:10.1016/j.jcp.2018.06.042\n\n"
+  "fix nve/spin command: https://doi.org/10.1016/j.jcp.2018.06.042\n\n"
   "@article{tranchida2018massively,\n"
   "title={Massively Parallel Symplectic Algorithm for Coupled Magnetic Spin "
   "   Dynamics and Molecular Dynamics},\n"
@@ -57,8 +57,6 @@ static const char cite_fix_nve_spin[] =
   "publisher={Elsevier}\n"
   "doi={10.1016/j.jcp.2018.06.042}\n"
   "}\n\n";
-
-enum{NONE};
 
 /* ---------------------------------------------------------------------- */
 
@@ -74,7 +72,6 @@ FixNVESpin::FixNVESpin(LAMMPS *lmp, int narg, char **arg) :
   if (narg < 4) error->all(FLERR,"Illegal fix/nve/spin command");
 
   time_integrate = 1;
-  sector_flag = NONE;
   lattice_flag = 1;
   nlocal_max = 0;
   npairs = 0;
@@ -88,14 +85,9 @@ FixNVESpin::FixNVESpin(LAMMPS *lmp, int narg, char **arg) :
   if (atom->map_style == Atom::MAP_NONE)
     error->all(FLERR,"Fix nve/spin requires an atom map, see atom_modify");
 
-  // defining sector_flag
+  // define sector_flag
 
-  int nprocs_tmp = comm->nprocs;
-  if (nprocs_tmp == 1) {
-    sector_flag = 0;
-  } else if (nprocs_tmp >= 1) {
-    sector_flag = 1;
-  } else error->all(FLERR,"Illegal fix/nve/spin command");
+  sector_flag = (comm->nprocs > 1) ? 1 : 0;
 
   // defining lattice_flag
 
@@ -120,11 +112,6 @@ FixNVESpin::FixNVESpin(LAMMPS *lmp, int narg, char **arg) :
 
   if (!atom->sp_flag)
     error->all(FLERR,"Fix nve/spin requires atom/spin style");
-
-  // check if sector_flag is correctly defined
-
-  if (sector_flag == 0 && nprocs_tmp > 1)
-    error->all(FLERR,"Illegal fix/nve/spin command");
 
   // initialize the magnetic interaction flags
 
@@ -198,6 +185,7 @@ void FixNVESpin::init()
   // init length of vector of ptrs to Pair/Spin styles
 
   if (npairspin > 0) {
+    delete[] spin_pairs;
     spin_pairs = new PairSpin*[npairspin];
   }
 
@@ -230,84 +218,46 @@ void FixNVESpin::init()
   }
 
   // set ptrs for fix precession/spin styles
+  // reset flags and cached pointers first, since the fixes
+  // may have been deleted since a previous run
 
-  // loop 1: obtain # of fix precession/spin styles
+  precession_spin_flag = maglangevin_flag = setforce_spin_flag = 0;
+  locksetforcespin = nullptr;
 
-  int iforce;
-  nprecspin = 0;
-  for (iforce = 0; iforce < modify->nfix; iforce++) {
-    if (utils::strmatch(modify->fix[iforce]->style,"^precession/spin")) {
-      nprecspin++;
-    }
-  }
-
-  // init length of vector of ptrs to precession/spin styles
-
+  auto precfixes = modify->get_fix_by_style("^precession/spin");
+  nprecspin = (int) precfixes.size();
   if (nprecspin > 0) {
+    precession_spin_flag = 1;
+    delete[] lockprecessionspin;
     lockprecessionspin = new FixPrecessionSpin*[nprecspin];
+    for (int i = 0; i < nprecspin; i++)
+      lockprecessionspin[i] = dynamic_cast<FixPrecessionSpin *>(precfixes[i]);
   }
-
-  // loop 2: fill vector with ptrs to precession/spin styles
-
-  int count2 = 0;
-  if (nprecspin > 0) {
-    for (iforce = 0; iforce < modify->nfix; iforce++) {
-      if (utils::strmatch(modify->fix[iforce]->style,"^precession/spin")) {
-        precession_spin_flag = 1;
-        lockprecessionspin[count2] = dynamic_cast<FixPrecessionSpin *>(modify->fix[iforce]);
-        count2++;
-      }
-    }
-  }
-
-  if (count2 != nprecspin)
-    error->all(FLERR,"Incorrect number of precession/spin fixes");
 
   // set ptrs for fix langevin/spin styles
 
-  // loop 1: obtain # of fix langevin/spin styles
-
-  nlangspin = 0;
-  for (iforce = 0; iforce < modify->nfix; iforce++) {
-    if (utils::strmatch(modify->fix[iforce]->style,"^langevin/spin")) {
-      nlangspin++;
-    }
-  }
-
-  // init length of vector of ptrs to langevin/spin styles
-
+  auto langfixes = modify->get_fix_by_style("^langevin/spin");
+  nlangspin = (int) langfixes.size();
   if (nlangspin > 0) {
+    maglangevin_flag = 1;
+    delete[] locklangevinspin;
     locklangevinspin = new FixLangevinSpin*[nlangspin];
+    for (int i = 0; i < nlangspin; i++)
+      locklangevinspin[i] = dynamic_cast<FixLangevinSpin *>(langfixes[i]);
   }
-
-  // loop 2: fill vector with ptrs to langevin/spin styles
-
-  count2 = 0;
-  if (nlangspin > 0) {
-    for (iforce = 0; iforce < modify->nfix; iforce++) {
-      if (utils::strmatch(modify->fix[iforce]->style,"^langevin/spin")) {
-        maglangevin_flag = 1;
-        locklangevinspin[count2] = dynamic_cast<FixLangevinSpin *>(modify->fix[iforce]);
-        count2++;
-      }
-    }
-  }
-
-  if (count2 != nlangspin)
-    error->all(FLERR,"Incorrect number of langevin/spin fixes");
 
   // ptrs FixSetForceSpin classes
 
-  for (iforce = 0; iforce < modify->nfix; iforce++) {
-    if (utils::strmatch(modify->fix[iforce]->style,"^setforce/spin")) {
-      setforce_spin_flag = 1;
-      locksetforcespin = dynamic_cast<FixSetForceSpin *>(modify->fix[iforce]);
-    }
+  auto setforcefixes = modify->get_fix_by_style("^setforce/spin");
+  if (!setforcefixes.empty()) {
+    setforce_spin_flag = 1;
+    locksetforcespin = dynamic_cast<FixSetForceSpin *>(setforcefixes.back());
   }
 
   // setting the sector variables/lists
 
   nsectors = 0;
+  memory->destroy(rsec);
   memory->create(rsec,3,"nve/spin:rsec");
 
   // perform the sectoring operation
@@ -360,26 +310,28 @@ void FixNVESpin::initial_integrate(int /*vflag*/)
       comm->forward_comm();
       int i = stack_foot[j];
       while (i >= 0) {
+        const int next = forward_stacks[i];
         if (mask[i] & groupbit) {
           ComputeInteractionsSpin(i);
           AdvanceSingleSpin(i);
-          i = forward_stacks[i];
         }
+        i = next;
       }
     }
     for (int j = nsectors-1; j >= 0; j--) {     // advance quarter s for nlocal
       comm->forward_comm();
       int i = stack_head[j];
       while (i >= 0) {
+        const int next = backward_stacks[i];
         if (mask[i] & groupbit) {
           ComputeInteractionsSpin(i);
           AdvanceSingleSpin(i);
-          i = backward_stacks[i];
         }
+        i = next;
       }
     }
-  } else if (sector_flag == 0) {                // serial seq. update
-    comm->forward_comm();                       // comm. positions of ghost atoms
+  } else {                                       // serial seq. update
+    comm->forward_comm();                        // comm. positions of ghost atoms
     for (int i = 0; i < nlocal; i++) {           // advance quarter s for nlocal
       if (mask[i] & groupbit) {
         ComputeInteractionsSpin(i);
@@ -392,7 +344,7 @@ void FixNVESpin::initial_integrate(int /*vflag*/)
         AdvanceSingleSpin(i);
       }
     }
-  } else error->all(FLERR,"Illegal fix nve/spin command");
+  }
 
   // update x for all particles
 
@@ -413,22 +365,24 @@ void FixNVESpin::initial_integrate(int /*vflag*/)
       comm->forward_comm();
       int i = stack_foot[j];
       while (i >= 0) {
+        const int next = forward_stacks[i];
         if (mask[i] & groupbit) {
           ComputeInteractionsSpin(i);
           AdvanceSingleSpin(i);
-          i = forward_stacks[i];
         }
+        i = next;
       }
     }
     for (int j = nsectors-1; j >= 0; j--) {     // advance quarter s for nlocal
       comm->forward_comm();
       int i = stack_head[j];
       while (i >= 0) {
+        const int next = backward_stacks[i];
         if (mask[i] & groupbit) {
           ComputeInteractionsSpin(i);
           AdvanceSingleSpin(i);
-          i = backward_stacks[i];
         }
+        i = next;
       }
     }
   } else {                                      // serial seq. update
@@ -595,7 +549,8 @@ void FixNVESpin::sectoring()
   }
 
   if (rv == 0.0)
-   error->all(FLERR,"Illegal sectoring operation");
+   error->all(FLERR, Error::NOLASTLINE,
+              "No suitable cutoff found for sectoring operation: rv = {}", rv);
 
   double rax = rsx/rv;
   double ray = rsy/rv;
@@ -610,8 +565,9 @@ void FixNVESpin::sectoring()
 
   nsectors = sec[0]*sec[1]*sec[2];
 
-  if (sector_flag == 1 && nsectors != 8)
-    error->all(FLERR,"Illegal sectoring operation");
+  if (sector_flag && (nsectors != 8))
+    error->all(FLERR, Error::NOLASTLINE,
+               "Illegal sectoring operation resulting in {} sectors instead of 8", nsectors);
 
   rsec[0] = rsx;
   rsec[1] = rsy;
@@ -694,7 +650,7 @@ void FixNVESpin::AdvanceSingleSpin(int i)
 
   // comm. sp[i] to atoms with same tag (for serial algo)
 
-  if (sector_flag == 0) {
+  if (!sector_flag) {
     if (sametag[i] >= 0) {
       j = sametag[i];
       while (j >= 0) {
@@ -737,4 +693,13 @@ void FixNVESpin::final_integrate()
     }
   }
 
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixNVESpin::memory_usage()
+{
+  double bytes = (double) nlocal_max * 2 * sizeof(int);     // backward_stacks + forward_stacks
+  bytes += (double) nsectors * 2 * sizeof(int);             // stack_head + stack_foot
+  return bytes;
 }

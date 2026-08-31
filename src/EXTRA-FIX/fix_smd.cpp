@@ -38,7 +38,7 @@ enum { SMD_NONE=0,
        SMD_CVEL=1<<2, SMD_CFOR=1<<3,
        SMD_AUTOX=1<<4, SMD_AUTOY=1<<5, SMD_AUTOZ=1<<6};
 
-#define SMALL 0.001
+static constexpr double SMALL = 0.001;
 
 /* ---------------------------------------------------------------------- */
 
@@ -111,6 +111,9 @@ FixSMD::FixSMD(LAMMPS *lmp, int narg, char **arg) :
     if (r0 < 0) error->all(FLERR,"R0 < 0 for fix smd command");
     argoffs +=6;
   } else error->all(FLERR,"Illegal fix smd command");
+
+  if (comm->me == 0)
+    error->warning(FLERR, "Fix smd is unmaintained. Consider using fix colvars or fix plumed.");
 
   force_flag = 0;
   ftotal[0] = ftotal[1] = ftotal[2] = 0.0;
@@ -430,7 +433,7 @@ void FixSMD::smd_couple()
 
 void FixSMD::write_restart(FILE *fp)
 {
-#define RESTART_ITEMS 5
+  static constexpr int RESTART_ITEMS = 5;
   double buf[RESTART_ITEMS], fsign;
 
   if (comm->me == 0) {
@@ -451,7 +454,7 @@ void FixSMD::write_restart(FILE *fp)
 
 void FixSMD::restart(char *buf)
 {
-  auto list = (double *)buf;
+  auto *list = (double *)buf;
   r_old = list[0];
   xn=list[1];
   yn=list[2];

@@ -34,8 +34,6 @@
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 1024
-
 #define FC_PACKED1_T typename ForceConst<flt_t>::fc_packed1
 #define FC_PACKED2_T typename ForceConst<flt_t>::fc_packed2
 
@@ -88,8 +86,6 @@ void PairEAMIntel::compute(int eflag, int vflag,
 
   const int inum = list->inum;
   const int nthreads = comm->nthreads;
-  const int host_start = fix->host_start_pair();
-  const int offload_end = fix->offload_end_pair();
   const int ago = neighbor->ago;
 
   if (ago != 0 && fix->separate_buffers() == 0) {
@@ -116,37 +112,29 @@ void PairEAMIntel::compute(int eflag, int vflag,
   if (_onetype) {
     if (eflag) {
       if (force->newton_pair) {
-        eval<1,1,1>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<1,1,1>(0, ovflag, buffers, fc, host_start, inum);
+        eval<1,1,1>(ovflag, buffers, fc, 0, inum);
       } else {
-        eval<1,1,0>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<1,1,0>(0, ovflag, buffers, fc, host_start, inum);
+        eval<1,1,0>(ovflag, buffers, fc, 0, inum);
       }
     } else {
       if (force->newton_pair) {
-        eval<1,0,1>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<1,0,1>(0, ovflag, buffers, fc, host_start, inum);
+        eval<1,0,1>(ovflag, buffers, fc, 0, inum);
       } else {
-        eval<1,0,0>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<1,0,0>(0, ovflag, buffers, fc, host_start, inum);
+        eval<1,0,0>(ovflag, buffers, fc, 0, inum);
       }
     }
   } else {
     if (eflag) {
       if (force->newton_pair) {
-        eval<0,1,1>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<0,1,1>(0, ovflag, buffers, fc, host_start, inum);
+        eval<0,1,1>(ovflag, buffers, fc, 0, inum);
       } else {
-        eval<0,1,0>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<0,1,0>(0, ovflag, buffers, fc, host_start, inum);
+        eval<0,1,0>(ovflag, buffers, fc, 0, inum);
       }
     } else {
       if (force->newton_pair) {
-        eval<0,0,1>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<0,0,1>(0, ovflag, buffers, fc, host_start, inum);
+        eval<0,0,1>(ovflag, buffers, fc, 0, inum);
       } else {
-        eval<0,0,0>(1, ovflag, buffers, fc, 0, offload_end);
-        eval<0,0,0>(0, ovflag, buffers, fc, host_start, inum);
+        eval<0,0,0>(ovflag, buffers, fc, 0, inum);
       }
     }
   }
@@ -155,7 +143,7 @@ void PairEAMIntel::compute(int eflag, int vflag,
 /* ---------------------------------------------------------------------- */
 
 template <int ONETYPE, int EFLAG, int NEWTON_PAIR, class flt_t, class acc_t>
-void PairEAMIntel::eval(const int offload, const int vflag,
+void PairEAMIntel::eval(const int vflag,
                         IntelBuffers<flt_t,acc_t> *buffers,
                         const ForceConst<flt_t> &fc,
                         const int astart, const int aend)
@@ -188,12 +176,9 @@ void PairEAMIntel::eval(const int offload, const int vflag,
 
 
   int nlocal, nall, minlocal;
-  fix->get_buffern(offload, nlocal, nall, minlocal);
+  fix->get_buffern(nlocal, nall, minlocal);
 
-  const int ago = neighbor->ago;
-  IP_PRE_pack_separate_buffers(fix, buffers, ago, offload, nlocal, nall);
-
-  ATOM_T * _noalias const x = buffers->get_x(offload);
+  ATOM_T * _noalias const x = buffers->get_x();
 
   const int * _noalias const ilist = list->ilist;
   const int * _noalias const numneigh = list->numneigh;
@@ -217,17 +202,14 @@ void PairEAMIntel::eval(const int offload, const int vflag,
   const int ccache_stride = _ccache_stride;
 
   // Determine how much data to transfer
-  int x_size, q_size, f_stride, ev_size, separate_flag;
-  IP_PRE_get_transfern(ago, NEWTON_PAIR, EFLAG, vflag,
-                       buffers, offload, fix, separate_flag,
-                       x_size, q_size, ev_size, f_stride);
+  int f_stride;
+  IP_PRE_get_transfern(NEWTON_PAIR, buffers, f_stride);
 
   int tc;
   FORCE_T * _noalias f_start;
   acc_t * _noalias ev_global;
-  IP_PRE_get_buffers(offload, buffers, fix, tc, f_start, ev_global);
+  IP_PRE_get_buffers(buffers, fix, tc, f_start, ev_global);
   const int nthreads = tc;
-  int *overflow = fix->get_off_overflow_flag();
 
   const flt_t frdr = rdr;
   const flt_t frdrho = rdrho;
@@ -236,14 +218,8 @@ void PairEAMIntel::eval(const int offload, const int vflag,
   const int istride = fc.rhor_istride();
   const int jstride = fc.rhor_jstride();
   const int fstride = fc.frho_stride();
-
   {
-    #if defined(__MIC__) && defined(_LMP_INTEL_OFFLOAD)
-    *timer_compute = MIC_Wtime();
-    #endif
 
-    IP_PRE_repack_for_offload(NEWTON_PAIR, separate_flag, nlocal, nall,
-                              f_stride, x, 0);
 
     acc_t oevdwl, ov0, ov1, ov2, ov3, ov4, ov5;
     if (EFLAG || vflag)
@@ -300,7 +276,7 @@ void PairEAMIntel::eval(const int offload, const int vflag,
         }
         const int * _noalias const jlist = firstneigh[i];
         int jnum = numneigh[i];
-        IP_PRE_neighbor_pad(jnum, offload);
+        IP_PRE_neighbor_pad(jnum);
 
         const flt_t xtmp = x[i].x;
         const flt_t ytmp = x[i].y;
@@ -340,7 +316,7 @@ void PairEAMIntel::eval(const int offload, const int vflag,
           const int j = tj[jj] & NEIGHMASK;
           if (!ONETYPE) jtype = tjtype[jj];
           const flt_t rsq = trsq[jj];
-          flt_t p = sqrt(rsq)*frdr + (flt_t)1.0;
+          flt_t p = std::sqrt(rsq)*frdr + (flt_t)1.0;
           int m = static_cast<int> (p);
           m = MIN(m,nr-1);
           p -= m;
@@ -495,7 +471,7 @@ void PairEAMIntel::eval(const int offload, const int vflag,
         }
         const int * _noalias const jlist = firstneigh[i];
         int jnum = numneigh[i];
-        IP_PRE_neighbor_pad(jnum, offload);
+        IP_PRE_neighbor_pad(jnum);
 
         acc_t fxtmp, fytmp, fztmp, fwtmp;
         acc_t sevdwl, sv0, sv1, sv2, sv3, sv4, sv5;
@@ -546,7 +522,7 @@ void PairEAMIntel::eval(const int offload, const int vflag,
           const int j = tj[jj] & NEIGHMASK;
           if (!ONETYPE) jtype = tjtype[jj];
           const flt_t rsq = trsq[jj];
-          const flt_t r = sqrt(rsq);
+          const flt_t r = std::sqrt(rsq);
           flt_t p = r*frdr + (flt_t)1.0;
           int m = static_cast<int> (p);
           m = MIN(m,nr-1);
@@ -567,12 +543,10 @@ void PairEAMIntel::eval(const int offload, const int vflag,
           } else
             rhoip = rhojp;
           const flt_t z2p = (z2r_spline_t[joff].a*p +
-                             z2r_spline_t[joff].b)*p +
-            z2r_spline_t[joff].c;
+                             z2r_spline_t[joff].b)*p + z2r_spline_t[joff].c;
           const flt_t z2 = ((z2r_spline_t[joff].d*p +
                              z2r_spline_t[joff].e)*p +
-                            z2r_spline_t[joff].f)*p +
-            z2r_spline_t[joff].g;
+                            z2r_spline_t[joff].f)*p + z2r_spline_t[joff].g;
 
           const flt_t recip = (flt_t)1.0/r;
           const flt_t phi = z2*recip;
@@ -620,7 +594,7 @@ void PairEAMIntel::eval(const int offload, const int vflag,
       } // for i
 
       IP_PRE_fdotr_reduce_omp(NEWTON_PAIR, nall, minlocal, nthreads, f_start,
-                              f_stride, x, offload, vflag, ov0, ov1, ov2, ov3,
+                              f_stride, x, vflag, ov0, ov1, ov2, ov3,
                               ov4, ov5);
     } /// omp
 
@@ -645,20 +619,14 @@ void PairEAMIntel::eval(const int offload, const int vflag,
       ev_global[6] = ov4;
       ev_global[7] = ov5;
     }
-    #if defined(__MIC__) && defined(_LMP_INTEL_OFFLOAD)
-    *timer_compute = MIC_Wtime() - *timer_compute;
-    #endif
   }
 
-  if (offload)
-    fix->stop_watch(TIME_OFFLOAD_LATENCY);
-  else
-    fix->stop_watch(TIME_HOST_PAIR);
+  fix->stop_watch(TIME_HOST_PAIR);
 
   if (EFLAG || vflag)
-    fix->add_result_array(f_start, ev_global, offload, eatom, 0, vflag);
+    fix->add_result_array(f_start, ev_global, eatom, vflag);
   else
-    fix->add_result_array(f_start, nullptr, offload);
+    fix->add_result_array(f_start, nullptr);
 }
 
 /* ----------------------------------------------------------------------
@@ -675,11 +643,6 @@ void PairEAMIntel::init_style()
   if (!fix) error->all(FLERR, "The 'package intel' command is required for /intel styles");
 
   fix->pair_init_check();
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (fix->offload_balance() != 0.0)
-    error->all(FLERR,
-      "Offload for eam/intel is not yet available. Set balance to 0.");
-  #endif
 
   if (fix->precision() == FixIntel::PREC_MODE_MIXED)
     pack_force_const(force_const_single, fix->get_mixed_buffers());
@@ -696,14 +659,11 @@ void PairEAMIntel::pack_force_const(ForceConst<flt_t> &fc,
                                     IntelBuffers<flt_t,acc_t> *buffers)
 {
   int off_ccache = 0;
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (_cop >= 0) off_ccache = 1;
-  #endif
   buffers->grow_ccache(off_ccache, comm->nthreads, 1);
   _ccache_stride = buffers->ccache_stride();
 
   int tp1 = atom->ntypes + 1;
-  fc.set_ntypes(tp1,nr,nrho,memory,_cop);
+  fc.set_ntypes(tp1,nr,nrho,memory);
 
   // Repeat cutsq calculation because done after call to init_style
   for (int i = 1; i <= atom->ntypes; i++) {
@@ -773,8 +733,7 @@ void PairEAMIntel::pack_force_const(ForceConst<flt_t> &fc,
 template <class flt_t>
 void PairEAMIntel::ForceConst<flt_t>::set_ntypes(const int ntypes,
                                                  const int nr, const int nrho,
-                                                 Memory *memory,
-                                                 const int cop) {
+                                                 Memory *memory) {
   if (memory != nullptr) _memory = memory;
   if ((ntypes != _ntypes) || (nr + 1 > _nr) || (nrho + 1 > _nrho)) {
     if (_ntypes > 0) {
@@ -786,7 +745,6 @@ void PairEAMIntel::ForceConst<flt_t>::set_ntypes(const int ntypes,
       _memory->destroy(scale_f);
     }
     if (ntypes > 0) {
-      _cop = cop;
       _nr = nr + 1;
       IP_PRE_edge_align(_nr, sizeof(flt_t));
       _memory->create(rhor_spline_f,ntypes*ntypes*_nr,"fc.rhor_spline_f");
@@ -851,4 +809,3 @@ void PairEAMIntel::unpack_forward_comm(int n, int first, double *buf,
   last = first + n;
   for (i = first; i < last; i++) fp_f[i] = buf[m++];
 }
-

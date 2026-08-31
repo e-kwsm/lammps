@@ -56,12 +56,6 @@ ImproperHarmonicIntel::ImproperHarmonicIntel(LAMMPS *lmp) :
 
 void ImproperHarmonicIntel::compute(int eflag, int vflag)
 {
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (_use_base) {
-    ImproperHarmonic::compute(eflag, vflag);
-    return;
-  }
-  #endif
 
   if (fix->precision() == FixIntel::PREC_MODE_MIXED)
     compute<float,double>(eflag, vflag, fix->get_mixed_buffers(),
@@ -115,7 +109,7 @@ void ImproperHarmonicIntel::eval(const int vflag,
   const int inum = neighbor->nimproperlist;
   if (inum == 0) return;
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
+  ATOM_T * _noalias const x = buffers->get_x();
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
 
@@ -126,7 +120,7 @@ void ImproperHarmonicIntel::eval(const int vflag,
   int tc;
   FORCE_T * _noalias f_start;
   acc_t * _noalias ev_global;
-  IP_PRE_get_buffers(0, buffers, fix, tc, f_start, ev_global);
+  IP_PRE_get_buffers(buffers, fix, tc, f_start, ev_global);
   const int nthreads = tc;
 
   acc_t oeimproper, ov0, ov1, ov2, ov3, ov4, ov5;
@@ -194,9 +188,9 @@ void ImproperHarmonicIntel::eval(const int vflag,
       flt_t ss2 = vb2x*vb2x + vb2y*vb2y + vb2z*vb2z;
       flt_t ss3 = vb3x*vb3x + vb3y*vb3y + vb3z*vb3z;
 
-      const flt_t r1 = (flt_t)1.0 / sqrt(ss1);
-      const flt_t r2 = (flt_t)1.0 / sqrt(ss2);
-      const flt_t r3 = (flt_t)1.0 / sqrt(ss3);
+      const flt_t r1 = (flt_t)1.0 / std::sqrt(ss1);
+      const flt_t r2 = (flt_t)1.0 / std::sqrt(ss2);
+      const flt_t r3 = (flt_t)1.0 / std::sqrt(ss3);
 
       ss1 = (flt_t)1.0 / ss1;
       ss2 = (flt_t)1.0 / ss2;
@@ -214,7 +208,7 @@ void ImproperHarmonicIntel::eval(const int vflag,
       flt_t s2 = (flt_t)1.0 - c2*c2;
       if (s2 < SMALL) s2 = SMALL;
 
-      flt_t s12 = (flt_t)1.0 / sqrt(s1*s2);
+      flt_t s12 = (flt_t)1.0 / std::sqrt(s1*s2);
       s1 = (flt_t)1.0 / s1;
       s2 = (flt_t)1.0 / s2;
       flt_t c = (c1*c2 + c0) * s12;
@@ -229,12 +223,12 @@ void ImproperHarmonicIntel::eval(const int vflag,
       if (c < (flt_t)-1.0) c = (flt_t)-1.0;
 
       const flt_t sd = (flt_t)1.0 - c * c;
-      flt_t s = (flt_t)1.0 / sqrt(sd);
+      flt_t s = (flt_t)1.0 / std::sqrt(sd);
       if (sd < SMALL2) s = INVSMALL;
 
       // force & energy
 
-      const flt_t domega = acos(c) - fc.fc[type].chi;
+      const flt_t domega = std::acos(c) - fc.fc[type].chi;
       flt_t a;
       a = fc.fc[type].k * domega;
 
@@ -346,13 +340,6 @@ void ImproperHarmonicIntel::init_style()
   fix = static_cast<FixIntel *>(modify->get_fix_by_id("package_intel"));
   if (!fix) error->all(FLERR, "The 'package intel' command is required for /intel styles");
 
-  #ifdef _LMP_INTEL_OFFLOAD
-  _use_base = 0;
-  if (fix->offload_balance() != 0.0) {
-    _use_base = 1;
-    return;
-  }
-  #endif
 
   fix->bond_init_check();
 

@@ -30,6 +30,7 @@
 #include "error.h"
 #include "fix_reaxff.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "modify.h"
 #include "neigh_list.h"
@@ -46,7 +47,7 @@ using namespace LAMMPS_NS;
 using namespace ReaxFF;
 
 static const char cite_pair_reax_c[] =
-  "pair reaxff command: doi:10.1016/j.parco.2011.08.005\n\n"
+  "pair reaxff command: https://doi.org/10.1016/j.parco.2011.08.005\n\n"
   "@Article{Aktulga12,\n"
   " author = {H. M. Aktulga and J. C. Fogarty and S. A. Pandit and A. Y. Grama},\n"
   " title = {Parallel Reactive Molecular Dynamics: {N}umerical Methods and Algorithmic Techniques},\n"
@@ -59,7 +60,8 @@ static const char cite_pair_reax_c[] =
 
 /* ---------------------------------------------------------------------- */
 
-PairReaxFF::PairReaxFF(LAMMPS *lmp) : Pair(lmp)
+PairReaxFF::PairReaxFF(LAMMPS *lmp) :
+    Pair(lmp), tmpr(nullptr), chi(nullptr), eta(nullptr), gamma(nullptr), bcut_acks2(nullptr)
 {
   if (lmp->citeme) lmp->citeme->add(cite_pair_reax_c);
 
@@ -110,9 +112,7 @@ PairReaxFF::PairReaxFF(LAMMPS *lmp) : Pair(lmp)
 
   setup_flag = 0;
   fixspecies_flag = 0;
-
   nmax = 0;
-
   list_blocking_flag = 0;
 }
 
@@ -130,13 +130,13 @@ PairReaxFF::~PairReaxFF()
     // deallocate reax data-structures
 
     if (api->control->tabulate) Deallocate_Lookup_Tables(api->system);
-
     if (api->control->hbond_cut > 0) Delete_List(api->lists+HBONDS);
+
     Delete_List(api->lists+BONDS);
     Delete_List(api->lists+THREE_BODIES);
     Delete_List(api->lists+FAR_NBRS);
 
-    DeAllocate_Workspace(api->control, api->workspace);
+    DeAllocate_Workspace(api->workspace);
     DeAllocate_System(api->system);
   }
 
@@ -153,17 +153,16 @@ PairReaxFF::~PairReaxFF()
     memory->destroy(cutsq);
     memory->destroy(cutghost);
 
-    delete [] chi;
-    delete [] eta;
-    delete [] gamma;
-    delete [] bcut_acks2;
+    delete[] chi;
+    delete[] eta;
+    delete[] gamma;
+    delete[] bcut_acks2;
   }
 
   memory->destroy(tmpid);
   memory->destroy(tmpbo);
 
-  delete [] pvector;
-
+  delete[] pvector;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -177,6 +176,7 @@ void PairReaxFF::allocate()
   memory->create(cutsq,n+1,n+1,"pair:cutsq");
   memory->create(cutghost,n+1,n+1,"pair:cutghost");
   map = new int[n+1];
+  for (int i = 0; i <= n; ++i) map[i] = -1;
 
   chi = new double[n+1];
   eta = new double[n+1];
@@ -280,12 +280,7 @@ void PairReaxFF::coeff(int nargs, char **args)
   if (!allocated) allocate();
 
   if (nargs != 3 + atom->ntypes)
-    error->all(FLERR,"Incorrect args for pair coefficients");
-
-  // insure I,J args are * *
-
-  if (strcmp(args[0],"*") != 0 || strcmp(args[1],"*") != 0)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
   // read ffield file
 
@@ -305,14 +300,17 @@ void PairReaxFF::coeff(int nargs, char **args)
   }
 
   int n = atom->ntypes;
+  eletype.resize(n+1);
 
   // pair_coeff element map
-  for (int i = 3; i < nargs; i++)
+  for (int i = 3; i < nargs; i++) {
+    eletype[i-2] = args[i];
     for (int j = 0; j < nreax_types; j++)
       if (utils::lowercase(args[i]) == utils::lowercase(api->system->reax_param.sbp[j].name)) {
         map[i-2] = j;
         itmp ++;
       }
+  }
 
   // error check
   if (itmp != n)
@@ -332,7 +330,7 @@ void PairReaxFF::coeff(int nargs, char **args)
         count++;
       }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
 }
 
@@ -344,11 +342,14 @@ void PairReaxFF::init_style()
 
   auto acks2_fixes = modify->get_fix_by_style("^acks2/reax");
   int have_qeq = modify->get_fix_by_style("^qeq/reax").size()
-    + modify->get_fix_by_style("^qeq/shielded").size() + acks2_fixes.size();
+    + modify->get_fix_by_style("^qeq/shielded").size() + acks2_fixes.size()
+    + modify->get_fix_by_style("^qeq/rel/reax").size()
+    + modify->get_fix_by_style("^qtpie/reax").size();
 
   if (qeqflag && (have_qeq != 1))
     error->all(FLERR,"Pair style reaxff requires use of exactly one of the "
-               "fix qeq/reaxff or fix qeq/shielded or fix acks2/reaxff commands");
+               "fix qeq/reaxff or fix qeq/shielded or fix acks2/reaxff or "
+               "fix qtpie/reaxff or fix qeq/rel/reaxff commands");
 
   api->system->acks2_flag = acks2_fixes.size();
   if (api->system->acks2_flag)
@@ -444,7 +445,9 @@ void PairReaxFF::setup()
 
 double PairReaxFF::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   cutghost[i][j] = cutghost[j][i] = cutmax;
   return cutmax;
@@ -467,7 +470,7 @@ void PairReaxFF::compute(int eflag, int vflag)
   api->system->N = atom->nlocal + atom->nghost; // mine + ghosts
 
   if (api->system->acks2_flag) {
-    auto ifix = modify->get_fix_by_style("^acks2/reax").front();
+    auto *ifix = modify->get_fix_by_style("^acks2/reax").front();
     api->workspace->s = (dynamic_cast<FixACKS2ReaxFF*>(ifix))->get_s();
   }
 
@@ -536,7 +539,6 @@ void PairReaxFF::compute(int eflag, int vflag)
       }
     FindBond();
   }
-
 }
 
 /* ---------------------------------------------------------------------- */
@@ -547,7 +549,7 @@ void PairReaxFF::write_reax_atoms()
   int *num_hbonds = fix_reaxff->num_hbonds;
 
   if (api->system->N > api->system->total_cap)
-    error->all(FLERR,"Too many ghost atoms");
+    error->all(FLERR,"Too many ghost atoms in ReaxFF pair style");
 
   for (int i = 0; i < api->system->N; ++i) {
     api->system->my_atoms[i].orig_id = atom->tag[i];
@@ -587,8 +589,8 @@ void PairReaxFF::set_far_nbr(far_neighbor_data *fdest,
 int PairReaxFF::estimate_reax_lists()
 {
   int itr_i, itr_j, i, j;
-  int num_nbrs, num_marked;
-  int *ilist, *jlist, *numneigh, **firstneigh, *marked;
+  int num_nbrs;
+  int *ilist, *jlist, *numneigh, **firstneigh;
   double d_sqr;
   rvec dvec;
   double **x;
@@ -602,15 +604,11 @@ int PairReaxFF::estimate_reax_lists()
   firstneigh = list->firstneigh;
 
   num_nbrs = 0;
-  num_marked = 0;
-  marked = (int*) calloc(api->system->N, sizeof(int));
 
   int numall = list->inum + list->gnum;
 
   for (itr_i = 0; itr_i < numall; ++itr_i) {
     i = ilist[itr_i];
-    marked[i] = 1;
-    ++num_marked;
     jlist = firstneigh[i];
 
     for (itr_j = 0; itr_j < numneigh[i]; ++itr_j) {
@@ -622,8 +620,6 @@ int PairReaxFF::estimate_reax_lists()
         ++num_nbrs;
     }
   }
-
-  free(marked);
 
   return static_cast<int> (MAX(num_nbrs*safezone, mincap*REAX_MIN_NBRS));
 }
@@ -660,7 +656,7 @@ int PairReaxFF::write_reax_lists()
     jlist = firstneigh[i];
     Set_Start_Index(i, num_nbrs, far_nbrs);
 
-    if (i < inum)
+    if (itr_i < inum)
       cutoff_sqr = SQR(api->control->nonb_cut);
     else
       cutoff_sqr = SQR(api->control->bond_cut);
@@ -670,7 +666,7 @@ int PairReaxFF::write_reax_lists()
       j &= NEIGHMASK;
       get_distance(x[j], x[i], &d_sqr, &dvec);
 
-      if (d_sqr <= (cutoff_sqr)) {
+      if (d_sqr <= cutoff_sqr) {
         dist[j] = sqrt(d_sqr);
         set_far_nbr(&far_list[num_nbrs], j, dist[j], dvec);
         ++num_nbrs;
@@ -706,24 +702,28 @@ void *PairReaxFF::extract(const char *str, int &dim)
 {
   dim = 1;
   if (strcmp(str,"chi") == 0 && chi) {
+    chi[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) chi[i] = api->system->reax_param.sbp[map[i]].chi;
       else chi[i] = 0.0;
     return (void *) chi;
   }
   if (strcmp(str,"eta") == 0 && eta) {
+    eta[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) eta[i] = api->system->reax_param.sbp[map[i]].eta;
       else eta[i] = 0.0;
     return (void *) eta;
   }
   if (strcmp(str,"gamma") == 0 && gamma) {
+    gamma[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) gamma[i] = api->system->reax_param.sbp[map[i]].gamma;
       else gamma[i] = 0.0;
     return (void *) gamma;
    }
    if (strcmp(str,"bcut_acks2") == 0 && bcut_acks2) {
+    bcut_acks2[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) bcut_acks2[i] = api->system->reax_param.sbp[map[i]].bcut_acks2;
       else bcut_acks2[i] = 0.0;

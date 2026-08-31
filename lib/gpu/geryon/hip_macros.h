@@ -26,6 +26,9 @@
 #ifdef UCL_DEBUG
 #define UCL_SYNC_DEBUG
 #define UCL_DESTRUCT_CHECK
+#define UCL_DEBUG_ARG(arg) arg
+#else
+#define UCL_DEBUG_ARG(arg)
 #endif
 
 #ifndef UCL_NO_API_CHECK
@@ -58,20 +61,20 @@
 #else  // not DEBUG
 
 // void macros for performance reasons
-#define CU_SAFE_CALL_NS( call ) call
-#define CU_SAFE_CALL( call) call
+#define CU_SAFE_CALL_NS(call) (void)call
+#define CU_SAFE_CALL(call) (void)call
 
 #endif
 
 #ifdef UCL_DESTRUCT_CHECK
 
-#define CU_DESTRUCT_CALL( call) CU_SAFE_CALL( call)
-#define CU_DESTRUCT_CALL_NS( call) CU_SAFE_CALL_NS( call)
+#define CU_DESTRUCT_CALL(call) CU_SAFE_CALL(call)
+#define CU_DESTRUCT_CALL_NS(call) CU_SAFE_CALL_NS(call)
 
 #else
 
-#define CU_DESTRUCT_CALL( call) call
-#define CU_DESTRUCT_CALL_NS( call) call
+#define CU_DESTRUCT_CALL(call) (void)call
+#define CU_DESTRUCT_CALL_NS(call) (void)call
 
 #endif
 

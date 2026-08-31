@@ -54,7 +54,7 @@ https://doi.org/10.1103/PhysRevE.92.043303
 #include "domain.h"
 #include "error.h"
 #include "fix.h"
-#include "fix_store_peratom.h"
+#include "fix_store_atom.h"
 #include "force.h"
 #include "group.h"
 #include "improper.h"
@@ -73,12 +73,12 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeHMA::ComputeHMA(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg), id_temp(nullptr), deltaR(nullptr)
+    Compute(lmp, narg, arg), id_temp(nullptr), list(nullptr), deltaR(nullptr)
 {
-  if (narg < 4) error->all(FLERR,"Illegal compute hma command");
-  if (igroup) error->all(FLERR,"Compute hma must use group all");
+  if (narg < 4) utils::missing_cmd_args(FLERR,"compute hma", error);
+  if (igroup) error->all(FLERR, 1, "Compute hma must use group all");
   if (strcmp(arg[3],"NULL") == 0)
-    error->all(FLERR,"fix ID specifying the set temperature of canonical simulation is required");
+    error->all(FLERR, 3, "fix ID specifying the set temperature of canonical simulation is required");
   else id_temp = utils::strdup(arg[3]);
 
   create_attribute = 1;
@@ -90,8 +90,8 @@ ComputeHMA::ComputeHMA(LAMMPS *lmp, int narg, char **arg) :
   // our new fix's group = same as compute group
 
   id_fix = utils::strdup(std::string(id)+"_COMPUTE_STORE");
-  fix = dynamic_cast<FixStorePeratom *>(
-    modify->add_fix(fmt::format("{} {} STORE/PERATOM 1 3", id_fix, group->names[igroup])));
+  fix = dynamic_cast<FixStoreAtom *>(
+    modify->add_fix(fmt::format("{} {} STORE/ATOM 3 0 0 1", id_fix, group->names[igroup])));
 
   // calculate xu,yu,zu for fix store array
   // skip if reset from restart file
@@ -139,7 +139,7 @@ ComputeHMA::ComputeHMA(LAMMPS *lmp, int narg, char **arg) :
       // the first time we're called, we'll grab lattice pressure and energy
       returnAnharmonic = -1;
     } else {
-      error->all(FLERR,"Illegal compute hma command");
+      error->all(FLERR, iarg, "Unknown compute hma keyword {}", arg[iarg]);
     }
   }
 
@@ -156,8 +156,7 @@ ComputeHMA::ComputeHMA(LAMMPS *lmp, int narg, char **arg) :
 
 ComputeHMA::~ComputeHMA()
 {
-  // check nfix in case all fixes have already been deleted
-  if (modify->nfix) modify->delete_fix(id_fix);
+  modify->delete_fix(id_fix);
 
   delete[] id_fix;
   delete[] id_temp;
@@ -172,9 +171,9 @@ ComputeHMA::~ComputeHMA()
 void ComputeHMA::init() {
   if (computeCv>-1) {
     if (force->pair == nullptr)
-      error->all(FLERR,"No pair style is defined for compute hma cv");
+      error->all(FLERR, Error::NOLASTLINE, "No pair style is defined for compute hma cv");
     if (force->pair->single_enable == 0)
-      error->all(FLERR,"Pair style does not support compute hma cv");
+      error->all(FLERR, Error::NOLASTLINE, "Pair style does not support compute hma cv");
   }
 
   neighbor->add_request(this, NeighConst::REQ_OCCASIONAL);
@@ -188,16 +187,20 @@ void ComputeHMA::init_list(int /* id */, NeighList *ptr)
 void ComputeHMA::setup()
 {
   int dummy=0;
-  int ifix = modify->find_fix(id_temp);
-  if (ifix < 0) error->all(FLERR,"Could not find compute hma temperature ID");
-  auto  temperat = (double *) modify->fix[ifix]->extract("t_target",dummy);
-  if (temperat==nullptr) error->all(FLERR,"Could not find compute hma temperature ID");
-  finaltemp = * temperat;
+  Fix *ifix = modify->get_fix_by_id(id_temp);
+  if (!ifix)
+    error->all(FLERR, Error::NOLASTLINE, "Could not find compute hma temperature fix ID {}",
+               id_temp);
+  auto *  temperat = (double *) ifix->extract("t_target",dummy);
+  if (temperat == nullptr)
+    error->all(FLERR, Error::NOLASTLINE, "Fix ID {} is not a thermostat {}", id_temp);
+  finaltemp = *temperat;
 
   // set fix which stores original atom coords
 
-  fix = dynamic_cast<FixStorePeratom *>(modify->get_fix_by_id(id_fix));
-  if (!fix) error->all(FLERR,"Could not find hma per-atom store fix ID {}", id_fix);
+  fix = dynamic_cast<FixStoreAtom *>(modify->get_fix_by_id(id_fix));
+  if (!fix)
+    error->all(FLERR, Error::NOLASTLINE, "Could not find hma per-atom store fix ID {}", id_fix);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -291,8 +294,7 @@ void ComputeHMA::compute_vector()
       double *special_coul = force->special_coul;
       int newton_pair = force->newton_pair;
 
-      if (update->firststep == update->ntimestep) neighbor->build_one(list,1);
-      else neighbor->build_one(list);
+      neighbor->build_one(list);
       int inum = list->inum;
       int *ilist = list->ilist;
       int *numneigh = list->numneigh;
@@ -400,8 +402,8 @@ double ComputeHMA::virial_compute(int n)
   if (force->angle) v += sumVirial(n, force->angle->virial);
   if (force->dihedral) v += sumVirial(n, force->dihedral->virial);
   if (force->improper) v += sumVirial(n, force->improper->virial);
-  for (int i = 0; i < modify->nfix; i++)
-    if (modify->fix[i]->thermo_virial) v += sumVirial(n, modify->fix[i]->virial);
+  for (const auto &ifix : modify->get_fix_list())
+    if (ifix->thermo_virial) v += sumVirial(n, ifix->virial);
 
   // sum virial across procs
 

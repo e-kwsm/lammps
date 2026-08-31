@@ -6,7 +6,7 @@ fix wall/gran/region command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID wall/gran/region fstyle fstyle_params wallstyle regionID keyword values ...
 
@@ -36,12 +36,14 @@ Syntax
 
 * wallstyle = region (see :doc:`fix wall/gran <fix_wall_gran>` for options for other kinds of walls)
 * region-ID = region whose boundary will act as wall
-* keyword = *contacts*
+* keyword = *contacts* or *temperature*
 
   .. parsed-literal::
 
       *contacts* value = none
          generate contact information for each particle
+      *temperature* value = temperature
+         specify temperature of wall
 
 Examples
 """"""""
@@ -65,14 +67,14 @@ non-granular particles and simpler wall geometries, respectively.
 
 Here are snapshots of example models using this command.  Corresponding
 input scripts can be found in examples/granregion.  Movies of these
-simulations are `here on the Movies page <https://www.lammps.org/movies.html#granregion>`_
-of the LAMMPS website.
+simulations are `here on the Movies page
+<https://www.lammps.org/examples/granregion/>`_ of the LAMMPS website.
 
-.. |wallgran1| image:: img/gran_funnel.png
-   :width: 48%
+.. |wallgran1| image:: img/gran_funnel.jpg
+   :width: 33%
 
-.. |wallgran2| image:: img/gran_mixer.png
-   :width: 48%
+.. |wallgran2| image:: img/gran_mixer.jpg
+   :width: 33%
 
 |wallgran1|  |wallgran2|
 
@@ -200,6 +202,17 @@ values for the 6 wall/particle coefficients than for particle/particle
 interactions.  E.g. if you wish to model the wall as a different
 material.
 
+The *temperature* keyword is used to assign a temperature to the wall.
+The following value can either be a numeric value or an equal-style
+:doc:`variable <variable>`.  If the value is a variable, it should be
+specified as v_name, where name is the variable name.  In this case, the
+variable will be evaluated each timestep, and its value used to determine
+the temperature. This option must be used in conjunction with a heat
+conduction model defined in :doc:`pair_style granular <pair_granular>`,
+:doc:`fix property/atom <fix_property_atom>` to store temperature and a
+heat flow, and :doc:`fix heat/flow <fix_heat_flow>` to integrate heat
+flow.
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -230,10 +243,10 @@ uninterrupted fashion.
    with a different region ID.
 
 If the :code:`contacts` option is used, this fix generates a per-atom array
-with 8 columns as output, containing the contact information for owned
+with at least 8 columns as output, containing the contact information for owned
 particles (nlocal on each processor). All columns in this per-atom array will
-be zero if no contact has occurred. The values of these columns are listed in
-the following table:
+be zero if no contact has occurred.  The first 8 values of these columns are
+listed in the following table.
 
 +-------+----------------------------------------------------+----------------+
 | Index | Value                                              | Units          |
@@ -256,10 +269,26 @@ the following table:
 |     8 | Radius :math:`r` of atom                           | distance units |
 +-------+----------------------------------------------------+----------------+
 
+If a granular sub-model calculates additional contact information (e.g. the
+heat sub-models calculate the amount of heat exchanged), these quantities
+are appended to the end of this array. First, any extra values from the
+normal sub-model are appended followed by the damping, tangential, rolling,
+twisting, then heat models. See the descriptions of granular sub-models in
+the :doc:`pair granular <pair_granular>` page for information on any extra
+quantities.
+
 None of the :doc:`fix_modify <fix_modify>` options are relevant to this fix.
 No parameter of this fix can be used with the *start/stop* keywords of the
 :doc:`run <run>` command. This fix is not invoked during :doc:`energy
 minimization <minimize>`.
+
+Dump image info
+"""""""""""""""
+
+This fix does **not** support the *fix* keyword of the :doc:`dump image
+<dump_image>` command.  Instead the region used by the fix can be
+visualized using the *region* keyword of *dump image*.
+
 
 Restrictions
 """"""""""""

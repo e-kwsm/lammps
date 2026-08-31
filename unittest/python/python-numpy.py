@@ -51,6 +51,33 @@ class PythonNumpy(unittest.TestCase):
         else:
             return 0
 
+    def checkAngle(self, vals, atype, aatom1, aatom2, aatom3):
+        set1 = {aatom1, aatom2, aatom3}
+        set2 = {vals[1], vals[2], vals[3]}
+        if len(set1.intersection(set2)) == 3:
+            self.assertEqual(vals[0], atype)
+            return 1
+        else:
+            return 0
+
+    def checkDihedral(self, vals, dtype, datom1, datom2, datom3, datom4):
+        set1 = {datom1, datom2, datom3, datom4}
+        set2 = {vals[1], vals[2], vals[3], vals[4]}
+        if len(set1.intersection(set2)) == 4:
+            self.assertEqual(vals[0], dtype)
+            return 1
+        else:
+            return 0
+
+    def checkImproper(self, vals, itype, iatom1, iatom2, iatom3, iatom4):
+        set1 = {iatom1, iatom2, iatom3, iatom4}
+        set2 = {vals[1], vals[2], vals[3], vals[4]}
+        if len(set1.intersection(set2)) == 4:
+            self.assertEqual(vals[0], itype)
+            return 1
+        else:
+            return 0
+
     def testLammpsPointer(self):
         self.assertEqual(type(self.lmp.lmp), c_void_p)
 
@@ -81,6 +108,7 @@ class PythonNumpy(unittest.TestCase):
         self.lmp.command("create_box 1 box")
         self.lmp.command("create_atoms 1 single 1.0 1.0 1.0")
         self.lmp.command("create_atoms 1 single 1.0 1.0 1.5")
+        self.lmp.command("mass 1 1.0")
         self.lmp.command("compute ke all ke/atom")
         natoms = self.lmp.get_natoms()
         self.assertEqual(natoms,2)
@@ -125,69 +153,106 @@ class PythonNumpy(unittest.TestCase):
         self.assertEqual(values[0,0], 0.5)
         self.assertEqual(values[0,3], -0.5)
         self.assertEqual(values[1,0], 1.5)
-        self.assertEqual(values[1,3], 1.5)
-
-    def testExtractAtomDeprecated(self):
-        self.lmp.command("units lj")
-        self.lmp.command("atom_style atomic")
-        self.lmp.command("atom_modify map array")
-        self.lmp.command("region box block 0 2 0 2 0 2")
-        self.lmp.command("create_box 1 box")
-
-        x = [
-          1.0, 1.0, 1.0,
-          1.0, 1.0, 1.5
-        ]
-
-        types = [1, 1]
-
-        self.assertEqual(self.lmp.create_atoms(2, id=None, type=types, x=x), 2)
-        nlocal = self.lmp.extract_global("nlocal", LAMMPS_INT)
-        self.assertEqual(nlocal, 2)
-
-        ident = self.lmp.numpy.extract_atom_iarray("id", nlocal, dim=1)
-        self.assertEqual(len(ident), 2)
-
-        ntypes = self.lmp.extract_global("ntypes", LAMMPS_INT)
-        self.assertEqual(ntypes, 1)
-
-        x = self.lmp.numpy.extract_atom_darray("x", nlocal, dim=3)
-        v = self.lmp.numpy.extract_atom_darray("v", nlocal, dim=3)
-        self.assertEqual(len(x), 2)
-        self.assertTrue((x[0] == (1.0, 1.0, 1.0)).all())
-        self.assertTrue((x[1] == (1.0, 1.0, 1.5)).all())
-        self.assertEqual(len(v), 2)
+        self.assertEqual(values[1,3], -1.5)
 
     def testExtractAtom(self):
         self.lmp.command("units lj")
         self.lmp.command("atom_style atomic")
         self.lmp.command("atom_modify map array")
         self.lmp.command("region box block 0 2 0 2 0 2")
-        self.lmp.command("create_box 1 box")
+        self.lmp.command("create_box 2 box")
 
-        x = [
-          1.0, 1.0, 1.0,
-          1.0, 1.0, 1.5
-        ]
+        x = [ 1.0, 1.0, 1.0,  1.0, 1.0, 1.5,  1.5, 1.0, 1.0 ]
+        types = [1, 2, 1]
+        ids = [1, 2, 3]
+        self.assertEqual(self.lmp.create_atoms(3, atomid=ids, atype=types, x=x), 3)
+        self.lmp.command("mass * 2.0")
+        self.lmp.command("pair_style zero 1.1")
+        self.lmp.command("pair_coeff * *")
+        self.lmp.command("fix props all property/atom i_one i2_two 2 d_three d2_four 2");
+        self.lmp.command("fix rmass all property/atom mol q rmass ghost yes");
+        self.lmp.command("fix 1 all nve")
+        self.lmp.command("run 0 post no")
+        ntypes = self.lmp.extract_setting("ntypes");
+        nlocal = self.lmp.extract_setting("nlocal");
+        nall   = self.lmp.extract_setting("nall");
+        self.assertEqual(nlocal, 3)
+        self.assertEqual(ntypes, 2)
+        self.assertEqual(nall, 63)
 
-        types = [1, 1]
+        self.lmp.command("set atom 1 charge -1");
+        self.lmp.command("set atom 2 charge  1");
+        self.lmp.command("set atom 3 charge  0");
+        self.lmp.command("set atom * mol 2");
+        self.lmp.command("set atom 2 mol 1");
+        self.lmp.command("set atom 1 i_one -3");
+        self.lmp.command("set atom 2 i_one  3");
+        self.lmp.command("set atom 2 d_three -1.3");
+        self.lmp.command("set atom 3 d_three  3.5");
+        self.lmp.command("set atom 1 i_two[1] -3");
+        self.lmp.command("set atom 2 i_two[2]  3");
+        self.lmp.command("set atom * d_four[1] -1.3");
+        self.lmp.command("set atom * d_four[2]  3.5");
+        self.lmp.command("run 0 post no")
 
-        self.assertEqual(self.lmp.create_atoms(2, id=None, type=types, x=x), 2)
-        nlocal = self.lmp.extract_global("nlocal")
-        self.assertEqual(nlocal, 2)
+        mass = self.lmp.numpy.extract_atom("mass")
+        self.assertEqual(len(mass), ntypes + 1)
+        self.assertTrue((mass == (0.0, 2.0, 2.0)).all())
+
+        rmass = self.lmp.numpy.extract_atom("rmass")
+        self.assertEqual(len(rmass), nall)
+        self.assertTrue((rmass[0:3] == (0.0, 0.0, 0.0)).all())
+
+        charge = self.lmp.numpy.extract_atom("q")
+        self.assertEqual(len(charge), nall)
+        self.assertTrue((charge[0:3] == (-1.0, 1.0, 0.0)).all())
+
+        molecule = self.lmp.numpy.extract_atom("molecule")
+        self.assertEqual(len(molecule), nall)
+        self.assertTrue((molecule[0:3] == (2, 1, 2)).all())
 
         ident = self.lmp.numpy.extract_atom("id")
-        self.assertEqual(len(ident), 2)
+        self.assertEqual(len(ident), nall)
+        self.assertTrue((ident[0:3] == (1, 2, 3)).all())
 
-        ntypes = self.lmp.extract_global("ntypes")
-        self.assertEqual(ntypes, 1)
+        atype = self.lmp.numpy.extract_atom("type")
+        self.assertEqual(len(atype), nall)
+        self.assertTrue((atype[0:3] == (1, 2, 1)).all())
 
         x = self.lmp.numpy.extract_atom("x")
         v = self.lmp.numpy.extract_atom("v")
-        self.assertEqual(len(x), 2)
+        self.assertEqual(len(x), nall)
+        self.assertEqual(len(x[0]), 3)
         self.assertTrue((x[0] == (1.0, 1.0, 1.0)).all())
         self.assertTrue((x[1] == (1.0, 1.0, 1.5)).all())
-        self.assertEqual(len(v), 2)
+        self.assertTrue((x[2] == (1.5, 1.0, 1.0)).all())
+        self.assertEqual(len(v), nlocal)
+        self.assertEqual(len(v[0]), 3)
+
+        self.lmp.command("comm_modify vel yes");
+        self.lmp.command("run 0 post no")
+
+        v = self.lmp.numpy.extract_atom("v")
+        self.assertEqual(len(v), nall)
+
+        one = self.lmp.numpy.extract_atom("i_one")
+        two = self.lmp.numpy.extract_atom("i2_two")
+        three = self.lmp.numpy.extract_atom("d_three")
+        four = self.lmp.numpy.extract_atom("d2_four")
+        self.assertEqual(len(one), nlocal)
+        self.assertTrue((one == (-3, 3, 0)).all())
+        self.assertEqual(len(two), nlocal)
+        self.assertEqual(len(two[0]), 2)
+        self.assertTrue((two[0] == (-3, 0)).all())
+        self.assertTrue((two[1] == (0, 3)).all())
+        self.assertTrue((two[2] == (0, 0)).all())
+        self.assertEqual(len(three), nlocal)
+        self.assertTrue((three == (0.0, -1.3, 3.5)).all())
+        self.assertEqual(len(four), nlocal)
+        self.assertEqual(len(four[0]), 2)
+        self.assertTrue((four[0] == (-1.3, 3.5)).all())
+        self.assertTrue((four[1] == (-1.3, 3.5)).all())
+        self.assertTrue((four[2] == (-1.3, 3.5)).all())
 
     @unittest.skipIf(not has_full,"Gather bonds test")
     def testGatherBond_newton_on(self):
@@ -233,6 +298,122 @@ class PythonNumpy(unittest.TestCase):
             count += self.checkBond(bond, 5, 29, 27)
         self.assertEqual(count,10)
 
+    @unittest.skipIf(not has_full,"Gather angles test")
+    def testGatherAngle_newton_on(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton on on")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        angles = self.lmp.numpy.gather_angles()
+        self.assertEqual(len(angles),30)
+        count = 0
+        for angle in angles:
+            count += self.checkAngle(angle, 4, 2, 1, 3)
+            count += self.checkAngle(angle, 4, 1, 3, 6)
+            count += self.checkAngle(angle, 2, 4, 3, 6)
+            count += self.checkAngle(angle, 3, 7, 6, 8)
+            count += self.checkAngle(angle, 3, 8, 10, 16)
+            count += self.checkAngle(angle, 2, 8, 10, 11)
+            count += self.checkAngle(angle, 1, 12, 10, 16)
+            count += self.checkAngle(angle, 2, 10, 12, 14)
+            count += self.checkAngle(angle, 1, 19, 18, 20)
+            count += self.checkAngle(angle, 1, 28, 27, 29)
+        self.assertEqual(count,10)
+
+    @unittest.skipIf(not has_full,"Gather angles test")
+    def testGatherAngle_newton_off(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton off off")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        angles = self.lmp.numpy.gather_angles()
+        self.assertEqual(len(angles),30)
+        count = 0
+        for angle in angles:
+            count += self.checkAngle(angle, 4, 2, 1, 3)
+            count += self.checkAngle(angle, 4, 1, 3, 6)
+            count += self.checkAngle(angle, 2, 4, 3, 6)
+            count += self.checkAngle(angle, 3, 7, 6, 8)
+            count += self.checkAngle(angle, 3, 8, 10, 16)
+            count += self.checkAngle(angle, 2, 8, 10, 11)
+            count += self.checkAngle(angle, 1, 12, 10, 16)
+            count += self.checkAngle(angle, 2, 10, 12, 14)
+            count += self.checkAngle(angle, 1, 19, 18, 20)
+            count += self.checkAngle(angle, 1, 28, 27, 29)
+        self.assertEqual(count,10)
+
+    @unittest.skipIf(not has_full,"Gather dihedrals test")
+    def testGatherDihedral_newton_on(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton on on")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        dihedrals = self.lmp.numpy.gather_dihedrals()
+        self.assertEqual(len(dihedrals),31)
+        count = 0
+        for dihedral in dihedrals:
+            count += self.checkDihedral(dihedral, 2, 2, 1, 3, 6)
+            count += self.checkDihedral(dihedral, 3, 2, 1, 3, 5)
+            count += self.checkDihedral(dihedral, 1, 1, 3, 6, 7)
+            count += self.checkDihedral(dihedral, 5, 4, 3, 6, 7)
+            count += self.checkDihedral(dihedral, 4, 3, 6, 8, 9)
+            count += self.checkDihedral(dihedral, 2, 6, 8, 10, 16)
+            count += self.checkDihedral(dihedral, 5, 8, 10, 12, 13)
+            count += self.checkDihedral(dihedral, 1, 8, 10, 12, 14)
+            count += self.checkDihedral(dihedral, 2, 11, 10, 16, 17)
+            count += self.checkDihedral(dihedral, 5, 16, 10, 12, 14)
+        self.assertEqual(count,10)
+
+    @unittest.skipIf(not has_full,"Gather dihedrals test")
+    def testGatherDihedral_newton_off(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton off off")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        dihedrals = self.lmp.numpy.gather_dihedrals()
+        self.assertEqual(len(dihedrals),31)
+        count = 0
+        for dihedral in dihedrals:
+            count += self.checkDihedral(dihedral, 2, 2, 1, 3, 6)
+            count += self.checkDihedral(dihedral, 3, 2, 1, 3, 5)
+            count += self.checkDihedral(dihedral, 1, 1, 3, 6, 7)
+            count += self.checkDihedral(dihedral, 5, 4, 3, 6, 7)
+            count += self.checkDihedral(dihedral, 4, 3, 6, 8, 9)
+            count += self.checkDihedral(dihedral, 2, 6, 8, 10, 16)
+            count += self.checkDihedral(dihedral, 5, 8, 10, 12, 13)
+            count += self.checkDihedral(dihedral, 1, 8, 10, 12, 14)
+            count += self.checkDihedral(dihedral, 2, 11, 10, 16, 17)
+            count += self.checkDihedral(dihedral, 5, 16, 10, 12, 14)
+        self.assertEqual(count,10)
+
+    @unittest.skipIf(not has_full,"Gather impropers test")
+    def testGatherImproper_newton_on(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton on on")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        impropers = self.lmp.numpy.gather_impropers()
+        self.assertEqual(len(impropers),2)
+        count = 0
+        for improper in impropers:
+            count += self.checkImproper(improper, 1, 6, 3, 8, 7)
+            count += self.checkImproper(improper, 2, 8, 6, 10, 9)
+        self.assertEqual(count,2)
+
+    @unittest.skipIf(not has_full,"Gather impropers test")
+    def testGatherImproper_newton_off(self):
+        self.lmp.command('shell cd ' + os.environ['TEST_INPUT_DIR'])
+        self.lmp.command("newton off off")
+        self.lmp.file("in.fourmol")
+        self.lmp.command("run 0 post no")
+        impropers = self.lmp.numpy.gather_impropers()
+        self.assertEqual(len(impropers),2)
+        count = 0
+        for improper in impropers:
+            count += self.checkImproper(improper, 1, 6, 3, 8, 7)
+            count += self.checkImproper(improper, 2, 8, 6, 10, 9)
+        self.assertEqual(count,2)
+
     def testNeighborListSimple(self):
         self.lmp.commands_string("""
         units lj
@@ -245,7 +426,7 @@ class PythonNumpy(unittest.TestCase):
         x = [ 1.0, 1.0, 1.0,  1.0, 1.0, 1.5 ]
         types = [1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(2, id=None, type=types, x=x), 2)
+        self.assertEqual(self.lmp.create_atoms(2, atomid=None, atype=types, x=x), 2)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 2)
 
@@ -290,7 +471,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 1, 1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -329,7 +510,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 1, 1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -363,7 +544,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 2, 2, 2]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -428,7 +609,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 1, 1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -466,7 +647,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 1, 1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -499,7 +680,7 @@ class PythonNumpy(unittest.TestCase):
         tags = [1, 2, 3, 4, 5, 6, 7]
         types = [1, 1, 1, 1, 1, 1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(7, id=tags, type=types, x=x), 7)
+        self.assertEqual(self.lmp.create_atoms(7, atomid=tags, atype=types, x=x), 7)
         nlocal = self.lmp.extract_global("nlocal")
         self.assertEqual(nlocal, 7)
 
@@ -552,7 +733,7 @@ class PythonNumpy(unittest.TestCase):
 
         types = [1, 1]
 
-        self.assertEqual(self.lmp.create_atoms(2, id=None, type=types, x=x), 2)
+        self.assertEqual(self.lmp.create_atoms(2, atomid=None, atype=types, x=x), 2)
         self.lmp.command("variable a atom x*x+y*y+z*z")
         a = self.lmp.numpy.extract_variable("a", "all", LMP_VAR_ATOM)
         self.assertIs(type(a), numpy.ndarray)

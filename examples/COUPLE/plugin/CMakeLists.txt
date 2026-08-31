@@ -1,9 +1,8 @@
-##########################################
-# CMake build system for coupling to the LAMMPS library
+# -*- CMake -*- file for example programs that use the LAMMPS library
 # where the library is loaded dynamically at runtime.
 ##########################################
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 
 # enforce out-of-source build
 if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
@@ -23,17 +22,12 @@ endif()
 # and prints lots of pointless warnings about "unsafe" functions
 if(MSVC)
   if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    if(LAMMPS_EXCEPTIONS)
-      add_compile_options(/EHsc)
-    endif()
+    add_compile_options(/EHsc)
   endif()
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
-find_package(MPI REQUIRED)
-# do not include the (obsolete) MPI C++ bindings which makes
-# for leaner object files and avoids namespace conflicts
-set(MPI_CXX_SKIP_MPICXX TRUE)
+find_package(MPI REQUIRED COMPONENTS C)
 
 ##########################
 

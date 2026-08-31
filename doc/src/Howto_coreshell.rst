@@ -111,7 +111,7 @@ Therefore it is typically desirable to decouple the relative motion of
 the core/shell pair, which is an imaginary degree of freedom, from the
 real physical system.  To do that, the :doc:`compute temp/cs <compute_temp_cs>` command can be used, in conjunction with
 any of the thermostat fixes, such as :doc:`fix nvt <fix_nh>` or :doc:`fix langevin <fix_langevin>`.  This compute uses the center-of-mass velocity
-of the core/shell pairs to calculate a temperature, and insures that
+of the core/shell pairs to calculate a temperature, and ensures that
 velocity is what is rescaled for thermostatting purposes.  This
 compute also works for a system with both core/shell pairs and
 non-polarized ions (ions without an attached satellite particle).  The
@@ -178,7 +178,7 @@ the pairs.  This can be done by using the *bias* keyword of the
 To maintain the correct polarizability of the core/shell pairs, the
 kinetic energy of the internal motion shall remain nearly constant.
 Therefore the choice of spring force and mass ratio need to ensure
-much faster relative motion of the 2 atoms within the core/shell pair
+much faster relative motion of the two atoms within the core/shell pair
 than their center-of-mass velocity. This allows the shells to
 effectively react instantaneously to the electrostatic environment and
 limits energy transfer to or from the core/shell oscillators.
@@ -223,7 +223,7 @@ For example if core/shell pairs and other molecules are present:
    compute prop all property/atom i_CSID
    (...)
 
-The additional section in the date file would be formatted like this:
+The additional section in the data file would be formatted like this:
 
 .. parsed-literal::
 

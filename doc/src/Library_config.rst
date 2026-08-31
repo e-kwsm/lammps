@@ -6,6 +6,7 @@ This section documents the following functions:
 - :cpp:func:`lammps_version`
 - :cpp:func:`lammps_get_os_info`
 - :cpp:func:`lammps_config_has_mpi_support`
+- :cpp:func:`lammps_config_has_omp_support`
 - :cpp:func:`lammps_config_has_gzip_support`
 - :cpp:func:`lammps_config_has_png_support`
 - :cpp:func:`lammps_config_has_jpeg_support`
@@ -39,7 +40,7 @@ crashes within LAMMPS may be recovered from by enabling
 :ref:`exceptions <exceptions>`, avoiding them proactively is a safer
 approach.
 
-.. code-block:: C
+.. code-block:: c
    :caption: Example for using configuration settings functions
 
    #include "library.h"
@@ -85,6 +86,11 @@ approach.
 -----------------------
 
 .. doxygenfunction:: lammps_config_has_mpi_support
+   :project: progguide
+
+-----------------------
+
+.. doxygenfunction:: lammps_config_has_omp_support
    :project: progguide
 
 -----------------------

@@ -38,8 +38,8 @@ class PairEAMOMP : public PairEAM, public ThrOMP {
   double memory_usage() override;
 
  private:
-  template <int EVFLAG, int EFLAG, int NEWTON_PAIR>
-  void eval(int iifrom, int iito, ThrData *const thr);
+  template <int EVFLAG, int EFLAG, int NEWTON_PAIR, int HE>
+  void eval(int iifrom, int iito, int *beyond_rhomax, ThrData *const thr);
 };
 
 }    // namespace LAMMPS_NS

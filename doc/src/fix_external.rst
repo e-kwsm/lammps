@@ -1,12 +1,15 @@
 .. index:: fix external
+.. index:: fix external/kk
 
 fix external command
 ====================
 
+Accelerator Variants: *external/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID external mode args
 
@@ -71,14 +74,8 @@ which is typically a 32-bit integer unless LAMMPS is compiled with
 <size>` section of the manual.  Finally, *fexternal* are the forces
 returned by the driver program.
 
-The fix has a set_callback() method which the external driver can call
-to pass a pointer to its foo() function.  See the
-couple/lammps_quest/lmpqst.cpp file in the LAMMPS distribution for an
-example of how this is done.  This sample application performs
-classical MD using quantum forces computed by a density functional
-code `Quest <quest_>`_.
-
-.. _quest: https://dft.sandia.gov/Quest
+The best way to set up the callback function is to use the C-language
+library interface function :cpp:func:`lammps_set_fix_external_callback`.
 
 ----------
 
@@ -127,7 +124,7 @@ stress tensor components.  Eng is an extensive quantity,
 meaning it should be the sum over per-atom energies of all affected
 atoms.  It should also be provided in :doc:`energy units <units>`
 consistent with the simulation.  See the details below for how to
-insure this energy setting is used appropriately in a minimization.
+ensure this energy setting is used appropriately in a minimization.
 
 Additional public methods that the caller can use to update system
 properties are:
@@ -139,12 +136,16 @@ properties are:
    void set_vector_length(int n);
    void set_vector(int idx, double val);
 
-These allow to set per-atom energy contributions, per-atom stress
-contributions, the length and individual values of a global vector
-of properties that the caller code may want to communicate  to LAMMPS
+These enable setting per-atom energy and  per-atom stress contributions,
+the length and individual values of a global vector of properties that
+the caller code may want to communicate  to LAMMPS
 (e.g. for use in :doc:`fix ave/time <fix_ave_time>` or in
 :doc:`equal-style variables <variable>` or for
 :doc:`custom thermo output <thermo_style>`.
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 
@@ -173,9 +174,19 @@ stress/atom <compute_stress_atom>` commands.  The former can be
 accessed by :doc:`thermodynamic output <thermo_style>`.  The default
 setting for this fix is :doc:`fix_modify virial yes <fix_modify>`.
 
-This fix computes a global scalar which can be accessed by various
-:doc:`output commands <Howto_output>`.  The scalar is the potential
-energy discussed above.  The scalar stored by this fix is "extensive".
+This fix computes a global scalar, a global vector, and a per-atom array
+which can be accessed by various :doc:`output commands <Howto_output>`.
+The scalar is the potential energy discussed above.  The scalar stored
+by this fix is "extensive".
+The global vector has a custom length and needs to be set by the external
+program using the
+:cpp:func:`lammps_fix_external_set_vector() <lammps_fix_external_set_vector>`
+and :cpp:func:`lammps_fix_external_set_vector_length()
+<lammps_fix_external_set_vector_length>`
+calls of the LAMMPS library interface or the equivalent call of the Python
+or Fortran modules.
+The per-atom array has 3 values for each atom and is the applied external
+force.
 
 No parameter of this fix can be used with the *start/stop* keywords of
 the :doc:`run <run>` command.
@@ -192,7 +203,7 @@ invoked by the :doc:`minimize <minimize>` command.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

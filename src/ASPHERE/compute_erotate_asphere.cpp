@@ -29,7 +29,7 @@ using namespace LAMMPS_NS;
 
 ComputeERotateAsphere::
 ComputeERotateAsphere(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg)
+  Compute(lmp, narg, arg), avec_ellipsoid(nullptr), avec_line(nullptr), avec_tri(nullptr)
 {
   if (narg != 3) error->all(FLERR,"Illegal compute erotate/asphere command");
 
@@ -47,8 +47,7 @@ void ComputeERotateAsphere::init()
   avec_line = dynamic_cast<AtomVecLine *>(atom->style_match("line"));
   avec_tri = dynamic_cast<AtomVecTri *>(atom->style_match("tri"));
   if (!avec_ellipsoid && !avec_line && !avec_tri)
-    error->all(FLERR,"Compute erotate/asphere requires "
-               "atom style ellipsoid or line or tri");
+    error->all(FLERR,"Compute erotate/asphere requires atom style ellipsoid or line or tri");
 
   // check that all particles are finite-size
   // no point particles allowed, spherical is OK
@@ -79,12 +78,17 @@ double ComputeERotateAsphere::compute_scalar()
 {
   invoked_scalar = update->ntimestep;
 
-  AtomVecEllipsoid::Bonus *ebonus;
-  if (avec_ellipsoid) ebonus = avec_ellipsoid->bonus;
-  AtomVecLine::Bonus *lbonus;
+  AtomVecEllipsoid::Bonus *ebonus = nullptr;
+  AtomVecEllipsoid::BonusSuper *ebonus_super = nullptr;
+  if (avec_ellipsoid) {
+    if (atom->superellipsoid_flag) ebonus_super = avec_ellipsoid->bonus_super;
+    else ebonus = avec_ellipsoid->bonus;
+  }
+  AtomVecLine::Bonus *lbonus = nullptr;
   if (avec_line) lbonus = avec_line->bonus;
-  AtomVecTri::Bonus *tbonus;
+  AtomVecTri::Bonus *tbonus = nullptr;
   if (avec_tri) tbonus = avec_tri->bonus;
+
   int *ellipsoid = atom->ellipsoid;
   int *line = atom->line;
   int *tri = atom->tri;
@@ -98,22 +102,29 @@ double ComputeERotateAsphere::compute_scalar()
   // no point particles since divide by inertia
 
   double length;
-  double *shape,*quat;
-  double wbody[3],inertia[3];
+  double *quat;
+  double wbody[3], inertia[3];
   double rot[3][3];
   double erotate = 0.0;
 
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
-      if (ellipsoid && ellipsoid[i] >= 0) {
-        shape = ebonus[ellipsoid[i]].shape;
-        quat = ebonus[ellipsoid[i]].quat;
+      if (ellipsoid && (ebonus || ebonus_super) && (ellipsoid[i] >= 0)) {
 
-        // principal moments of inertia
-
-        inertia[0] = rmass[i] * (shape[1]*shape[1]+shape[2]*shape[2]) / 5.0;
-        inertia[1] = rmass[i] * (shape[0]*shape[0]+shape[2]*shape[2]) / 5.0;
-        inertia[2] = rmass[i] * (shape[0]*shape[0]+shape[1]*shape[1]) / 5.0;
+        if (atom->superellipsoid_flag) {
+          quat = ebonus_super[ellipsoid[i]].quat;
+          // principal moments of inertia are pre-computed
+          inertia[0] = ebonus_super[ellipsoid[i]].inertia[0];
+          inertia[1] = ebonus_super[ellipsoid[i]].inertia[1];
+          inertia[2] = ebonus_super[ellipsoid[i]].inertia[2];
+        } else {
+          auto *shape = ebonus[ellipsoid[i]].shape;
+          quat = ebonus[ellipsoid[i]].quat;
+          // principal moments of inertia
+          inertia[0] = rmass[i] * (shape[1]*shape[1]+shape[2]*shape[2]) / 5.0;
+          inertia[1] = rmass[i] * (shape[0]*shape[0]+shape[2]*shape[2]) / 5.0;
+          inertia[2] = rmass[i] * (shape[0]*shape[0]+shape[1]*shape[1]) / 5.0;
+        }
 
         // wbody = angular velocity in body frame
 
@@ -126,13 +137,13 @@ double ComputeERotateAsphere::compute_scalar()
         erotate += inertia[0]*wbody[0]*wbody[0] +
           inertia[1]*wbody[1]*wbody[1] + inertia[2]*wbody[2]*wbody[2];
 
-      } else if (line && line[i] >= 0) {
+      } else if (line && lbonus && (line[i] >= 0)) {
         length = lbonus[line[i]].length;
 
         erotate += (omega[i][0]*omega[i][0] + omega[i][1]*omega[i][1] +
                     omega[i][2]*omega[i][2]) * length*length*rmass[i] / 12.0;
 
-      } else if (tri && tri[i] >= 0) {
+      } else if (tri && tbonus && (tri[i] >= 0)) {
 
         // principal moments of inertia
 

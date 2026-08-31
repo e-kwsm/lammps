@@ -26,17 +26,22 @@
 #include "memory.h"
 #include "error.h"
 
+#include <cstring>
 
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-BondHarmonicShift::BondHarmonicShift(LAMMPS *lmp) : Bond(lmp) {}
+BondHarmonicShift::BondHarmonicShift(LAMMPS *lmp) : Bond(lmp), k(nullptr), r0(nullptr), r1(nullptr)
+{
+  born_matrix_enable = 1;
+}
 
 /* ---------------------------------------------------------------------- */
 
 BondHarmonicShift::~BondHarmonicShift()
 {
+  if (copymode) return;
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(k);
@@ -125,7 +130,7 @@ void BondHarmonicShift::allocate()
 
 void BondHarmonicShift::coeff(int narg, char **arg)
 {
-  if (narg != 4) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 4) error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -146,7 +151,7 @@ void BondHarmonicShift::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -212,4 +217,29 @@ double BondHarmonicShift::single(int type, double rsq, int /*i*/, int /*j*/,
 
   fforce =  -2.0*k[type]*dr/r;
   return k[type]*(dr*dr - dr2*dr2);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void BondHarmonicShift::born_matrix(int type, double rsq, int /*i*/, int /*j*/, double &du, double &du2)
+{
+  double r = sqrt(rsq);
+  double dr = r - r0[type];
+
+  du = 0.0;
+  du2 = 2 * k[type];
+  if (r > 0.0) du = du2 * dr;
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *BondHarmonicShift::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k;
+  if (strcmp(str, "r0") == 0) return (void *) r0;
+  if (strcmp(str, "r1") == 0) return (void *) r1;
+  return nullptr;
 }

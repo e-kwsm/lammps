@@ -16,14 +16,18 @@
 
 #include "pointers.h"
 
+#include "creator_registry.h"
+#include "json_fwd.h"
+
 #include <map>
 #include <set>
 
 namespace LAMMPS_NS {
 
-// forward declaration
+// forward declarations
 
 class AtomVec;
+class Molecule;
 
 class Atom : protected Pointers {
  public:
@@ -82,6 +86,7 @@ class Atom : protected Pointers {
   double **omega, **angmom, **torque;
   int *ellipsoid, *line, *tri, *body;
   double **quat;
+  double *temperature, *heatflow;
 
   // molecular systems
 
@@ -110,31 +115,28 @@ class Atom : protected Pointers {
 
   // PERI package
 
-  double *vfrac, *s0;
+  double *vfrac, *s0, *smin;
   double **x0;
 
   // SPIN package
 
   double **sp, **fm, **fm_long;
 
-  // EFF and AWPMD packages
+  // EFF package
 
   int *spin;
   double *eradius, *ervel, *erforce;
-  double *ervelforce;
-  double **cs, **csforce, **vforce;
-  int *etag;
 
   // CG-DNA package
 
-  tagint *id5p;
+  tagint *id3p, *id5p;
+  double *qeff;
 
   // DPD-REACT package
 
   double *uCond, *uMech, *uChem, *uCGnew, *uCG;
   double *duChem;
   double *dpdTheta;
-  int nspecies_dpd;
 
   // MESO package
 
@@ -144,12 +146,6 @@ class Atom : protected Pointers {
   double *edpd_cv;    // heat capacity
   int cc_species;
 
-  // MESONT package
-
-  double *length;
-  int *buckling;
-  tagint **bond_nt;
-
   // MACHDYN package
 
   double *contact_radius;
@@ -158,6 +154,13 @@ class Atom : protected Pointers {
   double *eff_plastic_strain;
   double *eff_plastic_strain_rate;
   double *damage;
+
+  // RHEO package
+
+  int *rheo_status;
+  double *conductivity;
+  double *pressure;
+  double *viscosity;
 
   // SPH package
 
@@ -172,7 +175,12 @@ class Atom : protected Pointers {
 
   // DIELECTRIC package
 
-  double *area, *ed, *em, *epsilon, *curvature, *q_unscaled;
+  double *area, *ed, *em, *epsilon, *curvature, *q_scaled;
+
+  // APIP package
+
+  double *apip_lambda, *apip_lambda_input, *apip_lambda_input_ta, *apip_e_fast, *apip_e_precise, **apip_f_const_lambda, **apip_f_dyn_lambda, *apip_lambda_const;
+  int *apip_lambda_required;
 
   // end of customization section
   // --------------------------------------------------------------------
@@ -184,15 +192,15 @@ class Atom : protected Pointers {
   // 1 if variable is used, 0 if not
 
   int labelmapflag, types_style;
-  int sphere_flag, ellipsoid_flag, line_flag, tri_flag, body_flag;
-  int peri_flag, electron_flag;
-  int wavepacket_flag, sph_flag;
+  int ellipsoid_flag, line_flag, tri_flag, body_flag, superellipsoid_flag;
+  int peri_flag, electron_flag, sph_flag;
 
   int molecule_flag, molindex_flag, molatom_flag;
   int q_flag, mu_flag;
   int rmass_flag, radius_flag, omega_flag, torque_flag, angmom_flag, quat_flag;
+  int temperature_flag, heatflow_flag;
   int vfrac_flag, spin_flag, eradius_flag, ervel_flag, erforce_flag;
-  int cs_flag, csforce_flag, vforce_flag, ervelforce_flag, etag_flag;
+  int rheo_status_flag, conductivity_flag, pressure_flag, viscosity_flag;
   int rho_flag, esph_flag, cv_flag, vest_flag;
   int dpd_flag, edpd_flag, tdpd_flag;
   int mesont_flag;
@@ -220,6 +228,10 @@ class Atom : protected Pointers {
 
   int dielectric_flag;
 
+  // APIP package
+
+  int apip_lambda_flag, apip_e_fast_flag, apip_e_precise_flag, apip_lambda_input_flag, apip_lambda_input_ta_flag, apip_lambda_required_flag, apip_f_const_lambda_flag, apip_f_dyn_lambda_flag, apip_lambda_const_flag;
+
   // end of customization section
   // --------------------------------------------------------------------
 
@@ -245,6 +257,7 @@ class Atom : protected Pointers {
   int *icols, *dcols;
   char **ivname, **dvname, **ianame, **daname;
   int nivector, ndvector, niarray, ndarray;
+  int *ivghost, *dvghost, *iaghost, *daghost;
 
   // molecule templates
   // each template can be a set of consecutive molecules
@@ -252,7 +265,7 @@ class Atom : protected Pointers {
   // 1st molecule in template stores nset = # in set
 
   int nmolecule;
-  class Molecule **molecules;
+  Molecule **molecules;
 
   // type label maps
 
@@ -297,9 +310,10 @@ class Atom : protected Pointers {
 
   // AtomVec factory types and map
 
-  typedef AtomVec *(*AtomVecCreator)(LAMMPS *);
-  typedef std::map<std::string, AtomVecCreator> AtomVecCreatorMap;
-  AtomVecCreatorMap *avec_map;
+  using AtomVecCreator = AtomVec *(*)(LAMMPS *);
+
+  // global registry of atom (AtomVec) style factory functions
+  static CreatorRegistry<AtomVecCreator> &avec_styles();
 
   // --------------------------------------------------------------------
   // functions
@@ -315,11 +329,11 @@ class Atom : protected Pointers {
   void create_avec(const std::string &, int, char **, int);
   virtual AtomVec *new_avec(const std::string &, int, int &);
 
-  void init();
+  virtual void init();
   void setup();
 
   std::string get_style();
-  AtomVec *style_match(const char *);
+  AtomVec *style_match(const std::string &);
   void modify_params(int, char **);
   void tag_check();
   void tag_extend();
@@ -329,9 +343,9 @@ class Atom : protected Pointers {
 
   int parse_data(const char *);
 
-  void deallocate_topology();
+  virtual void deallocate_topology();
 
-  void data_atoms(int, char *, tagint, tagint, int, int, double *, int, int *);
+  void data_atoms(int, char *, tagint, tagint, int, int, double *, int, int *, int);
   void data_vels(int, char *, tagint);
   void data_bonds(int, char *, int *, tagint, int, int, int *);
   void data_angles(int, char *, int *, tagint, int, int, int *);
@@ -352,9 +366,10 @@ class Atom : protected Pointers {
   int shape_consistency(int, double &, double &, double &);
 
   void add_molecule(int, char **);
+  void add_molecule(const std::string &, const json &);
   int find_molecule(const char *);
   std::vector<Molecule *> get_molecule_by_id(const std::string &);
-  void add_molecule_atom(class Molecule *, int, int, tagint);
+  void add_molecule_atom(Molecule *, int, int, tagint);
 
   void add_label_map();
 
@@ -366,13 +381,13 @@ class Atom : protected Pointers {
   void update_callback(int);
 
   int find_custom(const char *, int &, int &);
-  virtual int add_custom(const char *, int, int);
+  int find_custom_ghost(const char *, int &, int &, int &);
+  virtual int add_custom(const char *, int, int, int ghost = 0);
   virtual void remove_custom(int, int, int);
 
-  virtual void sync_modify(ExecutionSpace, unsigned int, unsigned int) {}
-
-  void *extract(const char *);
+  virtual void *extract(const char *);
   int extract_datatype(const char *);
+  int extract_size(const char *, int);
 
   inline int *get_map_array() { return map_array; };
   inline int get_map_size() { return map_tag_max + 1; };
@@ -388,7 +403,7 @@ class Atom : protected Pointers {
   // map lookup function inlined for efficiency
   // return -1 if no map defined
 
-  inline int map(tagint global)
+  virtual inline int map(tagint global)
   {
     if (map_style == 1)
       return map_array[global];
@@ -401,10 +416,10 @@ class Atom : protected Pointers {
   virtual void map_init(int check = 1);
   virtual void map_clear();
   virtual void map_set();
-  void map_one(tagint, int);
+  virtual void map_one(tagint, int);
   int map_style_set();
   virtual void map_delete();
-  int map_find_hash(tagint);
+  virtual int map_find_hash(tagint);
 
  protected:
   // global to local ID mapping

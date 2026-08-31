@@ -24,15 +24,18 @@
  ------------------------------------------------------------------------- */
 
 #include "fix_smd_integrate_ulsph.h"
+
+#include "atom.h"
+#include "comm.h"
+#include "domain.h"
+#include "error.h"
+#include "force.h"
+#include "pair.h"
+#include "update.h"
+
 #include <cmath>
 #include <cstring>
 #include <Eigen/Eigen>
-#include "atom.h"
-#include "comm.h"
-#include "force.h"
-#include "update.h"
-#include "error.h"
-#include "pair.h"
 
 using namespace Eigen;
 using namespace LAMMPS_NS;
@@ -41,7 +44,8 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
-                Fix(lmp, narg, arg) {
+    Fix(lmp, narg, arg), list(nullptr), pair(nullptr)
+{
 
         if ((atom->esph_flag != 1) || (atom->vfrac_flag != 1))
                 error->all(FLERR, "fix smd/integrate_ulsph command requires atom_style with both energy and volume");
@@ -110,9 +114,7 @@ FixSMDIntegrateUlsph::FixSMDIntegrateUlsph(LAMMPS *lmp, int narg, char **arg) :
                                 printf("... will limit velocities to <= %g\n", vlimit);
                         }
                 } else {
-                        char msg[128];
-                        snprintf(msg,128, "Illegal keyword for smd/integrate_ulsph: %s\n", arg[iarg]);
-                        error->all(FLERR, msg);
+                        error->all(FLERR, iarg, "Unknown fix smd/integrate_ulsph keyword: {}", arg[iarg]);
                 }
 
                 iarg++;
@@ -144,6 +146,11 @@ void FixSMDIntegrateUlsph::init() {
         dtv = update->dt;
         dtf = 0.5 * update->dt * force->ftm2v;
         vlimitsq = vlimit * vlimit;
+
+        // Cannot use vremap since its effects aren't propagated to vest
+        //   see RHEO or SPH packages for examples of patches
+        if (domain->deform_vremap)
+          error->all(FLERR, "Fix smd/integrate_ulsph cannot be used with velocity remapping");
 }
 
 /* ----------------------------------------------------------------------
@@ -169,7 +176,7 @@ void FixSMDIntegrateUlsph::initial_integrate(int /*vflag*/) {
          * get smoothed velocities from ULSPH pair style
          */
 
-        auto smoothVel = (Vector3d *) force->pair->extract("smd/ulsph/smoothVel_ptr", itmp);
+        auto *smoothVel = (Vector3d *) force->pair->extract("smd/ulsph/smoothVel_ptr", itmp);
 
         if (xsphFlag) {
                 if (smoothVel == nullptr) {
@@ -264,7 +271,7 @@ void FixSMDIntegrateUlsph::final_integrate() {
                 error->one(FLERR, "fix smd/integrate_ulsph failed to accesss num_neighs array");
         }
 
-        auto L = (Matrix3d *) force->pair->extract("smd/ulsph/velocityGradient_ptr", itmp);
+        auto *L = (Matrix3d *) force->pair->extract("smd/ulsph/velocityGradient_ptr", itmp);
         if (L == nullptr) {
                 error->one(FLERR, "fix smd/integrate_ulsph failed to accesss velocityGradient array");
         }

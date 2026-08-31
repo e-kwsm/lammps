@@ -16,13 +16,11 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
-#include "force.h"
 #include "memory.h"
 #include "modify.h"
 #include "sna.h"
 #include "update.h"
 
-#include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -39,8 +37,8 @@ ComputeSNAGridLocal::ComputeSNAGridLocal(LAMMPS *lmp, int narg, char **arg) :
 
   // begin code common to all SNAP computes
 
-  double rfac0, rmin0;
-  int twojmax, switchflag, bzeroflag, bnormflag, wselfallflag;
+  //double rfac0, rmin0;
+  //int twojmax, switchflag, bzeroflag, bnormflag, wselfallflag;
 
   int ntypes = atom->ntypes;
   int nargmin = 6 + 2 * ntypes;
@@ -58,6 +56,8 @@ ComputeSNAGridLocal::ComputeSNAGridLocal(LAMMPS *lmp, int narg, char **arg) :
   wselfallflag = 0;
   switchinnerflag = 0;
   nelements = 1;
+  chunksize = 32768;
+  parallel_thresh = 8192;
 
   // process required arguments
 
@@ -182,6 +182,7 @@ ComputeSNAGridLocal::ComputeSNAGridLocal(LAMMPS *lmp, int narg, char **arg) :
 
 ComputeSNAGridLocal::~ComputeSNAGridLocal()
 {
+  if (copymode) return;
   memory->destroy(radelem);
   memory->destroy(wjelem);
   memory->destroy(cutsq);
@@ -212,7 +213,7 @@ void ComputeSNAGridLocal::compute_local()
   int *const type = atom->type;
   const int ntotal = atom->nlocal + atom->nghost;
 
-  // insure rij, inside, and typej are of size jnum
+  // ensure rij, inside, and typej are of size jnum
 
   snaptr->grow_rij(ntotal);
 

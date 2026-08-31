@@ -49,9 +49,6 @@ class DihedralCharmmIntel : public DihedralCharmm {
   template <class flt_t, class acc_t>
   void pack_force_const(ForceConst<flt_t> &fc, IntelBuffers<flt_t, acc_t> *buffers);
 
-#ifdef _LMP_INTEL_OFFLOAD
-  int _use_base;
-#endif
 
   template <class flt_t> class ForceConst {
    public:
@@ -67,8 +64,8 @@ class DihedralCharmmIntel : public DihedralCharmm {
     fc_packed3 *fc;
     flt_t *weight;
 
-    ForceConst() : ljp(nullptr), fc(nullptr), _npairtypes(0), _ndihderaltypes(0) {}
-    ~ForceConst() { set_ntypes(0, 0, nullptr); }
+    ForceConst() : ljp(nullptr), fc(nullptr), weight(nullptr), _npairtypes(0), _ndihderaltypes(0) {}
+    ~ForceConst() noexcept(false) { set_ntypes(0, 0, nullptr); }
 
     void set_ntypes(const int npairtypes, const int ndihderaltypes, Memory *memory);
 

@@ -25,7 +25,6 @@
 #include "error.h"
 #include "force.h"
 #include "neighbor.h"
-#include "neigh_request.h"
 #include "universe.h"
 #include "update.h"
 
@@ -66,7 +65,7 @@ FixOMP::FixOMP(LAMMPS *lmp, int narg, char **arg)
      _nthr(-1), _neighbor(true), _mixed(false), _reduced(true),
      _pair_compute_flag(false), _kspace_compute_flag(false)
 {
-  if (narg < 4) error->all(FLERR,"Illegal package omp command");
+  if (narg < 4) utils::missing_cmd_args(FLERR, "package omp", error);
 
   int nthreads = 1;
   if (narg > 3) {
@@ -81,7 +80,7 @@ FixOMP::FixOMP(LAMMPS *lmp, int narg, char **arg)
 
 #if defined(_OPENMP)
   if (nthreads < 1)
-    error->all(FLERR,"Illegal number of OpenMP threads requested");
+    error->all(FLERR, 3 - 2, "Illegal number of OpenMP threads requested");
 
   int reset_thr = 0;
 #endif
@@ -98,10 +97,10 @@ FixOMP::FixOMP(LAMMPS *lmp, int narg, char **arg)
   int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"neigh") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal package omp command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "package omp neigh", error);
       _neighbor = utils::logical(FLERR,arg[iarg+1],false,lmp) != 0;
       iarg += 2;
-    } else error->all(FLERR,"Illegal package omp command");
+    } else error->all(FLERR, iarg - 2, "Unknown package omp keyword {}", arg[iarg]);
   }
 
   // print summary of settings
@@ -130,7 +129,7 @@ FixOMP::FixOMP(LAMMPS *lmp, int narg, char **arg)
 #endif
   {
     const int tid = get_tid();
-    auto t = new Timer(lmp);
+    auto *t = new Timer(lmp);
     thr[tid] = new ThrData(tid,t);
   }
 }
@@ -162,12 +161,16 @@ void FixOMP::init()
 {
   // OPENMP package cannot be used with atom_style template
   if (atom->molecular == Atom::TEMPLATE)
-    error->all(FLERR,"OPENMP package does not (yet) work with "
-               "atom_style template");
+    error->all(FLERR, Error::NOLASTLINE,
+               "OPENMP package does not (yet) work with atom_style template");
 
   // adjust number of data objects when the number of OpenMP
   // threads has been changed somehow
   const int nthreads = comm->nthreads;
+#if defined(_OPENMP)
+  // make certain threads are initialized correctly. avoids segfaults with LAMMPS-GUI
+  if (nthreads != omp_get_max_threads()) omp_set_num_threads(nthreads);
+#endif
   if (_nthr != nthreads) {
     if (comm->me == 0)
       utils::logmesg(lmp,"Re-init OPENMP for {} OpenMP thread(s)\n", nthreads);
@@ -182,7 +185,7 @@ void FixOMP::init()
 #endif
     {
       const int tid = get_tid();
-      auto t = new Timer(lmp);
+      auto *t = new Timer(lmp);
       thr[tid] = new ThrData(tid,t);
     }
   }
@@ -196,7 +199,7 @@ void FixOMP::init()
 
   if (utils::strmatch(update->integrate_style,"^respa")
       && !utils::strmatch(update->integrate_style,"^respa/omp"))
-    error->all(FLERR,"Must use respa/omp for r-RESPA with /omp styles");
+    error->all(FLERR,  Error::NOLASTLINE, "Must use respa/omp for r-RESPA with /omp styles");
 
   _pair_compute_flag = force->pair && force->pair->compute_flag;
   _kspace_compute_flag = force->kspace && force->kspace->compute_flag;
@@ -213,7 +216,7 @@ void FixOMP::init()
   // kspace_split < 0  : master partition, does not do kspace
   // kspace_split > 0  : slave partition, only does kspace
 
-  if (strstr(update->integrate_style,"verlet/split") != nullptr) {
+  if (utils::strmatch(update->integrate_style, "^verlet/split")) {
     if (universe->iworld == 0) kspace_split = -1;
     else kspace_split = 1;
   } else {
@@ -227,7 +230,13 @@ void FixOMP::init()
   check_hybrid = 0;                                                     \
   if (force->name) {                                                    \
     if ( (strcmp(force->name ## _style,"hybrid") == 0) ||               \
-         (strcmp(force->name ## _style,"hybrid/overlay") == 0) )        \
+         (strcmp(force->name ## _style,"hybrid/overlay") == 0) ||       \
+         (strcmp(force->name ## _style,"hybrid/scaled") == 0) ||        \
+         (strcmp(force->name ## _style,"hybrid/molecular") == 0) ||     \
+         (strcmp(force->name ## _style,"hybrid/omp") == 0) ||           \
+         (strcmp(force->name ## _style,"hybrid/overlay/omp") == 0) ||   \
+         (strcmp(force->name ## _style,"hybrid/scaled/omp") == 0) ||    \
+         (strcmp(force->name ## _style,"hybrid/molecular/omp") == 0) )  \
       check_hybrid=1;                                                   \
     if (force->name->suffix_flag & Suffix::OMP) {                       \
       last_force_name = (const char *) #name;                           \

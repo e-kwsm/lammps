@@ -21,7 +21,9 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "ewald_const.h"
 #include "force.h"
+#include "info.h"
 #include "kspace.h"
 #include "math_const.h"
 #include "memory.h"
@@ -33,28 +35,24 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
-
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define A1        0.254829592
-#define A2       -0.284496736
-#define A3        1.421413741
-#define A4       -1.453152027
-#define A5        1.061405429
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairNMCutCoulLong::PairNMCutCoulLong(LAMMPS *lmp) : Pair(lmp)
+PairNMCutCoulLong::PairNMCutCoulLong(LAMMPS *lmp) :
+    Pair(lmp), cut_lj(nullptr), cut_ljsq(nullptr), e0(nullptr), r0(nullptr), nn(nullptr),
+    mm(nullptr), nm(nullptr), e0nm(nullptr), r0n(nullptr), r0m(nullptr), offset(nullptr)
 {
   ewaldflag = pppmflag = 1;
   ftable = nullptr;
-  qdist = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
 
 PairNMCutCoulLong::~PairNMCutCoulLong()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -147,7 +145,7 @@ void PairNMCutCoulLong::compute(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {
@@ -264,7 +262,7 @@ void PairNMCutCoulLong::settings(int narg, char **arg)
 void PairNMCutCoulLong::coeff(int narg, char **arg)
 {
   if (narg < 6 || narg > 7)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -292,7 +290,7 @@ void PairNMCutCoulLong::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -307,7 +305,7 @@ void PairNMCutCoulLong::init_style()
   neighbor->add_request(this);
 
   cut_coulsq = cut_coul * cut_coul;
-  // insure use of KSpace long-range solver, set g_ewald
+  // ensure use of KSpace long-range solver, set g_ewald
 
   if (force->kspace == nullptr)
     error->all(FLERR,"Pair style requires a KSpace style");
@@ -324,11 +322,11 @@ void PairNMCutCoulLong::init_style()
 
 double PairNMCutCoulLong::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
-  // include TIP4P qdist in full cutoff, qdist = 0.0 if not TIP4P
-
-  double cut = MAX(cut_lj[i][j],cut_coul+2.0*qdist);
+  double cut = MAX(cut_lj[i][j],cut_coul);
   cut_ljsq[i][j] = cut_lj[i][j] * cut_lj[i][j];
 
   nm[i][j] = nn[i][j]*mm[i][j];
@@ -523,7 +521,7 @@ double PairNMCutCoulLong::single(int i, int j, int itype, int jtype,
       rsq_lookup_single.f = rsq;
       itable = rsq_lookup_single.i & ncoulmask;
       itable >>= ncoulshiftbits;
-      fraction = (rsq_lookup_single.f - rtable[itable]) * drtable[itable];
+      fraction = ((double) rsq_lookup_single.f - rtable[itable]) * drtable[itable];
       table = ftable[itable] + fraction*dftable[itable];
       forcecoul = atom->q[i]*atom->q[j] * table;
       if (factor_coul < 1.0) {

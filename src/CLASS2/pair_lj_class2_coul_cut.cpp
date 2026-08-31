@@ -30,8 +30,12 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJClass2CoulCut::PairLJClass2CoulCut(LAMMPS *lmp) : Pair(lmp)
+PairLJClass2CoulCut::PairLJClass2CoulCut(LAMMPS *lmp) :
+    Pair(lmp), cut_lj(nullptr), cut_ljsq(nullptr), cut_coul(nullptr), cut_coulsq(nullptr),
+    epsilon(nullptr), sigma(nullptr), lj1(nullptr), lj2(nullptr), lj3(nullptr), lj4(nullptr),
+    offset(nullptr)
 {
+  born_matrix_enable = 1;
   writedata = 1;
   centroidstressflag = CENTROID_SAME;
 }
@@ -220,7 +224,7 @@ void PairLJClass2CoulCut::settings(int narg, char **arg)
 
 void PairLJClass2CoulCut::coeff(int narg, char **arg)
 {
-  if (narg < 4 || narg > 6) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg < 4 || narg > 6) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 
   if (!allocated) allocate();
 
@@ -248,7 +252,7 @@ void PairLJClass2CoulCut::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -466,6 +470,37 @@ double PairLJClass2CoulCut::single(int i, int j, int itype, int jtype, double rs
   }
 
   return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairLJClass2CoulCut::born_matrix(int i, int j, int itype, int jtype, double rsq,
+                            double factor_coul, double factor_lj, double &dupair,
+                            double &du2pair)
+{
+  double rinv, r2inv, r3inv, r7inv, r8inv;
+  double du_lj, du2_lj, du_coul, du2_coul;
+
+  double *q = atom->q;
+  double qqrd2e = force->qqrd2e;
+
+  r2inv = 1.0 / rsq;
+  rinv = sqrt(r2inv);
+  r3inv = r2inv * rinv;
+  r7inv = r3inv * r3inv * rinv;
+  r8inv = r7inv * rinv;
+
+  // Reminder: lj1[i][j] = 18.0 * epsilon[i][j] * pow(sigma[i][j], 9.0);
+  // Reminder: lj2[i][j] = 18.0 * epsilon[i][j] * pow(sigma[i][j], 6.0);
+  du_lj = r7inv * (lj2[itype][jtype] - lj1[itype][jtype] * r3inv);
+  du2_lj = r8inv * (10 * lj1[itype][jtype] * r3inv - 7 * lj2[itype][jtype]);
+
+  // Reminder: qqrd2e converts  q^2/r to energy w/ dielectric constant
+  du_coul = -qqrd2e * q[i] * q[j] * r2inv;
+  du2_coul = 2.0 * qqrd2e * q[i] * q[j] * r3inv;
+
+  dupair = factor_lj * du_lj + factor_coul * du_coul;
+  du2pair = factor_lj * du2_lj + factor_coul * du2_coul;
 }
 
 /* ---------------------------------------------------------------------- */

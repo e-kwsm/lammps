@@ -37,7 +37,7 @@ enum { NOBIAS, BIAS };
 /* ---------------------------------------------------------------------- */
 
 ComputeStressAtom::ComputeStressAtom(LAMMPS *lmp, int narg, char **arg) :
-    Compute(lmp, narg, arg), id_temp(nullptr), stress(nullptr)
+    Compute(lmp, narg, arg), temperature(nullptr), id_temp(nullptr), stress(nullptr)
 {
   if (narg < 4) error->all(FLERR, "Illegal compute stress/atom command");
 
@@ -48,17 +48,17 @@ ComputeStressAtom::ComputeStressAtom(LAMMPS *lmp, int narg, char **arg) :
   comm_reverse = 6;
 
   // store temperature ID used by stress computation
-  // insure it is valid for temperature computation
+  // ensure it is valid for temperature computation
 
   if (strcmp(arg[3], "NULL") == 0)
     id_temp = nullptr;
   else {
     id_temp = utils::strdup(arg[3]);
-
-    int icompute = modify->find_compute(id_temp);
-    if (icompute < 0) error->all(FLERR, "Could not find compute stress/atom temperature ID");
-    if (modify->compute[icompute]->tempflag == 0)
-      error->all(FLERR, "Compute stress/atom temperature ID does not compute temperature");
+    auto *icompute = modify->get_compute_by_id(id_temp);
+    if (!icompute)
+      error->all(FLERR, "Could not find compute stress/atom temperature compute {}", id_temp);
+    if (icompute->tempflag == 0)
+      error->all(FLERR, "Compute stress/atom compute {} does not compute temperature", id_temp);
   }
 
   // process optional args
@@ -122,9 +122,9 @@ void ComputeStressAtom::init()
   // fixes could have changed or compute_modify could have changed it
 
   if (id_temp) {
-    int icompute = modify->find_compute(id_temp);
-    if (icompute < 0) error->all(FLERR, "Could not find compute stress/atom temperature ID");
-    temperature = modify->compute[icompute];
+    temperature = modify->get_compute_by_id(id_temp);
+    if (!temperature)
+      error->all(FLERR, "Could not find compute stress/atom temperature compute {}", id_temp);
     if (temperature->tempbias)
       biasflag = BIAS;
     else
@@ -142,7 +142,7 @@ void ComputeStressAtom::compute_peratom()
 
   invoked_peratom = update->ntimestep;
   if (update->vflag_atom != invoked_peratom)
-    error->all(FLERR, "Per-atom virial was not tallied on needed timestep");
+    error->all(FLERR, Error::NOLASTLINE, "Per-atom virial was not tallied on needed timestep{}", utils::errorurl(22));
 
   // grow local stress array if necessary
   // needs to be atom->nmax in length
@@ -216,11 +216,11 @@ void ComputeStressAtom::compute_peratom()
   // add in per-atom contributions from relevant fixes
   // skip if vatom = nullptr
   // possible during setup phase if fix has not initialized its vatom yet
-  // e.g. fix ave/spatial defined before fix shake,
-  //   and fix ave/spatial uses a per-atom stress from this compute as input
+  // e.g. fix ave/chunk defined before fix shake,
+  //   and fix ave/chunk uses a per-atom stress from this compute as input
 
   if (fixflag) {
-    for (auto &ifix : modify->get_fix_list())
+    for (const auto &ifix : modify->get_fix_list())
       if (ifix->virial_peratom_flag && ifix->thermo_virial) {
         double **vatom = ifix->vatom;
         if (vatom)
@@ -288,7 +288,7 @@ void ComputeStressAtom::compute_peratom()
     } else {
 
       // invoke temperature if it hasn't been already
-      // this insures bias factor is pre-computed
+      // this ensures bias factor is pre-computed
 
       if (keflag && temperature->invoked_scalar != update->ntimestep) temperature->compute_scalar();
 

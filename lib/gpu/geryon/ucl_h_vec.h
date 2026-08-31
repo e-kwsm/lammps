@@ -126,7 +126,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     *   allocating container when using CUDA APIs
     * - Viewing a device container on the host is not supported **/
   template <class ucl_type>
-  inline void view(ucl_type &input, const size_t rows, const size_t cols) {
+  inline void view(ucl_type &input, const size_t UCL_DEBUG_ARG(rows), const size_t cols) {
     #ifdef UCL_DEBUG
     assert(rows==1);
     #endif
@@ -156,7 +156,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     * \param stride Number of _elements_ between the start of each row **/
   template <class ucl_type>
   inline void view(ucl_type &input, const size_t rows, const size_t cols,
-                   const size_t stride) { view(input,rows,cols); }
+                   const size_t /*stride*/) { view(input,rows,cols); }
 
   /// Do not allocate memory, instead use an existing allocation from Geryon
   /** This function must be passed a Geryon vector or matrix container.
@@ -188,7 +188,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     *   allocating container when using CUDA APIs
     * - Viewing a device pointer on the host is not supported **/
   template <class ptr_type>
-  inline void view(ptr_type *input, const size_t rows, const size_t cols,
+  inline void view(ptr_type *input, const size_t UCL_DEBUG_ARG(rows), const size_t cols,
                    UCL_Device &dev) {
     #ifdef UCL_DEBUG
     assert(rows==1);
@@ -214,7 +214,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     * \param stride Number of _elements_ between the start of each row **/
   template <class ptr_type>
   inline void view(ptr_type *input, const size_t rows, const size_t cols,
-                   const size_t stride, UCL_Device &dev)
+                   const size_t stride, UCL_Device &/*dev*/)
     { view(input,rows,cols,stride); }
 
   /// Do not allocate memory, instead use an existing allocation
@@ -233,7 +233,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     *   allocating container when using CUDA APIs
     * - Viewing a device container on the host is not supported **/
   template <class ucl_type>
-  inline void view_offset(const size_t offset,ucl_type &input,const size_t rows,
+  inline void view_offset(const size_t offset,ucl_type &input,const size_t UCL_DEBUG_ARG(rows),
                           const size_t cols) {
     #ifdef UCL_DEBUG
     assert(rows==1);
@@ -259,7 +259,7 @@ class UCL_H_Vec : public UCL_BaseMat {
     * \param stride Number of _elements_ between the start of each row **/
   template <class ucl_type>
   inline void view_offset(const size_t offset,ucl_type &input,const size_t rows,
-                          const size_t cols, const size_t stride)
+                          const size_t cols, const size_t /*stride*/)
     { view_offset(offset,input,rows,cols); }
 
   /// Do not allocate memory, instead use an existing allocation from Geryon
@@ -382,10 +382,10 @@ class UCL_H_Vec : public UCL_BaseMat {
   /// Get element at index i
   inline const numtyp & operator[](const int i) const { return _array[i]; }
   /// 2D access (row should always be 0)
-  inline numtyp & operator()(const int row, const int col)
+  inline numtyp & operator()(const int /*row*/, const int col)
     { return _array[col]; }
   /// 2D access (row should always be 0)
-  inline const numtyp & operator()(const int row, const int col) const
+  inline const numtyp & operator()(const int /*row*/, const int col) const
     { return _array[col]; }
 
   /// Returns pointer to memory pointer for allocation on host

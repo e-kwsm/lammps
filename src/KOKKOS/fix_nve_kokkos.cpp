@@ -17,8 +17,6 @@
 #include "atom_kokkos.h"
 #include "atom_masks.h"
 
-#include <cstring>
-
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
@@ -29,6 +27,7 @@ FixNVEKokkos<DeviceType>::FixNVEKokkos(LAMMPS *lmp, int narg, char **arg) :
   FixNVE(lmp, narg, arg)
 {
   kokkosable = 1;
+  fuse_integrate_flag = 1;
   atomKK = (AtomKokkos *) atom;
   execution_space = ExecutionSpaceFromDevice<DeviceType>::space;
 
@@ -43,7 +42,7 @@ void FixNVEKokkos<DeviceType>::init()
 {
   FixNVE::init();
 
-  atomKK->k_mass.modify<LMPHostType>();
+  atomKK->k_mass.modify_host();
   atomKK->k_mass.sync<DeviceType>();
 }
 
@@ -77,32 +76,38 @@ void FixNVEKokkos<DeviceType>::initial_integrate(int /*vflag*/)
 }
 
 template<class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVEKokkos<DeviceType>::initial_integrate_item(int i) const
 {
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
   if (mask[i] & groupbit) {
-    const double dtfm = dtf / mass[type[i]];
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
-    x(i,0) += dtv * v(i,0);
-    x(i,1) += dtv * v(i,1);
-    x(i,2) += dtv * v(i,2);
+    const KK_FLOAT dtfm = dtf_kk / mass[type[i]];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
   }
 }
 
 template<class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVEKokkos<DeviceType>::initial_integrate_rmass_item(int i) const
 {
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
   if (mask[i] & groupbit) {
-    const double dtfm = dtf / rmass[i];
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
-    x(i,0) += dtv * v(i,0);
-    x(i,1) += dtv * v(i,1);
-    x(i,2) += dtv * v(i,2);
+    const KK_FLOAT dtfm = dtf_kk / rmass[i];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
   }
 }
 
@@ -136,26 +141,96 @@ void FixNVEKokkos<DeviceType>::final_integrate()
 }
 
 template<class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVEKokkos<DeviceType>::final_integrate_item(int i) const
 {
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
   if (mask[i] & groupbit) {
-    const double dtfm = dtf / mass[type[i]];
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
+    const KK_FLOAT dtfm = dtf_kk / mass[type[i]];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
   }
 }
 
 template<class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVEKokkos<DeviceType>::final_integrate_rmass_item(int i) const
 {
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
   if (mask[i] & groupbit) {
-    const double dtfm = dtf / rmass[i];
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
+    const KK_FLOAT dtfm = dtf_kk / rmass[i];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+  }
+}
+
+/* ----------------------------------------------------------------------
+   allow for both per-type and per-atom mass
+------------------------------------------------------------------------- */
+
+template<class DeviceType>
+void FixNVEKokkos<DeviceType>::fused_integrate(int /*vflag*/)
+{
+  atomKK->sync(execution_space,datamask_read);
+
+  x = atomKK->k_x.view<DeviceType>();
+  v = atomKK->k_v.view<DeviceType>();
+  f = atomKK->k_f.view<DeviceType>();
+  rmass = atomKK->k_rmass.view<DeviceType>();
+  mass = atomKK->k_mass.view<DeviceType>();
+  type = atomKK->k_type.view<DeviceType>();
+  mask = atomKK->k_mask.view<DeviceType>();
+  int nlocal = atomKK->nlocal;
+  if (igroup == atomKK->firstgroup) nlocal = atomKK->nfirst;
+
+  if (rmass.data()) {
+    FixNVEKokkosFusedIntegrateFunctor<DeviceType,1> functor(this);
+    Kokkos::parallel_for(nlocal,functor);
+  } else {
+    FixNVEKokkosFusedIntegrateFunctor<DeviceType,0> functor(this);
+    Kokkos::parallel_for(nlocal,functor);
+  }
+
+  atomKK->modified(execution_space,datamask_modify);
+}
+
+template<class DeviceType>
+// NOLINTNEXTLINE
+KOKKOS_INLINE_FUNCTION
+void FixNVEKokkos<DeviceType>::fused_integrate_item(int i) const
+{
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
+  if (mask[i] & groupbit) {
+    const KK_FLOAT dtfm = static_cast<KK_FLOAT>(2.0) * dtf_kk / mass[type[i]];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
+  }
+}
+
+template<class DeviceType>
+// NOLINTNEXTLINE
+KOKKOS_INLINE_FUNCTION
+void FixNVEKokkos<DeviceType>::fused_integrate_rmass_item(int i) const
+{
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
+  if (mask[i] & groupbit) {
+    const KK_FLOAT dtfm = static_cast<KK_FLOAT>(2.0) * dtf_kk / rmass[i];
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
   }
 }
 
@@ -167,6 +242,8 @@ void FixNVEKokkos<DeviceType>::cleanup_copy()
   id = style = nullptr;
   vatom = nullptr;
 }
+
+/* ---------------------------------------------------------------------- */
 
 namespace LAMMPS_NS {
 template class FixNVEKokkos<LMPDeviceType>;

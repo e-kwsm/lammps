@@ -1,12 +1,15 @@
 .. index:: fix dt/reset
+.. index:: fix dt/reset/kk
 
 fix dt/reset command
 ====================
 
+Accelerator Variants: *dt/reset/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID dt/reset N Tmin Tmax Xmax keyword values ...
 
@@ -86,6 +89,10 @@ allows dump files to be written at intervals specified by simulation
 time, rather than by timesteps.  Simulation time is in time units;
 see the :doc:`units <units>` doc page for details.
 
+----------
+
+.. include:: accel_styles.rst
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -105,7 +112,7 @@ the :doc:`run <run>` command.  This fix is not invoked during
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

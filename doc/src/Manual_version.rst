@@ -2,39 +2,95 @@ What does a LAMMPS version mean
 -------------------------------
 
 The LAMMPS "version" is the date when it was released, such as 1 May
-2014.  LAMMPS is updated continuously and we aim to keep it working
-correctly and reliably at all times.  You can follow its development
-in a public `git repository on GitHub <https://github.com/lammps/lammps>`_.
+2014.  LAMMPS is updated continuously, and with the help of extensive
+automated testing (mostly applied *before* changes are included) we aim
+to keep it working correctly and reliably at all times, but there also
+are regular *feature releases* with new and expanded functionality, and
+there are designated *stable releases* that receive updates with bug
+fixes back-ported from the development branch.
 
-Whenever we fix a bug or update or add a feature, it will be merged into
-the *develop* branch of the git repository.  When a sufficient number of
-changes have accumulated *and* the software passes a set of automated
-tests, we release it in the next *patch* release, which are made every
-few weeks.  The *release* branch of the git repository is updated with
-every such release.  Info on patch releases are on `this website page
-<https://www.lammps.org/bug.html>`_.
+In addition to automated testing, several variants of static code
+analysis are run regularly to maintain or improve the overall code
+quality, consistency, and compliance with programming standards, best
+practices and style conventions.  You can follow its development in a
+public `git repository on GitHub <https://github.com/lammps/lammps>`_.
 
-Once or twice a year, we apply only bug fixes and small, non-intrusive
-changes to the *develop* branch and the code is subjected to more detailed
-and thorough testing than the default automated testing.  The latest
-patch release after such a period is then also labeled as a *stable* version
-and the *stable* branch is updated with it.  Between stable releases
-we occasionally release some updates to the stable release containing
-only bug fixes and updates back-ported from *develop* but no new features
-and update the *stable* branch accordingly.
+Each version of LAMMPS contains all the documented *features* up to and
+including its version date.  For recently added features, we add markers
+to the documentation at which specific LAMMPS version a feature or
+keyword was added or significantly changed.
 
-Each version of LAMMPS contains all the documented features up to and
-including its version date.
+Identifying the Version
+^^^^^^^^^^^^^^^^^^^^^^^
 
-The version date is printed to the screen and logfile every time you
-run LAMMPS. It is also in the file src/version.h and in the LAMMPS
-directory name created when you unpack a tarball.  And it is on the
-first page of the :doc:`manual <Manual>`.
+The version date is printed to the screen and log file every time you
+run LAMMPS.  There also is an indication, if a LAMMPS binary was
+compiled from version with modifications **after** a release, either
+from the development version or the maintenance version of the last
+stable release. It is also visible in the file src/version.h and in the
+LAMMPS directory name created when you unpack a downloaded tarball.  And
+it is on the first page of the :doc:`manual <Manual>`.
 
-* If you browse the HTML pages on the LAMMPS WWW site, they will by
-  default describe the most current patch release version of LAMMPS.
-  In the navigation bar on the bottom left, there is the option to
-  view instead the documentation for the most recent *stable* version
-  or the latest version from the current development branch.
-* If you browse the HTML pages included in your tarball, they
-  describe the version you have, which may be older.
+* If you browse the HTML pages of the online version of the LAMMPS
+  manual, they will by default describe the most current feature release
+  version of LAMMPS.  In the navigation bar on the bottom left, there is
+  the option to view instead the documentation for the most recent
+  *stable* version or the documentation corresponding to the state of
+  the development branch *develop*.
+* If you browse the HTML pages included in your downloaded tarball, they
+  describe the version you have, which may be older than the online
+  version.
+
+LAMMPS releases, branches, and tags
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. figure:: JPG/lammps-releases.png
+   :figclass: align-center
+
+   Relations between releases, main branches, and tags in the LAMMPS git repository
+
+Development
+"""""""""""
+
+Modifications of the LAMMPS source code (like bug fixes, code
+refactoring, updates to existing features, or addition of new features)
+are organized into pull requests.  Pull requests will be merged into the
+*develop* branch of the LAMMPS git repository on GitHub after they pass
+automated testing and code review by :doc:`core LAMMPS developers
+<Intro_authors>`.
+
+Feature Releases
+""""""""""""""""
+
+When a sufficient number of new features and updates have accumulated
+*and* the LAMMPS version on the *develop* branch passes an extended set
+of automated tests, we release it as a *feature release*, which are
+currently made every 4 to 8 weeks.  The *release* branch of the git
+repository is updated with every such *feature release* and a tag in the
+format ``patch_1May2014`` is added.  Release notes with the most
+important changes of these releases are `available on GitHub
+<https://github.com/lammps/lammps/releases/>`_.
+
+Stable Releases
+"""""""""""""""
+
+About once a year, we release a *stable release* version of LAMMPS.
+This is done after a "stabilization period" where we apply only bug
+fixes and small, non-intrusive changes to the *develop* branch but no
+new features to the core code.  At the same time, the code is subjected
+to more detailed and thorough manual testing that goes beyond the
+automated testing done by default.  After such a *stable release*, both
+the *release* and the *stable* branches are updated and two tags are
+applied, a ``patch_1May2014`` format and a ``stable_1May2014`` format
+tag.
+
+Stable Release Updates
+""""""""""""""""""""""
+
+Between *stable releases*, we collect bug fixes and updates that are
+back-ported from the *develop* branch in a branch called *maintenance*.
+From the *maintenance* branch we make occasional *stable update
+releases* and update the *stable* branch accordingly.  The first update
+to the ``stable_1May2014`` release would be tagged as
+``stable_1May2014_update1``.  These updates contain no new features
+and are intended to be fully backward compatible.

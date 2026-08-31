@@ -25,6 +25,7 @@
 #include "input.h"
 #include "memory.h"
 #include "modify.h"
+#include "safe_pointers.h"
 #include "update.h"
 #include "variable.h"
 
@@ -35,6 +36,7 @@
 #include "adios_common.h"
 
 using namespace LAMMPS_NS;
+using namespace LAMMPS_ADIOS;
 
 namespace LAMMPS_NS {
 class DumpCustomADIOSInternal {
@@ -61,26 +63,25 @@ class DumpCustomADIOSInternal {
 DumpCustomADIOS::DumpCustomADIOS(LAMMPS *lmp, int narg, char **arg) : DumpCustom(lmp, narg, arg)
 {
   // create a default adios2_config.xml if it doesn't exist yet.
-  FILE *cfgfp = fopen("adios2_config.xml", "r");
+  SafeFilePtr cfgfp = fopen("adios2_config.xml", "r");
   if (!cfgfp) {
     cfgfp = fopen("adios2_config.xml", "w");
     if (cfgfp) fputs(default_config, cfgfp);
   }
-  if (cfgfp) fclose(cfgfp);
 
   internal = new DumpCustomADIOSInternal();
   try {
 #if defined(MPI_STUBS)
-    internal->ad = new adios2::ADIOS("adios2_config.xml", adios2::DebugON);
+    internal->ad = new adios2::ADIOS("adios2_config.xml");
 #else
-    internal->ad = new adios2::ADIOS("adios2_config.xml", world, adios2::DebugON);
+    internal->ad = new adios2::ADIOS("adios2_config.xml", world);
 #endif
   } catch (std::ios_base::failure &e) {
     error->all(FLERR, "ADIOS initialization failed with error: {}", e.what());
   }
 
   internal->columnNames.reserve(nfield);
-  for (int i = 0; i < nfield; ++i) { internal->columnNames.emplace_back(earg[i]); }
+  for (int i = 0; i < nfield; ++i) internal->columnNames.emplace_back(earg[i]);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -88,7 +89,7 @@ DumpCustomADIOS::DumpCustomADIOS(LAMMPS *lmp, int narg, char **arg) : DumpCustom
 DumpCustomADIOS::~DumpCustomADIOS()
 {
   internal->columnNames.clear();
-  if (internal->fh) { internal->fh.Close(); }
+  if (internal->fh) internal->fh.Close();
   delete internal->ad;
   delete internal;
 }
@@ -165,7 +166,7 @@ void DumpCustomADIOS::write()
   internal->varAtoms.SetShape({nAtomsGlobal, nColumns});
   internal->varAtoms.SetSelection({{startRow, 0}, {nAtomsLocal, nColumns}});
 
-  // insure filewriter proc can receive everyone's info
+  // ensure filewriter proc can receive everyone's info
   // limit nmax*size_one to int since used as arg in MPI_Rsend() below
   // pack my data into buf
   // if sorting on IDs also request ID list from pack()
@@ -216,10 +217,10 @@ void DumpCustomADIOS::write()
   internal->fh.Put<uint64_t>("nme", bnme);
   internal->fh.Put<uint64_t>("offset", atomOffset);
   // now write the atoms
-  internal->fh.Put<double>("atoms", buf);
+  internal->fh.Put<double>(internal->varAtoms, buf);
   internal->fh.EndStep();    // I/O will happen now...
 
-  if (multifile) { internal->fh.Close(); }
+  if (multifile) internal->fh.Close();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -273,8 +274,8 @@ void DumpCustomADIOS::init_style()
     fix[i] = modify->get_fix_by_id(id_fix[i]);
     if (!fix[i]) error->all(FLERR, "Could not find dump custom/adios fix ID {}", id_fix[i]);
     if (nevery % fix[i]->peratom_freq)
-      error->all(FLERR, "dump custom/adios and fix {} with ID {} not computed at compatible times",
-                 fix[i]->style, id_fix[i]);
+      error->all(FLERR, Error::NOLASTLINE, "dump custom/adios and fix {} with ID {} not "
+                 "computed at compatible times{}", fix[i]->style, id_fix[i], utils::errorurl(7));
   }
 
   int ivariable;
@@ -290,58 +291,60 @@ void DumpCustomADIOS::init_style()
 
   /* Define the group of variables for the atom style here since it's a fixed
    * set */
-  internal->io = internal->ad->DeclareIO(internal->ioName);
-  if (!internal->io.InConfigFile()) {
-    // if not defined by user, we can change the default settings
-    // BPFile is the default writer
-    internal->io.SetEngine("BPFile");
-    int num_aggregators = multiproc;
-    if (num_aggregators == 0) num_aggregators = 1;
-    auto nstreams = std::to_string(num_aggregators);
-    internal->io.SetParameters({{"substreams", nstreams}});
-    if (me == 0)
-      utils::logmesg(lmp, "ADIOS method for {} is n-to-m (aggregation with {} writers)\n", filename,
-                     nstreams);
+  if (!internal->io) {
+    internal->io = internal->ad->DeclareIO(internal->ioName);
+    if (!internal->io.InConfigFile()) {
+      // if not defined by user, we can change the default settings
+      // BPFile is the default writer
+      internal->io.SetEngine("BPFile");
+      int num_aggregators = multiproc;
+      if (num_aggregators == 0) num_aggregators = 1;
+      auto nstreams = std::to_string(num_aggregators);
+      internal->io.SetParameters({{"substreams", nstreams}});
+      if (me == 0)
+        utils::logmesg(lmp, "ADIOS method for {} is n-to-m (aggregation with {} writers)\n",
+                       filename, nstreams);
+    }
+
+    internal->io.DefineVariable<uint64_t>("ntimestep");
+    internal->io.DefineVariable<uint64_t>("natoms");
+
+    internal->io.DefineVariable<int>("nprocs");
+    internal->io.DefineVariable<int>("ncolumns");
+
+    internal->io.DefineVariable<double>("boxxlo");
+    internal->io.DefineVariable<double>("boxxhi");
+    internal->io.DefineVariable<double>("boxylo");
+    internal->io.DefineVariable<double>("boxyhi");
+    internal->io.DefineVariable<double>("boxzlo");
+    internal->io.DefineVariable<double>("boxzhi");
+
+    internal->io.DefineVariable<double>("boxxy");
+    internal->io.DefineVariable<double>("boxxz");
+    internal->io.DefineVariable<double>("boxyz");
+
+    internal->io.DefineAttribute<int>("triclinic", domain->triclinic);
+
+    int *boundaryptr = reinterpret_cast<int *>(domain->boundary);
+    internal->io.DefineAttribute<int>("boundary", boundaryptr, 6);
+
+    auto nColumns = static_cast<size_t>(size_one);
+    internal->io.DefineAttribute<std::string>("columns", internal->columnNames.data(), nColumns);
+    internal->io.DefineAttribute<std::string>("columnstr", columns);
+    internal->io.DefineAttribute<std::string>("boundarystr", boundstr);
+    internal->io.DefineAttribute<std::string>("LAMMPS/dump_style", "custom");
+    internal->io.DefineAttribute<std::string>("LAMMPS/version", lmp->version);
+    internal->io.DefineAttribute<std::string>("LAMMPS/num_ver", std::to_string(lmp->num_ver));
+
+    internal->io.DefineVariable<uint64_t>("nme",
+                                          {adios2::LocalValueDim});    // local dimension variable
+    internal->io.DefineVariable<uint64_t>("offset",
+                                          {adios2::LocalValueDim});    // local dimension variable
+
+    // atom table size is not known at the moment
+    // it will be correctly defined at the moment of write
+    size_t UnknownSizeYet = 1;
+    internal->varAtoms = internal->io.DefineVariable<double>(
+        "atoms", {UnknownSizeYet, nColumns}, {UnknownSizeYet, 0}, {UnknownSizeYet, nColumns});
   }
-
-  internal->io.DefineVariable<uint64_t>("ntimestep");
-  internal->io.DefineVariable<uint64_t>("natoms");
-
-  internal->io.DefineVariable<int>("nprocs");
-  internal->io.DefineVariable<int>("ncolumns");
-
-  internal->io.DefineVariable<double>("boxxlo");
-  internal->io.DefineVariable<double>("boxxhi");
-  internal->io.DefineVariable<double>("boxylo");
-  internal->io.DefineVariable<double>("boxyhi");
-  internal->io.DefineVariable<double>("boxzlo");
-  internal->io.DefineVariable<double>("boxzhi");
-
-  internal->io.DefineVariable<double>("boxxy");
-  internal->io.DefineVariable<double>("boxxz");
-  internal->io.DefineVariable<double>("boxyz");
-
-  internal->io.DefineAttribute<int>("triclinic", domain->triclinic);
-
-  int *boundaryptr = reinterpret_cast<int *>(domain->boundary);
-  internal->io.DefineAttribute<int>("boundary", boundaryptr, 6);
-
-  auto nColumns = static_cast<size_t>(size_one);
-  internal->io.DefineAttribute<std::string>("columns", internal->columnNames.data(), nColumns);
-  internal->io.DefineAttribute<std::string>("columnstr", columns);
-  internal->io.DefineAttribute<std::string>("boundarystr", boundstr);
-  internal->io.DefineAttribute<std::string>("LAMMPS/dump_style", "custom");
-  internal->io.DefineAttribute<std::string>("LAMMPS/version", lmp->version);
-  internal->io.DefineAttribute<std::string>("LAMMPS/num_ver", std::to_string(lmp->num_ver));
-
-  internal->io.DefineVariable<uint64_t>("nme",
-                                        {adios2::LocalValueDim});    // local dimension variable
-  internal->io.DefineVariable<uint64_t>("offset",
-                                        {adios2::LocalValueDim});    // local dimension variable
-
-  // atom table size is not known at the moment
-  // it will be correctly defined at the moment of write
-  size_t UnknownSizeYet = 1;
-  internal->varAtoms = internal->io.DefineVariable<double>(
-      "atoms", {UnknownSizeYet, nColumns}, {UnknownSizeYet, 0}, {UnknownSizeYet, nColumns});
 }

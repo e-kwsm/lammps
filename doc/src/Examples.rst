@@ -1,7 +1,7 @@
 Example scripts
 ===============
 
-The LAMMPS distribution includes an examples sub-directory with many
+The LAMMPS distribution includes an examples subdirectory with many
 sample problems.  Many are 2d models that run quickly and are
 straightforward to visualize, requiring at most a couple of minutes to
 run on a desktop machine.  Each problem has an input script (in.\*) and
@@ -18,7 +18,7 @@ files and image files.
 
 If you uncomment the :doc:`dump <dump>` command in the input script, a
 text dump file will be produced, which can be animated by various
-`visualization programs <https://www.lammps.org/viz.html>`_.
+`visualization programs <https://www.lammps.org/ecosystem/visualization/>`_.
 
 If you uncomment the :doc:`dump image <dump>` command in the input
 script, and assuming you have built LAMMPS with a JPG library, JPG
@@ -26,10 +26,10 @@ snapshot images will be produced when the simulation runs.  They can
 be quickly post-processed into a movie using commands described on the
 :doc:`dump image <dump_image>` doc page.
 
-Animations of many of the examples can be viewed on the Movies section
-of the `LAMMPS website <https://www.lammps.org/movies.html>`_.
+Animations of many of the examples can be viewed on the Examples gallery section
+of the `LAMMPS website <https://www.lammps.org/examples/>`_.
 
-There are two kinds of sub-directories in the examples folder.  Lower
+There are two kinds of subdirectories in the examples folder.  Lower
 case named directories contain one or a few simple, quick-to-run
 problems.  Upper case named directories contain up to several complex
 scripts that illustrate a particular kind of simulation method or
@@ -44,9 +44,9 @@ Lowercase directories
 ---------------------
 
 +-------------+------------------------------------------------------------------+
-| accelerate  | run with various acceleration options (OpenMP, GPU, Phi)         |
-+-------------+------------------------------------------------------------------+
 | airebo      | polyethylene with AIREBO potential                               |
++-------------+------------------------------------------------------------------+
+| amoeba      | small water and bio models with AMOEBA and HIPPO potentials      |
 +-------------+------------------------------------------------------------------+
 | atm         | Axilrod-Teller-Muto potential example                            |
 +-------------+------------------------------------------------------------------+
@@ -54,7 +54,7 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | body        | body particles, 2d system                                        |
 +-------------+------------------------------------------------------------------+
-| bpm         | BPM simulations of pouring elastic grains and plate impact       |
+| bpm         | simulations of solid elastic/plastic deformation and fracture    |
 +-------------+------------------------------------------------------------------+
 | cmap        | CMAP 5-body contributions to CHARMM force field                  |
 +-------------+------------------------------------------------------------------+
@@ -78,13 +78,17 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | ellipse     | ellipsoidal particles in spherical solvent, 2d system            |
 +-------------+------------------------------------------------------------------+
+| fire        | examples for using minimization styles fire and quickmin         |
++-------------+------------------------------------------------------------------+
 | flow        | Couette and Poiseuille flow in a 2d channel                      |
 +-------------+------------------------------------------------------------------+
 | friction    | frictional contact of spherical asperities between 2d surfaces   |
 +-------------+------------------------------------------------------------------+
-| mc          | Monte Carlo features via fix gcmc, widom and other commands      |
+| gjf         | examples for Gronbech-Jensen thermostats with large time step    |
 +-------------+------------------------------------------------------------------+
 | granregion  | use of fix wall/region/gran as boundary on granular particles    |
++-------------+------------------------------------------------------------------+
+| grid        | use of commands which overlay grids on the simulation domain     |
 +-------------+------------------------------------------------------------------+
 | hugoniostat | Hugoniostat shock dynamics                                       |
 +-------------+------------------------------------------------------------------+
@@ -94,7 +98,7 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | kim         | use of potentials from the `OpenKIM Repository <openkim_>`_      |
 +-------------+------------------------------------------------------------------+
-| latte       | examples for using fix latte for DFTB via the LATTE library      |
+| mc          | Monte Carlo features via fix gcmc, widom and other commands      |
 +-------------+------------------------------------------------------------------+
 | mdi         | use of the MDI package and MolSSI MDI code coupling library      |
 +-------------+------------------------------------------------------------------+
@@ -102,11 +106,13 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | melt        | rapid melt of 3d LJ system                                       |
 +-------------+------------------------------------------------------------------+
+| mesh        | create_atoms mesh command examples                               |
++-------------+------------------------------------------------------------------+
 | micelle     | self-assembly of small lipid-like molecules into 2d bilayers     |
 +-------------+------------------------------------------------------------------+
 | min         | energy minimization of 2d LJ melt                                |
 +-------------+------------------------------------------------------------------+
-| mscg        | parameterize a multi-scale coarse-graining (MSCG) model          |
+| mliap       | examples for using several bundled ML-IAP potentials             |
 +-------------+------------------------------------------------------------------+
 | msst        | MSST shock dynamics                                              |
 +-------------+------------------------------------------------------------------+
@@ -117,6 +123,8 @@ Lowercase directories
 | neb         | nudged elastic band (NEB) calculation for barrier finding        |
 +-------------+------------------------------------------------------------------+
 | nemd        | non-equilibrium MD of 2d sheared system                          |
++-------------+------------------------------------------------------------------+
+| numdiff     | get forces, virial, and Born matrix from numerical differences   |
 +-------------+------------------------------------------------------------------+
 | obstacle    | flow around two voids in a 2d channel                            |
 +-------------+------------------------------------------------------------------+
@@ -134,9 +142,13 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | rdf-adf     | computing radial and angle distribution functions for water      |
 +-------------+------------------------------------------------------------------+
-| reax        | RDX and TATB models using the ReaxFF                             |
+| reaxff      | RDX and TATB models and more using ReaxFF                        |
++-------------+------------------------------------------------------------------+
+| replicate   | use of replicate command                                         |
 +-------------+------------------------------------------------------------------+
 | rerun       | use of rerun and read_dump commands                              |
++-------------+------------------------------------------------------------------+
+| rheo        | RHEO simulations of fluid flows and phase transitions            |
 +-------------+------------------------------------------------------------------+
 | rigid       | rigid bodies modeled as independent or coupled                   |
 +-------------+------------------------------------------------------------------+
@@ -146,17 +158,31 @@ Lowercase directories
 +-------------+------------------------------------------------------------------+
 | srd         | stochastic rotation dynamics (SRD) particles as solvent          |
 +-------------+------------------------------------------------------------------+
+| steinhardt  | Steinhardt-Nelson Q_l and W_l parameters using orientorder/atom  |
++-------------+------------------------------------------------------------------+
 | streitz     | use of Streitz/Mintmire potential with charge equilibration      |
 +-------------+------------------------------------------------------------------+
+| stress_vcm  | removing binned rigid body motion from binned stress profile     |
++-------------+------------------------------------------------------------------+
 | tad         | temperature-accelerated dynamics of vacancy diffusion in bulk Si |
++-------------+------------------------------------------------------------------+
+| tersoff     | regression test input for Tersoff potential variants             |
 +-------------+------------------------------------------------------------------+
 | threebody   | regression test input for a variety of manybody potentials       |
 +-------------+------------------------------------------------------------------+
 | tracker     | track interactions in LJ melt                                    |
 +-------------+------------------------------------------------------------------+
+| triclinic   | general triclinic simulation boxes versus orthogonal boxes       |
++-------------+------------------------------------------------------------------+
+| ttm         | two-temperature model examples                                   |
++-------------+------------------------------------------------------------------+
 | vashishta   | use of the Vashishta potential                                   |
 +-------------+------------------------------------------------------------------+
 | voronoi     | Voronoi tesselation via compute voronoi/atom command             |
++-------------+------------------------------------------------------------------+
+| wall        | use of reflective walls with different stochastic models         |
++-------------+------------------------------------------------------------------+
+| yaml        | demonstrates use of yaml thermo and dump styles                  |
 +-------------+------------------------------------------------------------------+
 
 Here is how you can run and visualize one of the sample problems:
@@ -169,8 +195,8 @@ Here is how you can run and visualize one of the sample problems:
 
 Running the simulation produces the files *dump.indent* and
 *log.lammps*\ .  You can visualize the dump file of snapshots with a
-variety of third-party tools highlighted on the
-`Visualization <https://www.lammps.org/viz.html>`_ page of the LAMMPS
+variety of third-party tools highlighted on the `Visualization
+<https://www.lammps.org/ecosystem/visualization/>`_ page of the LAMMPS
 website.
 
 If you uncomment the :doc:`dump image <dump_image>` line(s) in the input
@@ -207,9 +233,13 @@ Uppercase directories
 +------------+--------------------------------------------------------------------------------------------------+
 | KAPPA      | compute thermal conductivity via several methods                                                 |
 +------------+--------------------------------------------------------------------------------------------------+
+| LEPTON     | use of fix efield/lepton                                                                         |
++------------+--------------------------------------------------------------------------------------------------+
 | MC-LOOP    | using LAMMPS in a Monte Carlo mode to relax the energy of a system in a input script loop        |
 +------------+--------------------------------------------------------------------------------------------------+
 | PACKAGES   | examples for specific packages and contributed commands                                          |
++------------+--------------------------------------------------------------------------------------------------+
+| QUANTUM    | how to use LAMMPS in tandem with several quantum codes via the MDI code coupling library         |
 +------------+--------------------------------------------------------------------------------------------------+
 | SPIN       | examples for features of the SPIN package                                                        |
 +------------+--------------------------------------------------------------------------------------------------+
@@ -221,10 +251,10 @@ Uppercase directories
 Nearly all of these directories have README files which give more
 details on how to understand and use their contents.
 
-The PACKAGES directory has a large number of sub-directories which
+The PACKAGES directory has a large number of subdirectories which
 correspond by name to specific packages.  They contain scripts that
 illustrate how to use the command(s) provided in those packages.  Many
-of the sub-directories have their own README files which give further
+of the subdirectories have their own README files which give further
 instructions.  See the :doc:`Packages_details <Packages_details>` doc
 page for more info on specific packages.
 

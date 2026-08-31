@@ -1,7 +1,10 @@
 .. index:: compute cna/atom
+.. index:: compute cna/atom/omp
 
 compute cna/atom command
 ========================
+
+Accelerator Variants: *cna/atom/omp*
 
 Syntax
 """"""
@@ -43,7 +46,7 @@ compute group.  Note that normally a CNA calculation should only be
 performed on mono-component systems.
 
 The CNA calculation can be sensitive to the specified cutoff value.
-You should insure the appropriate nearest neighbors of an atom are
+You should ensure the appropriate nearest neighbors of an atom are
 found within the cutoff distance for the presumed crystal structure
 (e.g., 12 nearest neighbor for perfect FCC and HCP crystals, 14 nearest
 neighbors for perfect BCC crystals).  These formulas can be used to
@@ -67,7 +70,7 @@ following relation should also be satisfied:
 
 .. math::
 
-  r_c + r_s > 2*{\rm cutoff}
+  r_c + r_s > 2*\mathrm{cutoff}
 
 where :math:`r_c` is the cutoff distance of the potential, :math:`r_s`
 is the skin
@@ -92,9 +95,15 @@ LAMMPS output options.
 The per-atom vector values will be a number from 0 to 5, as explained
 above.
 
+----------
+
+.. include:: accel_styles.rst
+
+----------
+
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

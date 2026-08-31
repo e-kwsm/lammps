@@ -15,13 +15,16 @@
 #define LMP_DUMP_H
 
 #include "pointers.h"    // IWYU pragma: export
+#include "safe_pointers.h"
 
 #include <map>
 
 namespace LAMMPS_NS {
+class Compute;
 
 class Dump : protected Pointers {
   friend class Output;
+  friend class WriteDump;
 
  public:
   char *id;                // user-defined name of Dump
@@ -45,33 +48,30 @@ class Dump : protected Pointers {
   void init();
   virtual void write();
 
-  virtual int pack_forward_comm(int, int *, double *, int, int *)
-  {
-    return 0;
-  }
+  virtual int pack_forward_comm(int, int *, double *, int, int *) { return 0; }
   virtual void unpack_forward_comm(int, int, double *) {}
-  virtual int pack_reverse_comm(int, int, double *)
-  {
-    return 0;
-  }
+  virtual int pack_reverse_comm(int, int, double *) { return 0; }
   virtual void unpack_reverse_comm(int, int *, double *) {}
 
   void modify_params(int, char **);
+  virtual void *extract(const char *, int &) { return nullptr; }
+
   virtual double memory_usage();
 
  protected:
   int me, nprocs;    // proc info
 
-  int compressed;          // 1 if dump file is written compressed, 0 no
-  int binary;              // 1 if dump file is written binary, 0 no
-  int multifile;           // 0 = one big file, 1 = one file per timestep
-  int multiproc;           // 0 = proc 0 writes for all,
-                           // else # of procs writing files
-  int nclusterprocs;       // # of procs in my cluster that write to one file
-  int filewriter;          // 1 if this proc writes a file, else 0
-  int fileproc;            // ID of proc in my cluster who writes to file
-  char *multiname;         // filename with % converted to cluster ID
-  MPI_Comm clustercomm;    // MPI communicator within my cluster of procs
+  int compressed;            // 1 if dump file is written compressed, 0 no
+  int binary;                // 1 if dump file is written binary, 0 no
+  int multifile;             // 0 = one big file, 1 = one file per timestep
+  int multifile_override;    // 1 to override the "must have '*'" restriction in `write_dump`
+  int multiproc;             // 0 = proc 0 writes for all,
+                             // else # of procs writing files
+  int nclusterprocs;         // # of procs in my cluster that write to one file
+  int filewriter;            // 1 if this proc writes a file, else 0
+  int fileproc;              // ID of proc in my cluster who writes to file
+  char *multiname;           // filename with % converted to cluster ID
+  MPI_Comm clustercomm;      // MPI communicator within my cluster of procs
 
   int flush_flag;           // 0 if no flush, 1 if flush every dump
   int sort_flag;            // 1 if sorted output
@@ -90,12 +90,15 @@ class Dump : protected Pointers {
   int unit_count;           // # of times the unit information was written
   int delay_flag;           // 1 if delay output until delaystep
   int write_header_flag;    // 1 if write header, 0 if not
+  int has_id;               // 1 if output contains Atom-IDs
+
+  int nfile, nper;
 
   bigint delaystep;
 
-  int refreshflag;    // 1 if dump_modify refresh specified
-  char *refresh;      // compute ID to invoke refresh() on
-  int irefresh;       // index of compute
+  int refreshflag;      // 1 if dump_modify refresh specified
+  char *idrefresh;      // compute ID to invoke refresh() on
+  Compute *irefresh;    // index of compute
 
   int skipflag;     // 1 if skip condition defined
   char *skipvar;    // name of variable to check for skip condition
@@ -111,14 +114,14 @@ class Dump : protected Pointers {
   char *format_int_user;
   char *format_bigint_user;
   char **format_column_user;
-  enum { INT, DOUBLE, STRING, BIGINT };
+  enum { INT, DOUBLE, STRING, STRING2, BIGINT };
   std::map<std::string, int> key2col;
   std::vector<std::string> keyword_user;
 
-  FILE *fp;        // file to write dump to
-  int size_one;    // # of quantities for one atom
-  int nme;         // # of atoms in this dump from me
-  int nsme;        // # of chars in string output from me
+  SafeFilePtr fp;    // file to write dump to
+  int size_one;      // # of quantities for one atom
+  int nme;           // # of atoms in this dump from me
+  int nsme;          // # of chars in string output from me
 
   double boxxlo, boxxhi;    // local copies of domain values
   double boxylo, boxyhi;    // lo/hi are bounding box for triclinic
@@ -157,17 +160,11 @@ class Dump : protected Pointers {
 
   virtual void init_style() = 0;
   virtual void openfile();
-  virtual int modify_param(int, char **)
-  {
-    return 0;
-  }
+  virtual int modify_param(int, char **) { return 0; }
   virtual void write_header(bigint) = 0;
   virtual int count();
   virtual void pack(tagint *) = 0;
-  virtual int convert_string(int, double *)
-  {
-    return 0;
-  }
+  virtual int convert_string(int, double *) { return 0; }
   virtual void write_data(int, double *) = 0;
   virtual void write_footer() {}
 

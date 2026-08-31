@@ -75,7 +75,7 @@ instance, the potential reduces to a Stillinger-Weber potential
    G_{JIK}\left(\cos\theta\right) & = \left(\cos\theta+\frac{1}{3}\right)^2
 
 The potential reduces to a Tersoff potential (:ref:`Tersoff <Tersoff>`
-or :ref:`Albe <poly-Albe>`) if we set
+or :ref:`Albe1 <poly-Albe>`) if we set
 
 .. math::
 
@@ -110,7 +110,7 @@ The potential reduces to a modified Stillinger-Weber potential
    W_{IJ}\left(r\right) & = u_{IJ}\left(r\right) \\
    G_{JIK}\left(\cos\theta\right) & = g_{JIK}\left(\cos\theta\right)
 
-The potential reduces to a Rockett-Tersoff potential (:ref:`Wang3
+The potential reduces to a Rockett-Tersoff potential (:ref:`(Wang5)
 <Wang3>`) if we set
 
 .. math::
@@ -351,11 +351,11 @@ Related commands
 
 .. _poly-Albe:
 
-**(Albe)** K. Albe, K. Nordlund, J. Nord, and A. Kuronen, Phys. Rev. B, 66, 035205 (2002).
+**(Albe1)** K. Albe, K. Nordlund, J. Nord, and A. Kuronen, Phys. Rev. B, 66, 035205 (2002).
 
 .. _Wang3:
 
-**(Wang)** J. Wang, and A. Rockett, Phys. Rev. B, 43, 12571 (1991).
+**(Wang5)** J. Wang, and A. Rockett, Phys. Rev. B, 43, 12571 (1991).
 
 .. _poly-Daw:
 

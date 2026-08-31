@@ -23,23 +23,29 @@
 #include "atom.h"
 #include "atom_vec.h"
 #include "comm.h"
+#include "command.h"
 #include "compute.h"
 #include "domain.h"
 #include "dump.h"
 #include "error.h"
+#include "exceptions.h"
 #include "fix.h"
 #include "fix_external.h"
 #include "force.h"
 #include "group.h"
 #include "info.h"
 #include "input.h"
+#include "json.h"
+#include "lattice.h"
 #include "lmppython.h"
 #include "memory.h"
 #include "modify.h"
 #include "molecule.h"
 #include "neigh_list.h"
 #include "neighbor.h"
+#include "neigh_request.h"
 #include "output.h"
+#include "pair.h"
 #if defined(LMP_PLUGIN)
 #include "plugin.h"
 #endif
@@ -47,19 +53,23 @@
 #include "respa.h"
 #include "thermo.h"
 #include "timer.h"
+#include "tokenizer.h"
 #include "universe.h"
 #include "update.h"
 #include "variable.h"
+#include "version.h"
 
+
+#include <algorithm>
 #include <cstring>
-
-#if defined(LAMMPS_EXCEPTIONS)
-#include "exceptions.h"
-#endif
+#include <utility>
 
 #if defined(LMP_PYTHON)
 #include <Python.h>
 #endif
+
+/// string buffer for error messages of global errors
+static std::string lammps_last_global_errormessage;
 
 using namespace LAMMPS_NS;
 
@@ -73,6 +83,12 @@ static void ptr_argument_warning()
           "is deprecated.  Please use the return value instead.\n");
   ptr_argument_flag = 0;
 }
+
+// __func__ is supposed to be portable for compilers also supporting C99: MSVC, GCC, Clang.
+#if defined(FNERR)
+#undef FNERR
+#endif
+#define FNERR __func__
 
 // ----------------------------------------------------------------------
 // utility macros
@@ -93,28 +109,30 @@ static void ptr_argument_warning()
    END_CAPTURE
 ------------------------------------------------------------------------- */
 
-#ifdef LAMMPS_EXCEPTIONS
-#define BEGIN_CAPTURE \
+#define BEGIN_CAPTURE        \
   Error *error = lmp->error; \
   try
 
 #define END_CAPTURE \
   catch(LAMMPSAbortException &ae) { \
     int nprocs = 0; \
-    MPI_Comm_size(ae.universe, &nprocs ); \
+    MPI_Comm_size(ae.get_universe(), &nprocs ); \
     \
     if (nprocs > 1) { \
-      error->set_last_error(ae.message, ERROR_ABORT); \
+      error->set_last_error(ae.what(), ERROR_ABORT); \
     } else { \
-      error->set_last_error(ae.message, ERROR_NORMAL); \
+      error->set_last_error(ae.what(), ERROR_NORMAL); \
     } \
   } catch(LAMMPSException &e) { \
-    error->set_last_error(e.message, ERROR_NORMAL); \
+    error->set_last_error(e.what(), ERROR_NORMAL); \
   }
-#else
-#define BEGIN_CAPTURE
-#define END_CAPTURE
-#endif
+
+#define STORE_ERROR_MESSAGE(handle, message)                \
+  if (handle && handle->error) {                            \
+    handle->error->set_last_error(message);                 \
+  } else {                                                  \
+    lammps_last_global_errormessage = std::move(message);   \
+  }
 
 // ----------------------------------------------------------------------
 // Library functions to create/destroy an instance of LAMMPS
@@ -129,7 +147,7 @@ The :cpp:func:`lammps_open` function creates a new :cpp:class:`LAMMPS
 as if they were :doc:`command-line arguments <Run_options>` for the
 LAMMPS executable, and an MPI communicator for LAMMPS to run under.
 Since the list of arguments is **exactly** as when called from the
-command line, the first argument would be the name of the executable and
+command-line, the first argument would be the name of the executable and
 thus is otherwise ignored.  However ``argc`` may be set to 0 and then
 ``argv`` may be ``NULL``.  If MPI is not yet initialized, ``MPI_Init()``
 will be called during creation of the LAMMPS class instance.
@@ -144,7 +162,7 @@ fails a null pointer is returned.
    possible to provide the address of a pointer variable as final
    argument *ptr*\ .
 
-.. deprecated:: 18Sep2020
+.. versionremoved:: 18Sep2020
 
    The *ptr* argument will be removed in a future release of LAMMPS.
    It should be set to ``NULL`` instead.
@@ -163,8 +181,8 @@ fails a null pointer is returned.
 
 \endverbatim
  *
- * \param  argc  number of command line arguments
- * \param  argv  list of command line argument strings
+ * \param  argc  number of command-line arguments
+ * \param  argv  list of command-line argument strings
  * \param  comm  MPI communicator for this LAMMPS instance
  * \param  ptr   pointer to a void pointer variable which serves
  *               as a handle; may be ``NULL``
@@ -176,20 +194,20 @@ void *lammps_open(int argc, char **argv, MPI_Comm comm, void **ptr)
   lammps_mpi_init();
   if (ptr) ptr_argument_warning();
 
-#ifdef LAMMPS_EXCEPTIONS
-  try
-  {
+  try {
+    lammps_last_global_errormessage.clear();
     lmp = new LAMMPS(argc, argv, comm);
     if (ptr) *ptr = (void *) lmp;
-  }
-  catch(LAMMPSException &e) {
-    fmt::print(stderr, "LAMMPS Exception: {}", e.message);
+  } catch (fmt::format_error &fe) {
+    lammps_last_global_errormessage = fe.what();
+    fprintf(stderr, "fmt::format_error: %s\n", fe.what());
+    if (ptr) *ptr = nullptr;
+  } catch(LAMMPSException &e) {
+    lammps_last_global_errormessage = e.what();
+
+    utils::print(stderr, "LAMMPS Exception: {}", e.what());
     if (ptr) *ptr = nullptr;
   }
-#else
-  lmp = new LAMMPS(argc, argv, comm);
-  if (ptr) *ptr = (void *) lmp;
-#endif
   return (void *) lmp;
 }
 
@@ -219,7 +237,7 @@ fails a null pointer is returned.
    possible to provide the address of a pointer variable as final
    argument *ptr*\ .
 
-.. deprecated:: 18Sep2020
+.. versionremoved:: 18Sep2020
 
    The *ptr* argument will be removed in a future release of LAMMPS.
    It should be set to ``NULL`` instead.
@@ -230,8 +248,8 @@ fails a null pointer is returned.
 
 \endverbatim
  *
- * \param  argc  number of command line arguments
- * \param  argv  list of command line argument strings
+ * \param  argc  number of command-line arguments
+ * \param  argv  list of command-line argument strings
  * \param  ptr   pointer to a void pointer variable
  *               which serves as a handle; may be ``NULL``
  * \return       pointer to new LAMMPS instance cast to ``void *`` */
@@ -247,6 +265,8 @@ void *lammps_open_no_mpi(int argc, char **argv, void **ptr)
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 This function is a version of :cpp:func:`lammps_open`, that uses an
 integer for the MPI communicator as the MPI Fortran interface does.  It
 is used in the :f:func:`lammps` constructor of the LAMMPS Fortran
@@ -257,15 +277,13 @@ communicator with ``MPI_Comm_f2c()`` and then calls
 If for some reason the creation or initialization of the LAMMPS instance
 fails a null pointer is returned.
 
-.. versionadded:: 18Sep2020
-
 *See also*
    :cpp:func:`lammps_open_fortran`, :cpp:func:`lammps_open_no_mpi`
 
 \endverbatim
  *
- * \param  argc   number of command line arguments
- * \param  argv   list of command line argument strings
+ * \param  argc   number of command-line arguments
+ * \param  argv   list of command-line argument strings
  * \param  f_comm Fortran style MPI communicator for this LAMMPS instance
  * \return        pointer to new LAMMPS instance cast to ``void *`` */
 
@@ -294,7 +312,13 @@ multiple LAMMPS instances concurrently or sequentially.  See
 
 void lammps_close(void *handle)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+
   delete lmp;
 }
 
@@ -304,12 +328,12 @@ void lammps_close(void *handle)
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 The MPI standard requires that any MPI application must call
 ``MPI_Init()`` exactly once before performing any other MPI function
 calls.  This function checks, whether MPI is already initialized and
 calls ``MPI_Init()`` in case it is not.
-
-.. versionadded:: 18Sep2020
 
 \endverbatim */
 
@@ -333,6 +357,8 @@ void lammps_mpi_init()
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 The MPI standard requires that any MPI application calls
 ``MPI_Finalize()`` before exiting.  Even if a calling program does not
 do any MPI calls, MPI is still initialized internally to avoid errors
@@ -341,10 +367,9 @@ before exiting the program to wait until all (parallel) tasks are
 completed and then MPI is cleanly shut down.  After calling this
 function no more MPI calls may be made.
 
-.. versionadded:: 18Sep2020
-
 *See also*
-   :cpp:func:`lammps_kokkos_finalize`, :cpp:func:`lammps_python_finalize`
+   :cpp:func:`lammps_kokkos_finalize`, :cpp:func:`lammps_python_finalize`,
+   :cpp:func:`lammps_plugin_finalize`
 \endverbatim */
 
 void lammps_mpi_finalize()
@@ -366,6 +391,8 @@ void lammps_mpi_finalize()
  *
 \verbatim embed:rst
 
+.. versionadded:: 2Jul2021
+
 The Kokkos library may only be initialized once during the execution of
 a process.  This is done automatically the first time Kokkos
 functionality is used.  This requires that the Kokkos environment
@@ -373,10 +400,9 @@ must be explicitly shut down after any LAMMPS instance using it is
 closed (to release associated resources).
 After calling this function no Kokkos functionality may be used.
 
-.. versionadded:: 2Jul2021
-
 *See also*
-   :cpp:func:`lammps_mpi_finalize`, :cpp:func:`lammps_python_finalize`
+   :cpp:func:`lammps_mpi_finalize`, :cpp:func:`lammps_python_finalize`,
+   :cpp:func:`lammps_plugin_finalize`
 \endverbatim */
 
 void lammps_kokkos_finalize()
@@ -386,9 +412,40 @@ void lammps_kokkos_finalize()
 
 /* ---------------------------------------------------------------------- */
 
+/** Unload all plugins and release the corresponding DSO handles
+ *
+\verbatim embed:rst
+
+.. versionadded:: 12Jun2025
+
+This function clears the list of all loaded plugins and closes the
+corresponding DSO handles and releases the imported executable code.
+
+However, this is **not** done when a LAMMPS instance is deleted because
+plugins and their shared objects are global properties.
+
+This function can be called to explicitly clear out all loaded plugins
+in case it is safe to do so.
+
+*See also*
+   :cpp:func:`lammps_mpi_finalize`, :cpp:func:`lammps_kokkos_finalize`,
+   :cpp:func:`lammps_python_finalize`
+\endverbatim */
+
+void lammps_plugin_finalize()
+{
+#if defined(LMP_PLUGIN)
+  plugin_finalize();
+#endif
+}
+
+/* ---------------------------------------------------------------------- */
+
 /** Clear the embedded Python environment
  *
 \verbatim embed:rst
+
+.. versionadded:: 20Sep2021
 
 This function resets and clears an embedded Python environment
 by calling the `Py_Finalize() function
@@ -409,10 +466,9 @@ after calling Py_Finalize().
 This function can be called to explicitly clear the Python
 environment in case it is safe to do so.
 
-.. versionadded:: 20Sep2021
-
 *See also*
-   :cpp:func:`lammps_mpi_finalize`, :cpp:func:`lammps_kokkos_finalize`
+   :cpp:func:`lammps_mpi_finalize`, :cpp:func:`lammps_kokkos_finalize`,
+   :cpp:func:`lammps_plugin_finalize`
 \endverbatim */
 
 void lammps_python_finalize()
@@ -420,12 +476,13 @@ void lammps_python_finalize()
   Python::finalize();
 }
 
-
 /* ---------------------------------------------------------------------- */
 
 /** Call a LAMMPS Error class function
  *
 \verbatim embed:rst
+
+.. versionadded:: 3Nov2022
 
 This function is a wrapper around functions in the ``Error`` to print an
 error message and then stop LAMMPS.
@@ -435,8 +492,6 @@ of constants from :cpp:enum:`_LMP_ERROR_CONST`.  If the value does not
 match any valid combination of constants a warning is printed and the
 function returns.
 
-.. versionadded:: 3Nov2022
-
 \endverbatim
  *
  * \param  handle       pointer to a previously created LAMMPS instance
@@ -445,7 +500,12 @@ function returns.
 
 void lammps_error(void *handle, int error_type, const char *error_text)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
 
   BEGIN_CAPTURE
   {
@@ -454,19 +514,19 @@ void lammps_error(void *handle, int error_type, const char *error_text)
       lmp->error->warning("(library)", 0, error_text);
       break;
     case LMP_ERROR_ONE:
-      lmp->error->one("(library)", 0, error_text);
+      lmp->error->one("(library)", 0, Error::NOLASTLINE, error_text);
       break;
     case LMP_ERROR_ALL:
-      lmp->error->all("(library)", 0, error_text);
+      lmp->error->all("(library)", 0, Error::NOLASTLINE, error_text);
       break;
     case LMP_ERROR_WARNING|LMP_ERROR_WORLD:
       lmp->error->warning("(library)", 0, error_text);
       break;
     case LMP_ERROR_ONE|LMP_ERROR_WORLD:
-      lmp->error->one("(library)", 0, error_text);
+      lmp->error->one("(library)", 0, Error::NOLASTLINE, error_text);
       break;
     case LMP_ERROR_ALL|LMP_ERROR_WORLD:
-      lmp->error->all("(library)", 0, error_text);
+      lmp->error->all("(library)", 0, Error::NOLASTLINE, error_text);
       break;
     case LMP_ERROR_WARNING|LMP_ERROR_UNIVERSE:
       lmp->error->universe_warn("(library)", 0, error_text);
@@ -484,8 +544,7 @@ void lammps_error(void *handle, int error_type, const char *error_text)
   }
   END_CAPTURE
 
-#if defined(LAMMPS_EXCEPTIONS)
-    // with enabled exceptions the above code will simply throw an
+    // in case of an error the above code will simply throw an
     // exception and record the error message. So we have to explicitly
     // stop here like we do in main.cpp
   if (lammps_has_error(handle)) {
@@ -500,7 +559,58 @@ void lammps_error(void *handle, int error_type, const char *error_text)
       exit(1);
     }
   }
-#endif
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** expand a single LAMMPS input line from a string.
+ *
+\verbatim embed:rst
+
+This function tells LAMMPS to expand the string in *cmd* like it would process
+an input line fed to :cpp:func:`lammps_command` **without** executing it.
+The *entire* string is considered as input and need not have a (final) newline
+character.  Newline characters in the body of the string, however, will be
+treated as part of the command and will **not** start a second command.
+
+The function returns the expanded string in a new string buffer that
+must be freed with :cpp:func:`lammps_free` after use to avoid a memory leak.
+
+*See also*
+    :cpp:func:`lammps_eval`
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  line    string with a single LAMMPS input line
+ * \return         string with expanded line */
+
+char *lammps_expand(void *handle, const char *line)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
+  char *copy, *work;
+  int n, maxcopy, maxwork;
+
+  if (!line) return nullptr;
+
+  BEGIN_CAPTURE
+  {
+    n = strlen(line) + 1;
+    copy = (char *) malloc(n * sizeof(char));
+    work = (char *) malloc(n * sizeof(char));
+    maxwork = maxcopy = n;
+    memcpy(copy, line, maxcopy);
+    lmp->input->substitute(copy, work, maxcopy, maxwork, 0);
+    free(work);
+  }
+  END_CAPTURE
+
+  return copy;
 }
 
 // ----------------------------------------------------------------------
@@ -527,13 +637,18 @@ and :cpp:func:`Input::file()<void LAMMPS_NS::Input::file()>`.
 
 void lammps_file(void *handle, const char *filename)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->update || !lmp->input) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
 
   BEGIN_CAPTURE
   {
     if (lmp->update->whichflag != 0)
-      lmp->error->all(FLERR,"Library error: issuing LAMMPS commands "
-                      "during a run is not allowed.");
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Issuing LAMMPS commands during a run is not allowed", FNERR);
     else
       lmp->input->file(filename);
   }
@@ -551,7 +666,7 @@ This function tells LAMMPS to execute the single command in the string
 (final) newline character.  Newline characters in the body of the
 string, however, will be treated as part of the command and will **not**
 start a second command.  The function :cpp:func:`lammps_commands_string`
-processes a string with multiple command lines.
+processes a string with multiple command-lines.
 
 The function returns the name of the command on success or ``NULL`` when
 passing a string without a command.
@@ -564,14 +679,19 @@ passing a string without a command.
 
 char *lammps_command(void *handle, const char *cmd)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->update || !lmp->input) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
   char *result = nullptr;
 
   BEGIN_CAPTURE
   {
     if (lmp->update->whichflag != 0)
-      lmp->error->all(FLERR,"Library error: issuing LAMMPS commands "
-                      "during a run is not allowed.");
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Issuing LAMMPS command during a run is not allowed.", FNERR);
     else
       result = lmp->input->one(cmd);
   }
@@ -623,10 +743,10 @@ combined by removing the '&' and the following newline character.  After
 this processing the string is handed to LAMMPS for parsing and
 executing.
 
-.. note::
+.. versionadded:: 21Nov2023
 
-   Multi-line commands enabled by triple quotes will NOT work with
-   this function.
+   The command is now able to process long strings with triple quotes and
+   loops using :doc:`jump SELF \<label\> <jump>`.
 
 \endverbatim
  *
@@ -635,45 +755,97 @@ executing.
 
 void lammps_commands_string(void *handle, const char *str)
 {
-  auto lmp = (LAMMPS *) handle;
-
-  // copy str and convert from CR-LF (DOS-style) to LF (Unix style) line
-  int n = strlen(str);
-  char *ptr, *copy = new char[n+1];
-
-  for (ptr = copy; *str != '\0'; ++str) {
-    if ((str[0] == '\r') && (str[1] == '\n')) continue;
-    *ptr++ = *str;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->update || !lmp->output || !lmp->comm || !lmp->input) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
   }
-  *ptr = '\0';
+
+  std::string cmd, line, buffer;
+  bool append = false;
+  bool triple = false;
+  if (str) buffer = str;
+  buffer += '\n';
 
   BEGIN_CAPTURE
   {
     if (lmp->update->whichflag != 0) {
-      lmp->error->all(FLERR,"Library error: issuing LAMMPS command during run");
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Issuing LAMMPS commands during a run is not allowed", FNERR);
     }
 
-    n = strlen(copy);
-    ptr = copy;
-    for (int i=0; i < n; ++i) {
+    std::size_t cursor = 0;
+    int nline = -1;
+    std::string label;
 
-      // handle continuation character as last character in line or string
-      if ((copy[i] == '&') && (copy[i+1] == '\n'))
-        copy[i+1] = copy[i] = ' ';
-      else if ((copy[i] == '&') && (copy[i+1] == '\0'))
-        copy[i] = ' ';
+    // split buffer into lines, set line number, process continuation characters, and here docs
 
-      if (copy[i] == '\n') {
-        copy[i] = '\0';
-        lmp->input->one(ptr);
-        ptr = copy + i+1;
-      } else if (copy[i+1] == '\0')
-        lmp->input->one(ptr);
+    while (cursor < buffer.size()) {
+      ++nline;
+      std::size_t start = cursor;
+      cursor = buffer.find('\n', start);
+      if (cursor != std::string::npos) {
+        line = buffer.substr(start, cursor-start);
+        auto start_erase = std::remove(line.begin(), line.end(), '\r');
+        line.erase(start_erase, line.end());
+        ++cursor;
+        lmp->output->thermo->set_line(nline);
+      } else {
+        line = buffer;
+      }
+
+      if (append || triple)
+        cmd += line;
+      else
+        cmd = line;
+
+      if (utils::strmatch(line, R"(""".*""")")) {
+        triple = false;
+      } else if (utils::strmatch(line, R"(""")")) {
+        triple = !triple;
+      }
+      if (triple) cmd += '\n';
+
+      if (!triple && utils::strmatch(cmd, "&$")) {
+        append = true;
+        cmd.back() = ' ';
+      } else append = false;
+
+      auto words = Tokenizer(cmd).as_vector();
+      if (!label.empty()) {
+        // skip lines until label command found
+        if ((words.size() == 2) && (words[0] == "label") && (words[1] == label)) {
+          label.clear();
+        } else continue;
+      }
+
+      if (!append && !triple) {
+        // need to handle jump command here
+        if ((words.size() == 3) && (words[0] == "jump")) {
+          if (words[1] != "SELF")
+            lmp->error->all(FLERR, Error::NOLASTLINE,
+                            "{}(): May only use jump SELF with command string buffer", FNERR);
+          // emulate jump command unless with need to skip it
+          if (!lmp->input->get_jump_skip()) {
+            label = words[2];
+            cursor = 0;
+            nline = -1;
+            continue;
+          }
+        }
+        // stop processing when quit command is found
+        if (!words.empty() && (words[0] == "quit")) {
+          if (lmp->comm->me == 0)
+            utils::logmesg(lmp, "Encountered a 'quit' command. Stopping ...\n");
+          break;
+        }
+
+        lmp->input->one(cmd);
+      }
     }
   }
   END_CAPTURE
-
-  delete[] copy;
 }
 
 // -----------------------------------------------------------------------
@@ -685,7 +857,7 @@ void lammps_commands_string(void *handle, const char *str)
 \verbatim embed:rst
 
 This number may be very large when running large simulations across
-multiple processors.  Depending on compile time choices, LAMMPS may be
+multiple processes.  Depending on compile time choices, LAMMPS may be
 using either 32-bit or a 64-bit integer to store this number. For
 portability this function returns thus a double precision
 floating point number, which can represent up to a 53-bit signed
@@ -711,23 +883,30 @@ the size of a ``bigint`` integer.
 
 double lammps_get_natoms(void *handle)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1.0;
+  }
 
   auto  natoms = static_cast<double>(lmp->atom->natoms);
-  if (natoms > 9.0e15) return 0; // TODO:XXX why not -1?
+  if (natoms > 9.0e15) return -1.0;
   return natoms;
 }
 
 /* ---------------------------------------------------------------------- */
 
-/** Get current value of a thermo keyword.
+/** Evaluate a thermo keyword.
  *
 \verbatim embed:rst
 
-This function returns the current value of a :doc:`thermo keyword
-<thermo_style>`.  Unlike :cpp:func:`lammps_extract_global` it does not
-give access to the storage of the desired data but returns its value as
-a ``double``, so it can also return information that is computed on-the-fly.
+This function returns the current value of a :doc:`thermo keyword <thermo_style>`.
+Unlike :cpp:func:`lammps_extract_global` it does not give access to the
+storage of the desired data but returns its value as a ``double``, so it
+can also return information that is computed on-the-fly.
+Use :cpp:func:`lammps_last_thermo` to get access to the cached data from
+the last thermo output.
 
 \endverbatim
  *
@@ -737,7 +916,12 @@ a ``double``, so it can also return information that is computed on-the-fly.
 
 double lammps_get_thermo(void *handle, const char *keyword)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->output || !lmp->output->thermo) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0.0;
+  }
   double dval = 0.0;
 
   BEGIN_CAPTURE
@@ -747,6 +931,153 @@ double lammps_get_thermo(void *handle, const char *keyword)
   END_CAPTURE
 
   return dval;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Access cached data from last thermo output
+ *
+\verbatim embed:rst
+
+.. versionadded:: 15Jun2023
+
+This function provides access to cached data from the last thermo output.
+This differs from :cpp:func:`lammps_get_thermo` in that it does **not**
+trigger an evaluation.  Instead it provides direct access to a read-only
+location of the last thermo output data and the corresponding keyword
+strings.  How to handle the return value depends on the value of the *what*
+argument string.  When accessing the data from a concurrent thread while
+LAMMPS is running, the cache needs to be locked first and then unlocked
+after the data is obtained, so that the data is not corrupted while
+reading in case LAMMPS wants to update it at the same time.  Outside
+of a run, the lock/unlock calls have no effect.
+
+.. note::
+
+   The *type* property points to a static location that is reassigned
+   with every call, so the returned pointer should be recast,
+   dereferenced, and assigned immediately. Otherwise, its value may be
+   changed with the next invocation of the function.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 51 25 10
+
+   * - Value of *what*
+     - Description of return value
+     - Data type
+     - Uses index
+   * - setup
+     - 1 if setup is not completed and thus thermo data invalid, 0 otherwise
+     - pointer to int
+     - no
+   * - line
+     - line number (0-based) of current line in current file or buffer
+     - pointer to int
+     - no
+   * - imagename
+     - file name of the last :doc:`dump image <dump_image>` file written
+     - pointer to 0-terminated const char array
+     - no
+   * - step
+     - timestep when the last thermo output was generated or -1
+     - pointer to bigint
+     - no
+   * - num
+     - number of fields in thermo output
+     - pointer to int
+     - no
+   * - keyword
+     - column keyword for thermo output
+     - pointer to 0-terminated const char array
+     - yes
+   * - type
+     - data type of thermo output column; see :cpp:enum:`_LMP_DATATYPE_CONST`
+     - pointer to int
+     - yes
+   * - data
+     - actual field data for column
+     - pointer to int, int64_t or double
+     - yes
+   * - lock
+     - acquires lock to thermo data cache
+     - NULL pointer
+     - no
+   * - unlock
+     - releases lock to thermo data cache
+     - NULL pointer
+     - no
+
+\endverbatim
+ *
+ * \param  handle   pointer to a previously created LAMMPS instance
+ * \param  what     string with the kind of data requested
+ * \param  index    integer with index into data arrays, ignored for scalar data
+ * \return          pointer to location of requested data cast to void or NULL */
+
+void *lammps_last_thermo(void *handle, const char *what, int index)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->update || !lmp->output || !lmp->output->thermo) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
+  void *val = nullptr;
+
+  if (!lmp->output) return val;
+  Thermo *th = lmp->output->thermo;
+  if (!th) return val;
+  const int nfield = *th->get_nfield();
+
+  BEGIN_CAPTURE
+  {
+    if (strcmp(what, "setup") == 0) {
+      if (lmp->update)
+        val = (void *) &lmp->update->setupflag;
+
+    } else if (strcmp(what, "line") == 0) {
+      val = (void *) th->get_line();
+
+    } else if (strcmp(what, "imagename") == 0) {
+      val = (void *) th->get_image_fname();
+
+    } else if (strcmp(what, "step") == 0) {
+      val = (void *) th->get_timestep();
+
+    } else if (strcmp(what, "num") == 0) {
+      val = (void *) th->get_nfield();
+
+    } else if (strcmp(what, "keyword") == 0) {
+      if ((index < 0) || (index >= nfield)) return nullptr;
+      const auto &keywords = th->get_keywords();
+      val = (void *) keywords[index].c_str();
+
+    } else if (strcmp(what, "type") == 0) {
+      if ((index < 0) || (index >= nfield)) return nullptr;
+      const auto &field = th->get_fields()[index];
+      val = (void *) &field.type;
+    } else if (strcmp(what, "data") == 0) {
+      if ((index < 0) || (index >= nfield)) return nullptr;
+      const auto &field = th->get_fields()[index];
+      if (field.type == multitype::LAMMPS_INT) {
+        val = (void *) &field.data.i;
+      } else if (field.type == multitype::LAMMPS_INT64) {
+        val = (void *) &field.data.b;
+      } else if (field.type == multitype::LAMMPS_DOUBLE) {
+        val = (void *) &field.data.d;
+      }
+    } else if (strcmp(what, "lock") == 0) {
+      th->lock_cache();
+      val = nullptr;
+    } else if (strcmp(what, "unlock") == 0) {
+      th->unlock_cache();
+      val = nullptr;
+    } else val = nullptr;
+
+  }
+  END_CAPTURE
+  return val;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -777,15 +1108,20 @@ void lammps_extract_box(void *handle, double *boxlo, double *boxhi,
                         double *xy, double *yz, double *xz,
                         int *pflags, int *boxflag)
 {
-  auto lmp = (LAMMPS *) handle;
-  Domain *domain = lmp->domain;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->domain || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
 
   BEGIN_CAPTURE
   {
+    auto *domain = lmp->domain;
     // do nothing if box does not yet exist
-    if ((lmp->domain->box_exist == 0)
-        && (lmp->comm->me == 0)) {
-      lmp->error->warning(FLERR,"Calling lammps_extract_box without a box");
+    if (lmp->domain->box_exist == 0) {
+      if (lmp->comm->me == 0)
+        lmp->error->warning(FLERR, "Call to lammps_extract_box() without a box ignored");
       return;
     }
 
@@ -839,18 +1175,24 @@ are created.
 void lammps_reset_box(void *handle, double *boxlo, double *boxhi,
                       double xy, double yz, double xz)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->domain || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
   Domain *domain = lmp->domain;
 
   BEGIN_CAPTURE
   {
     if (lmp->atom->natoms > 0)
-      lmp->error->all(FLERR,"Calling lammps_reset_box not supported when atoms exist");
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "Calling lammps_reset_box() not supported when atoms exist");
 
     // warn and do nothing if no box exists
     if (lmp->domain->box_exist == 0) {
       if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Ignoring call to lammps_reset_box without a box");
+        lmp->error->warning(FLERR, "Call to lammps_reset_box() without a box ignored");
       return;
     }
 
@@ -878,6 +1220,8 @@ void lammps_reset_box(void *handle, double *boxlo, double *boxhi,
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 This function will retrieve memory usage information for the current
 LAMMPS instance or process.  The *meminfo* buffer will be filled with
 3 different numbers (if supported by the operating system).  The first
@@ -890,8 +1234,6 @@ third number is the maximum amount of RAM (not swap) used by the process
 so far. If any of the two latter parameters is not supported by the operating
 system it will be set to zero.
 
-.. versionadded:: 18Sep2020
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance
@@ -900,7 +1242,12 @@ system it will be set to zero.
 
 void lammps_memory_usage(void *handle, double *meminfo)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
   Info info(lmp);
   info.get_memory_info(meminfo);
 }
@@ -911,6 +1258,8 @@ void lammps_memory_usage(void *handle, double *meminfo)
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 This will take the LAMMPS "world" communicator and convert it to an
 integer using ``MPI_Comm_c2f()``, so it is equivalent to the
 corresponding MPI communicator in Fortran. This way it can be safely
@@ -918,8 +1267,6 @@ passed around between different programming languages.  To convert it
 to the C language representation use ``MPI_Comm_f2c()``.
 
 If LAMMPS was compiled with MPI_STUBS, this function returns -1.
-
-.. versionadded:: 18Sep2020
 
 *See also*
    :cpp:func:`lammps_open_fortran`
@@ -932,9 +1279,18 @@ If LAMMPS was compiled with MPI_STUBS, this function returns -1.
 int lammps_get_mpi_comm(void *handle)
 {
 #ifdef MPI_STUBS
+  LAMMPS *lmp = nullptr;
+  const auto &mesg = fmt::format("ERROR: {}(): No MPI communicator conversion possible "
+                                "with MPI STUBS\n", FNERR);
+  STORE_ERROR_MESSAGE(lmp, mesg);
   return -1;
 #else
-  LAMMPS *lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
   MPI_Fint f_comm = MPI_Comm_c2f(lmp->world);
   return f_comm;
 #endif
@@ -956,7 +1312,9 @@ be called without a valid LAMMPS object handle (it is ignored).
 * :ref:`Image masks <extract_image_masks>`
 * :ref:`System status <extract_system_status>`
 * :ref:`System sizes <extract_system_sizes>`
+* :ref:`Neighbor list settings <extract_neighbor_settings>`
 * :ref:`Atom style flags <extract_atom_flags>`
+* :ref:`Thermo settings <extract_thermo_settings>`
 
 .. _extract_integer_sizes:
 
@@ -964,7 +1322,7 @@ be called without a valid LAMMPS object handle (it is ignored).
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 17 83
 
    * - Keyword
      - Description / Return value
@@ -977,6 +1335,9 @@ be called without a valid LAMMPS object handle (it is ignored).
    * - imageint
      - size of the ``imageint`` integer type, 4 or 8 bytes.
        Set at :ref:`compile time <size>`.
+   * - MAX_GROUP
+     - size of the bitmask for groups in bits, should be 32.
+       Currently hard coded.
 
 .. _extract_image_masks:
 
@@ -987,7 +1348,7 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 17 83
 
    * - Keyword
      - Description / Return value
@@ -1006,7 +1367,7 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 17 83
 
    * - Keyword
      - Description / Return value
@@ -1033,14 +1394,31 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
    * - triclinic
      - 1 if the the simulation box is triclinic, 0 if orthogonal.
        See :doc:`change_box`.
+
+**Communication status**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Keyword
+     - Description / Return value
    * - universe_rank
      - MPI rank on LAMMPS' universe communicator (0 <= universe_rank < universe_size)
    * - universe_size
      - Number of ranks on LAMMPS' universe communicator (world_size <= universe_size)
    * - world_rank
-     - MPI rank on LAMMPS' world communicator (0 <= world_rank < world_size)
+     - MPI rank on LAMMPS' world communicator (0 <= world_rank < world_size, = comm->me)
    * - world_size
-     - Number of ranks on LAMMPS' world communicator
+     - Number of ranks on LAMMPS' world communicator (aka comm->nprocs)
+   * - comm_style
+     - communication style (0 = BRICK, 1 = TILED)
+   * - comm_layout
+     - communication layout (0 = LAYOUT_UNIFORM, 1 = LAYOUT_NONUNIFORM, 2 = LAYOUT_TILED)
+   * - comm_mode
+     - communication mode (0 = SINGLE, 1 = MULTI)
+   * - ghost_velocity
+     - whether velocities are communicated for ghost atoms (0 = no, 1 = yes)
 
 .. _extract_system_sizes:
 
@@ -1048,7 +1426,7 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 17 83
 
    * - Keyword
      - Description / Return value
@@ -1070,6 +1448,16 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
      - number of dihedral types
    * - nimpropertypes
      - number of improper types
+   * - bond_per_atom
+     - size of per-atom bond data arrays
+   * - angle_per_atom
+     - size of per-atom angle data arrays
+   * - dihedral_per_atom
+     - size of per-atom dihedral data arrays
+   * - improper_per_atom
+     - size of per-atom improper data arrays
+   * - maxspecial
+     - size of per-atom special data array
    * - nellipsoids
      - number of atoms that have ellipsoid data
    * - nlines
@@ -1079,13 +1467,38 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
    * - nbodies
      - number of atoms that have body data (see :doc:`the Body particle HowTo <Howto_body>`)
 
+.. _extract_neighbor_settings:
+
+**Neighbor list settings**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 17 83
+
+   * - neigh_every
+     - neighbor lists are rebuild every this many steps
+   * - neigh_delay
+     - neighbor lists are rebuild delayed this many steps
+   * - neigh_dist_check
+     - 0 if always rebuild, 1 rebuild after 1/2 skin
+   * - neigh_ago
+     - neighbor lists were rebuilt this many steps ago
+   * - nbondlist
+     - number of entries in bondlist (get list with :ref:`lammps_extract_global() <extract_neighbor_lists>`)
+   * - nanglelist
+     - number of entries in anglelist (get list with :ref:`lammps_extract_global() <extract_neighbor_lists>`)
+   * - ndihedrallist
+     - number of entries in dihedrallist (get list with :ref:`lammps_extract_global() <extract_neighbor_lists>`)
+   * - nimproperlist
+     - number of entries in improperlist (get list with :ref:`lammps_extract_global() <extract_neighbor_lists>`)
+
 .. _extract_atom_flags:
 
 **Atom style flags**
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 15 85
 
    * - Keyword
      - Description / Return value
@@ -1099,16 +1512,35 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
      - 1 if the atom style includes per-atom masses, 0 if there are per-type masses. See :doc:`atom_style`.
    * - radius_flag
      - 1 if the atom style includes a per-atom radius. See :doc:`atom_style`.
-   * - sphere_flag
-     - 1 if the atom style describes extended particles that can rotate. See :doc:`atom_style`.
+   * - body_flag
+     - 1 if the atom style describes body particles. See :doc:`atom_style`.
    * - ellipsoid_flag
      - 1 if the atom style describes extended particles that may be ellipsoidal. See :doc:`atom_style`.
+   * - line_flag
+     - 1 if the atom style describes line particles. See :doc:`atom_style`.
+   * - tri_flag
+     - 1 if the atom style describes tri particles. See :doc:`atom_style`.
    * - omega_flag
      - 1 if the atom style can store per-atom rotational velocities. See :doc:`atom_style`.
    * - torque_flag
      - 1 if the atom style can store per-atom torques. See :doc:`atom_style`.
    * - angmom_flag
      - 1 if the atom style can store per-atom angular momentum. See :doc:`atom_style`.
+
+.. _extract_thermo_settings:
+
+**Thermo settings**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Keyword
+     - Description / Return value
+   * - thermo_every
+     - The current interval of thermo output. See :doc:`thermo`.
+   * - thermo_norm
+     - 1 if the thermo output is normalized. See :doc:`thermo_modify`.
 
 *See also*
    :cpp:func:`lammps_extract_global`
@@ -1121,17 +1553,24 @@ internally by the :doc:`Fortran interface <Fortran>` and are not likely to be us
 
 int lammps_extract_setting(void *handle, const char *keyword)
 {
-  auto lmp = (LAMMPS *) handle;
-
-// This can be customized by adding keywords and documenting them in the section above.
+  // This can be customized by adding keywords and documenting them in the section above.
   if (strcmp(keyword,"bigint") == 0) return sizeof(bigint);
   if (strcmp(keyword,"tagint") == 0) return sizeof(tagint);
   if (strcmp(keyword,"imageint") == 0) return sizeof(imageint);
+
+  if (strcmp(keyword,"MAX_GROUP") == 0) return Group::MAX_GROUP;
 
   if (strcmp(keyword,"IMGMASK") == 0) return IMGMASK;
   if (strcmp(keyword,"IMGBITS") == 0) return IMGBITS;
   if (strcmp(keyword,"IMG2BITS") == 0) return IMG2BITS;
   if (strcmp(keyword,"IMGMAX") == 0) return IMGMAX;
+
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->domain || !lmp->force || !lmp->comm || !lmp->universe || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
 
   if (strcmp(keyword,"dimension") == 0) return lmp->domain->dimension;
   if (strcmp(keyword,"box_exist") == 0) return lmp->domain->box_exist;
@@ -1147,6 +1586,10 @@ int lammps_extract_setting(void *handle, const char *keyword)
   if (strcmp(keyword,"world_rank") == 0) return lmp->comm->me;
   if (strcmp(keyword,"world_size") == 0) return lmp->comm->nprocs;
   if (strcmp(keyword,"nthreads") == 0) return lmp->comm->nthreads;
+  if (strcmp(keyword,"comm_style") == 0) return lmp->comm->style;
+  if (strcmp(keyword,"comm_layout") == 0) return lmp->comm->layout;
+  if (strcmp(keyword,"comm_mode") == 0) return lmp->comm->mode;
+  if (strcmp(keyword,"ghost_velocity") == 0) return lmp->comm->ghost_velocity;
 
   if (strcmp(keyword,"nlocal") == 0) return lmp->atom->nlocal;
   if (strcmp(keyword,"nghost") == 0) return lmp->atom->nghost;
@@ -1157,22 +1600,45 @@ int lammps_extract_setting(void *handle, const char *keyword)
   if (strcmp(keyword,"nangletypes") == 0) return lmp->atom->nangletypes;
   if (strcmp(keyword,"ndihedraltypes") == 0) return lmp->atom->ndihedraltypes;
   if (strcmp(keyword,"nimpropertypes") == 0) return lmp->atom->nimpropertypes;
+  if (strcmp(keyword,"bond_per_atom") == 0) return lmp->atom->bond_per_atom;
+  if (strcmp(keyword,"angle_per_atom") == 0) return lmp->atom->angle_per_atom;
+  if (strcmp(keyword,"dihedral_per_atom") == 0) return lmp->atom->dihedral_per_atom;
+  if (strcmp(keyword,"improper_per_atom") == 0) return lmp->atom->improper_per_atom;
+  if (strcmp(keyword,"maxspecial") == 0) return lmp->atom->maxspecial;
   if (strcmp(keyword,"nellipsoids") == 0) return lmp->atom->nellipsoids;
   if (strcmp(keyword,"nlines") == 0) return lmp->atom->nlines;
   if (strcmp(keyword,"ntris") == 0) return lmp->atom->ntris;
   if (strcmp(keyword,"nbodies") == 0) return lmp->atom->nbodies;
+
+  if (strcmp(keyword,"neigh_every") == 0) return lmp->neighbor->every;
+  if (strcmp(keyword,"neigh_delay") == 0) return lmp->neighbor->delay;
+  if (strcmp(keyword,"neigh_dist_check") == 0) return lmp->neighbor->dist_check;
+  if (strcmp(keyword,"neigh_ago") == 0) return lmp->neighbor->ago;
+  if (strcmp(keyword,"nbondlist") == 0) return lmp->neighbor->nbondlist;
+  if (strcmp(keyword,"nanglelist") == 0) return lmp->neighbor->nanglelist;
+  if (strcmp(keyword,"ndihedrallist") == 0) return lmp->neighbor->ndihedrallist;
+  if (strcmp(keyword,"nimproperlist") == 0) return lmp->neighbor->nimproperlist;
 
   if (strcmp(keyword,"molecule_flag") == 0) return lmp->atom->molecule_flag;
   if (strcmp(keyword,"q_flag") == 0) return lmp->atom->q_flag;
   if (strcmp(keyword,"mu_flag") == 0) return lmp->atom->mu_flag;
   if (strcmp(keyword,"rmass_flag") == 0) return lmp->atom->rmass_flag;
   if (strcmp(keyword,"radius_flag") == 0) return lmp->atom->radius_flag;
-  if (strcmp(keyword,"sphere_flag") == 0) return lmp->atom->sphere_flag;
+
+  if (strcmp(keyword,"body_flag") == 0) return lmp->atom->body_flag;
   if (strcmp(keyword,"ellipsoid_flag") == 0) return lmp->atom->ellipsoid_flag;
+  if (strcmp(keyword,"line_flag") == 0) return lmp->atom->line_flag;
+  if (strcmp(keyword,"tri_flag") == 0) return lmp->atom->tri_flag;
+
   if (strcmp(keyword,"omega_flag") == 0) return lmp->atom->omega_flag;
   if (strcmp(keyword,"torque_flag") == 0) return lmp->atom->torque_flag;
   if (strcmp(keyword,"angmom_flag") == 0) return lmp->atom->angmom_flag;
   if (strcmp(keyword,"peri_flag") == 0) return lmp->atom->peri_flag;
+
+  if (strcmp(keyword,"thermo_every") == 0) return lmp->output->thermo_every;
+  if (lmp->output->thermo) {
+    if (strcmp(keyword,"thermo_norm") == 0) return lmp->output->thermo->normflag;
+  }
 
   return -1;
 }
@@ -1183,12 +1649,12 @@ int lammps_extract_setting(void *handle, const char *keyword)
  *
 \verbatim embed:rst
 
+.. versionadded:: 18Sep2020
+
 This function returns an integer that encodes the data type of the global
 property with the specified name. See :cpp:enum:`_LMP_DATATYPE_CONST` for valid
 values. Callers of :cpp:func:`lammps_extract_global` can use this information
 to then decide how to cast the ``void *`` pointer and access the data.
-
-.. versionadded:: 18Sep2020
 
 \endverbatim
  *
@@ -1205,6 +1671,11 @@ int lammps_extract_global_datatype(void * /*handle*/, const char *name)
   if (strcmp(name,"atimestep") == 0) return LAMMPS_BIGINT;
   if (strcmp(name,"respa_levels") == 0) return LAMMPS_INT;
   if (strcmp(name,"respa_dt") == 0) return LAMMPS_DOUBLE;
+
+  if (strcmp(name,"git_commit") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"git_branch") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"git_descriptor") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"lammps_version") == 0) return LAMMPS_STRING;
 
   if (strcmp(name,"boxlo") == 0) return LAMMPS_DOUBLE;
   if (strcmp(name,"boxhi") == 0) return LAMMPS_DOUBLE;
@@ -1223,6 +1694,10 @@ int lammps_extract_global_datatype(void * /*handle*/, const char *name)
   if (strcmp(name,"xy") == 0) return LAMMPS_DOUBLE;
   if (strcmp(name,"xz") == 0) return LAMMPS_DOUBLE;
   if (strcmp(name,"yz") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"xlattice") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"ylattice") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"zlattice") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"procgrid") == 0) return LAMMPS_INT;
 
   if (strcmp(name,"natoms") == 0) return LAMMPS_BIGINT;
   if (strcmp(name,"nbonds") == 0) return LAMMPS_BIGINT;
@@ -1233,10 +1708,42 @@ int lammps_extract_global_datatype(void * /*handle*/, const char *name)
   if (strcmp(name,"nghost") == 0) return LAMMPS_INT;
   if (strcmp(name,"nmax") == 0) return LAMMPS_INT;
   if (strcmp(name,"ntypes") == 0) return LAMMPS_INT;
+  if (strcmp(name,"special_lj") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"special_coul") == 0) return LAMMPS_DOUBLE;
+
+  if (strcmp(name,"neigh_skin") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"neigh_cutmin") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"neigh_cutmax") == 0) return LAMMPS_DOUBLE;
+  if (strcmp(name,"neigh_bondlist") == 0) return LAMMPS_INT_2D;
+  if (strcmp(name,"neigh_anglelist") == 0) return LAMMPS_INT_2D;
+  if (strcmp(name,"neigh_dihedrallist") == 0) return LAMMPS_INT_2D;
+  if (strcmp(name,"neigh_improperlist") == 0) return LAMMPS_INT_2D;
+
+  if (strcmp(name,"eflag_global") == 0) return LAMMPS_BIGINT;
+  if (strcmp(name,"eflag_atom") == 0) return LAMMPS_BIGINT;
+  if (strcmp(name,"vflag_global") == 0) return LAMMPS_BIGINT;
+  if (strcmp(name,"vflag_atom") == 0) return LAMMPS_BIGINT;
+
+  if (strcmp(name,"map_style") == 0) return LAMMPS_INT;
+#if defined(LAMMPS_BIGBIG)
+  if (strcmp(name,"map_tag_max") == 0) return LAMMPS_BIGINT;
+#else
+  if (strcmp(name,"map_tag_max") == 0) return LAMMPS_INT;
+#endif
+  if (strcmp(name,"sametag") == 0) return LAMMPS_INT;
+  if (strcmp(name,"sortfreq") == 0) return LAMMPS_INT;
+  if (strcmp(name,"nextsort") == 0) return LAMMPS_BIGINT;
 
   if (strcmp(name,"q_flag") == 0) return LAMMPS_INT;
 
   if (strcmp(name,"units") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"atom_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"pair_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"bond_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"angle_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"dihedral_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"improper_style") == 0) return LAMMPS_STRING;
+  if (strcmp(name,"kspace_style") == 0) return LAMMPS_STRING;
   if (strcmp(name,"boltz") == 0) return LAMMPS_DOUBLE;
   if (strcmp(name,"hplanck") == 0) return LAMMPS_DOUBLE;
   if (strcmp(name,"mvv2e") == 0) return LAMMPS_DOUBLE;
@@ -1275,9 +1782,6 @@ the function again, unless a :doc:`clear` command is issued which wipes
 out and recreates the contents of the :cpp:class:`LAMMPS
 <LAMMPS_NS::LAMMPS>` class.
 
-Please also see :cpp:func:`lammps_extract_setting`,
-:cpp:func:`lammps_get_thermo`, and :cpp:func:`lammps_extract_box`.
-
 .. warning::
 
    Modifying the data in the location pointed to by the returned pointer
@@ -1287,6 +1791,9 @@ Please also see :cpp:func:`lammps_extract_setting`,
    Those will take care of all side effects and necessary updates of
    settings derived from such settings.  Where possible, a reference to
    such a command or a relevant section of the manual is given below.
+
+Please also see :cpp:func:`lammps_extract_setting`,
+:cpp:func:`lammps_get_thermo`, and :cpp:func:`lammps_extract_box`.
 
 The following tables list the supported names, their data types, length
 of the data area, and a short description.  The data type can also be
@@ -1301,6 +1808,9 @@ report the "native" data type.  The following tables are provided:
 * :ref:`Timestep settings <extract_timestep_settings>`
 * :ref:`Simulation box settings <extract_box_settings>`
 * :ref:`System property settings <extract_system_settings>`
+* :ref:`Neighbor topology data <extract_neighbor_lists>`
+* :ref:`Energy and virial tally settings <extract_tally_settings>`
+* :ref:`Git revision and version settings <extract_git_settings>`
 * :ref:`Unit settings <extract_unit_settings>`
 
 .. _extract_timestep_settings:
@@ -1309,7 +1819,7 @@ report the "native" data type.  The following tables are provided:
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 14 10 10 66
 
    * - Name
      - Type
@@ -1334,10 +1844,10 @@ report the "native" data type.  The following tables are provided:
    * - respa_levels
      - int
      - 1
-     - number of r-RESPA levels. See :doc:`run_style`.
+     - :math:`N_{respa}` = number of r-RESPA levels. See :doc:`run_style`.
    * - respa_dt
      - double
-     - number of r-RESPA levels
+     - :math:`N_{respa}`
      - length of the time steps with r-RESPA. See :doc:`run_style`.
 
 .. _extract_box_settings:
@@ -1346,7 +1856,7 @@ report the "native" data type.  The following tables are provided:
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 16 10 10 64
 
    * - Name
      - Type
@@ -1355,73 +1865,87 @@ report the "native" data type.  The following tables are provided:
    * - boxlo
      - double
      - 3
-     - lower box boundaries. See :doc:`create_box`.
+     - lower box boundaries in x-, y-, and z-direction; see :doc:`create_box`.
    * - boxhi
      - double
      - 3
-     - upper box boundaries. See :doc:`create_box`.
+     - lower box boundaries in x-, y-, and z-direction; see :doc:`create_box`.
    * - boxxlo
      - double
      - 1
-     - lower box boundary in x-direction. See :doc:`create_box`.
+     - lower box boundary in x-direction; see :doc:`create_box`.
    * - boxxhi
      - double
      - 1
-     - upper box boundary in x-direction. See :doc:`create_box`.
+     - upper box boundary in x-direction; see :doc:`create_box`.
    * - boxylo
      - double
      - 1
-     - lower box boundary in y-direction. See :doc:`create_box`.
+     - lower box boundary in y-direction; see :doc:`create_box`.
    * - boxyhi
      - double
      - 1
-     - upper box boundary in y-direction. See :doc:`create_box`.
+     - upper box boundary in y-direction; see :doc:`create_box`.
    * - boxzlo
      - double
      - 1
-     - lower box boundary in z-direction. See :doc:`create_box`.
+     - lower box boundary in z-direction; see :doc:`create_box`.
    * - boxzhi
      - double
      - 1
-     - upper box boundary in z-direction. See :doc:`create_box`.
+     - upper box boundary in z-direction; see :doc:`create_box`.
    * - sublo
      - double
      - 3
-     - subbox lower boundaries
+     - subbox lower boundaries in x-, y-, and z-direction
    * - subhi
      - double
      - 3
-     - subbox upper boundaries
+     - subbox upper boundaries in x-, y-, and z-direction
    * - sublo_lambda
      - double
      - 3
-     - subbox lower boundaries in fractional coordinates (for triclinic cells)
+     - subbox lower boundaries in fractional coordinates (for triclinic cells only)
    * - subhi_lambda
      - double
      - 3
-     - subbox upper boundaries in fractional coordinates (for triclinic cells)
+     - subbox upper boundaries in fractional coordinates (for triclinic cells only)
    * - periodicity
      - int
      - 3
-     - 0 if non-periodic, 1 if periodic for x, y, and z;
-       See :doc:`boundary`.
+     - 0 if non-periodic, 1 if periodic for x, y, and z; see :doc:`boundary`.
    * - triclinic
      - int
      - 1
-     - 1 if the the simulation box is triclinic, 0 if orthogonal;
-       See :doc:`change_box`.
+     - 1 if box is triclinic, 0 if orthogonal; see :doc:`change_box`.
    * - xy
      - double
      - 1
-     - triclinic tilt factor. See :doc:`Howto_triclinic`.
+     - triclinic tilt factor; see :doc:`Howto_triclinic`.
    * - yz
      - double
      - 1
-     - triclinic tilt factor. See :doc:`Howto_triclinic`.
+     - triclinic tilt factor; see :doc:`Howto_triclinic`.
    * - xz
      - double
      - 1
-     - triclinic tilt factor. See :doc:`Howto_triclinic`.
+     - triclinic tilt factor; see :doc:`Howto_triclinic`.
+   * - xlattice
+     - double
+     - 1
+     - lattice spacing in x-direction; see :doc:`lattice command <lattice>`.
+   * - ylattice
+     - double
+     - 1
+     - lattice spacing in y-direction; see :doc:`lattice command <lattice>`.
+   * - zlattice
+     - double
+     - 1
+     - lattice spacing in z-direction; see :doc:`lattice command <lattice>`.
+   * - procgrid
+     - int
+     - 3
+     - processor count in x-, y-, and z- direction; see :doc:`processors`.
 
 .. _extract_system_settings:
 
@@ -1429,16 +1953,16 @@ report the "native" data type.  The following tables are provided:
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 18 12 12 58
 
    * - Name
      - Type
      - Length
      - Description
-   * - ntypes
-     - int
+   * - natoms
+     - bigint
      - 1
-     - number of atom types
+     - total number of atoms in the simulation.
    * - nbonds
      - bigint
      - 1
@@ -1455,10 +1979,6 @@ report the "native" data type.  The following tables are provided:
      - bigint
      - 1
      - total number of impropers in the simulation.
-   * - natoms
-     - bigint
-     - 1
-     - total number of atoms in the simulation.
    * - nlocal
      - int
      - 1
@@ -1471,10 +1991,171 @@ report the "native" data type.  The following tables are provided:
      - int
      - 1
      - maximum of nlocal+nghost across all MPI ranks (for per-atom data array size).
+   * - ntypes
+     - int
+     - 1
+     - number of atom types
+   * - special_lj
+     - double
+     - 4
+     - special :doc:`pair weighting factors <special_bonds>` for LJ interactions (first element is always 1.0)
+   * - special_coul
+     - double
+     - 4
+     - special :doc:`pair weighting factors <special_bonds>` for Coulomb interactions (first element is always 1.0)
+   * - map_style
+     - int
+     - 1
+     - :doc:`atom map setting <atom_modify>`: 0 = none, 1 = array, 2 = hash, 3 = yes
+   * - map_tag_max
+     - int/bigint
+     - 1
+     - largest atom ID that can be mapped to a local index (bigint with -DLAMMPS_BIGBIG)
+   * - sametag
+     - int
+     - variable
+     - index of next local atom with the same ID in ascending order. -1 signals end.
+   * - sortfreq
+     - int
+     - 1
+     - frequency of atom sorting. 0 means sorting is off.
+   * - nextsort
+     - bigint
+     - 1
+     - timestep when atoms are sorted next
    * - q_flag
      - int
      - 1
      - **deprecated**. Use :cpp:func:`lammps_extract_setting` instead.
+   * - atom_style
+     - char \*
+     - 1
+     - string with the current atom style.
+   * - pair_style
+     - char \*
+     - 1
+     - string with the current pair style.
+   * - bond_style
+     - char \*
+     - 1
+     - string with the current bond style.
+   * - angle_style
+     - char \*
+     - 1
+     - string with the current angle style.
+   * - dihedral_style
+     - char \*
+     - 1
+     - string with the current dihedral style.
+   * - improper_style
+     - char \*
+     - 1
+     - string with the current improper style.
+   * - kspace_style
+     - char \*
+     - 1
+     - string with the current KSpace style.
+
+.. _extract_neighbor_lists:
+
+**Neighbor topology data**
+
+Get length of lists with :ref:`lammps_extract_setting() <extract_neighbor_settings>`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 12 16 52
+
+   * - Name
+     - Type
+     - Length
+     - Description
+   * - neigh_skin
+     - double
+     - 1
+     - neighbor list skin
+   * - neigh_cutmin
+     - double
+     - 1
+     - minimum neighbor cutoff across all type pairs
+   * - neigh_cutmax
+     - double
+     - 1
+     - maximum neighbor cutoff across all type pairs
+   * - neigh_bondlist
+     - 2d int
+     - nbondlist
+     - list of bonds (atom1, atom2, type)
+   * - neigh_anglelist
+     - 2d int
+     - nanglelist
+     - list of angles (atom1, atom2, atom3, type)
+   * - neigh_dihedrallist
+     - 2d int
+     - ndihedrallist
+     - list of dihedrals (atom1, atom2, atom3, atom4, type)
+   * - neigh_improperlist
+     - 2d int
+     - nimproperlist
+     - list of impropers (atom1, atom2, atom3, atom4, type)
+
+.. _extract_tally_settings:
+
+**Energy and virial tally settings**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 12 16 52
+
+   * - Name
+     - Type
+     - Length
+     - Description
+   * - eflag_global
+     - bigint
+     - 1
+     - timestep global energy is tallied on
+   * - eflag_atom
+     - bigint
+     - 1
+     - timestep per-atom energy is tallied on
+   * - vflag_global
+     - bigint
+     - 1
+     - timestep global virial is tallied on
+   * - vflag_atom
+     - bigint
+     - 1
+     - timestep per-atom virial is tallied on
+
+.. _extract_git_settings:
+
+**Git revision and version settings**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 14 10 60
+
+   * - Name
+     - Type
+     - Length
+     - Description
+   * - git_commit
+     - const char \*
+     - 1
+     - Git commit hash for the LAMMPS version.
+   * - git_branch
+     - const char \*
+     - 1
+     - Git branch for the LAMMPS version.
+   * - git_descriptor
+     - const char \*
+     - 1
+     - Combined descriptor for the git revision
+   * - lammps_version
+     - const char \*
+     - 1
+     - LAMMPS version string.
 
 .. _extract_unit_settings:
 
@@ -1482,7 +2163,7 @@ report the "native" data type.  The following tables are provided:
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 16 12 10 62
 
    * - Name
      - Type
@@ -1578,11 +2259,30 @@ report the "native" data type.  The following tables are provided:
 
 void *lammps_extract_global(void *handle, const char *name)
 {
-  auto lmp = (LAMMPS *) handle;
+  if (strcmp(name,"git_commit") == 0) return (void *)LAMMPS::git_commit;
+  if (strcmp(name,"git_branch") == 0) return (void  *)LAMMPS::git_branch;
+  if (strcmp(name,"git_descriptor") == 0) return (void *)LAMMPS::git_descriptor;
+  if (strcmp(name,"lammps_version") == 0) return (void *)LAMMPS_VERSION;
+
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->update || !lmp->atom || !lmp->force || !lmp->domain || !lmp->domain->lattice
+      || !lmp->update->integrate) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
 
   if (strcmp(name,"units") == 0) return (void *) lmp->update->unit_style;
+  if (strcmp(name,"atom_style") == 0) return (void *) lmp->atom->atom_style;
+  if (strcmp(name,"pair_style") == 0) return (void *) lmp->force->pair_style;
+  if (strcmp(name,"bond_style") == 0) return (void *) lmp->force->bond_style;
+  if (strcmp(name,"angle_style") == 0) return (void *) lmp->force->angle_style;
+  if (strcmp(name,"dihedral_style") == 0) return (void *) lmp->force->dihedral_style;
+  if (strcmp(name,"improper_style") == 0) return (void *) lmp->force->improper_style;
+  if (strcmp(name,"kspace_style") == 0) return (void *) lmp->force->kspace_style;
   if (strcmp(name,"dt") == 0) return (void *) &lmp->update->dt;
   if (strcmp(name,"ntimestep") == 0) return (void *) &lmp->update->ntimestep;
+
   // update->atime can be referenced as a pointer
   // thermo "timer" data cannot be, since it is computed on request
   // lammps_get_thermo() can access all thermo keywords by value
@@ -1590,10 +2290,11 @@ void *lammps_extract_global(void *handle, const char *name)
   if (strcmp(name,"atimestep") == 0) return (void *) &lmp->update->atimestep;
 
   if (utils::strmatch(lmp->update->integrate_style,"^respa")) {
-    auto respa = dynamic_cast<Respa *>(lmp->update->integrate);
+    auto *respa = dynamic_cast<Respa *>(lmp->update->integrate);
     if (strcmp(name,"respa_levels") == 0) return (void *) &respa->nlevels;
     if (strcmp(name,"respa_dt") == 0) return (void *) respa->step;
   }
+
   if (strcmp(name,"boxlo") == 0) return (void *) lmp->domain->boxlo;
   if (strcmp(name,"boxhi") == 0) return (void *) lmp->domain->boxhi;
   if (strcmp(name,"sublo") == 0) return (void *) lmp->domain->sublo;
@@ -1605,6 +2306,7 @@ void *lammps_extract_global(void *handle, const char *name)
     if (strcmp(name,"subhi_lambda") == 0)
       return (void *) lmp->domain->subhi_lamda;
   }
+
   if (strcmp(name,"boxxlo") == 0) return (void *) &lmp->domain->boxlo[0];
   if (strcmp(name,"boxxhi") == 0) return (void *) &lmp->domain->boxhi[0];
   if (strcmp(name,"boxylo") == 0) return (void *) &lmp->domain->boxlo[1];
@@ -1616,9 +2318,14 @@ void *lammps_extract_global(void *handle, const char *name)
   if (strcmp(name,"xy") == 0) return (void *) &lmp->domain->xy;
   if (strcmp(name,"xz") == 0) return (void *) &lmp->domain->xz;
   if (strcmp(name,"yz") == 0) return (void *) &lmp->domain->yz;
+  if (strcmp(name,"xlattice") == 0) return (void *) &lmp->domain->lattice->xlattice;
+  if (strcmp(name,"ylattice") == 0) return (void *) &lmp->domain->lattice->ylattice;
+  if (strcmp(name,"zlattice") == 0) return (void *) &lmp->domain->lattice->zlattice;
+  if (((lmp->comm->layout == Comm::LAYOUT_UNIFORM) ||
+       (lmp->comm->layout == Comm::LAYOUT_NONUNIFORM)) && (strcmp(name,"procgrid") == 0))
+    return (void *) &lmp->comm->procgrid;
 
   if (strcmp(name,"natoms") == 0) return (void *) &lmp->atom->natoms;
-  if (strcmp(name,"ntypes") == 0) return (void *) &lmp->atom->ntypes;
   if (strcmp(name,"nbonds") == 0) return (void *) &lmp->atom->nbonds;
   if (strcmp(name,"nangles") == 0) return (void *) &lmp->atom->nangles;
   if (strcmp(name,"ndihedrals") == 0) return (void *) &lmp->atom->ndihedrals;
@@ -1626,8 +2333,30 @@ void *lammps_extract_global(void *handle, const char *name)
   if (strcmp(name,"nlocal") == 0) return (void *) &lmp->atom->nlocal;
   if (strcmp(name,"nghost") == 0) return (void *) &lmp->atom->nghost;
   if (strcmp(name,"nmax") == 0) return (void *) &lmp->atom->nmax;
+  if (strcmp(name,"ntypes") == 0) return (void *) &lmp->atom->ntypes;
+  if (strcmp(name,"special_lj") == 0) return (void *) lmp->force->special_lj;
+  if (strcmp(name,"special_coul") == 0) return (void *) lmp->force->special_coul;
 
   if (strcmp(name,"q_flag") == 0) return (void *) &lmp->atom->q_flag;
+
+  if (strcmp(name,"neigh_skin") == 0) return (void *) &lmp->neighbor->skin;
+  if (strcmp(name,"neigh_cutmin") == 0) return (void *) &lmp->neighbor->cutneighmin;
+  if (strcmp(name,"neigh_cutmax") == 0) return (void *) &lmp->neighbor->cutneighmax;
+  if (strcmp(name,"neigh_bondlist") == 0) return (void *) lmp->neighbor->bondlist;
+  if (strcmp(name,"neigh_anglelist") == 0) return (void *) lmp->neighbor->anglelist;
+  if (strcmp(name,"neigh_dihedrallist") == 0) return (void *) lmp->neighbor->dihedrallist;
+  if (strcmp(name,"neigh_improperlist") == 0) return (void *) lmp->neighbor->improperlist;
+
+  if (strcmp(name,"eflag_global") == 0) return (void *) &lmp->update->eflag_global;
+  if (strcmp(name,"eflag_atom") == 0) return (void *) &lmp->update->eflag_atom;
+  if (strcmp(name,"vflag_global") == 0) return (void *) &lmp->update->vflag_global;
+  if (strcmp(name,"vflag_atom") == 0) return (void *) &lmp->update->vflag_atom;
+
+  if (strcmp(name,"map_style") == 0) return (void *) &lmp->atom->map_style;
+  if (strcmp(name,"map_tag_max") == 0) return (void *) &lmp->atom->map_tag_max;
+  if (strcmp(name,"sametag") == 0) return (void *) lmp->atom->sametag;
+  if (strcmp(name,"sortfreq") == 0) return (void *) &lmp->atom->sortfreq;
+  if (strcmp(name,"nextsort") == 0) return (void *) &lmp->atom->nextsort;
 
   // global constants defined by units
 
@@ -1656,16 +2385,125 @@ void *lammps_extract_global(void *handle, const char *name)
 
 /* ---------------------------------------------------------------------- */
 
+/** Get data dimension of pair style data accessible via Pair::extract().
+ *
+\verbatim embed:rst
+
+.. versionadded:: 29Aug2024
+
+This function returns an integer that specified the dimensionality of
+the data that can be extracted from the current pair style with ``Pair::extract()``.
+Callers of :cpp:func:`lammps_extract_pair` can use this information
+to then decide how to cast the ``void *`` pointer and access the data.
+
+\endverbatim
+ *
+ * \param  handle   pointer to a previously created LAMMPS instance
+ * \param  name     string with the name of the extracted property
+ * \return          integer constant encoding the dimensionality of the
+                    extractable pair style property or -1 if not found. */
+
+int lammps_extract_pair_dimension(void * handle, const char *name)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->force || !lmp->force->pair) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+
+  int dim = -1;
+  if (lmp->force->pair->extract(name, dim)) return dim;
+
+  return -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Get extract pair style data accessible via Pair::extract().
+ *
+\verbatim embed:rst
+
+.. versionadded:: 29Aug2024
+
+This function returns a pointer to data available from the current pair
+style with ``Pair::extract()``. The dimensionality of the returned
+pointer can be determined with :cpp:func:`lammps_extract_pair_dimension`.
+
+\endverbatim
+ *
+ * \param  handle   pointer to a previously created LAMMPS instance
+ * \param  name     string with the name of the extracted property
+ * \return          pointer (cast to ``void *``) to the location of the
+                    requested property. NULL if name is not known. */
+
+void *lammps_extract_pair(void * handle, const char *name)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->force || !lmp->force->pair) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
+  if (!name) return nullptr;
+
+  int dim = -1;
+  return lmp->force->pair->extract(name, dim);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Map global atom ID to local atom index
+ *
+\verbatim embed:rst
+
+.. versionadded:: 27June2024
+
+This function returns an integer that corresponds to the local atom
+index for an atom with the global atom ID *id*. The atom ID is passed
+as a void pointer so that it can use the same interface for either a
+32-bit or 64-bit tagint. The size of the tagint can be determined
+using :cpp:func:`lammps_extract_setting`.
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  id      void pointer to the atom ID (of data type tagint, i.e. 32-bit or 64-bit integer)
+ * \return         local atom index or -1 if the atom is not found or no map exists
+ * */
+
+int lammps_map_atom(void *handle, const void *id)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  if (!id) return -1;
+
+  const auto *tag = (const tagint *) id;
+  if (lmp->atom->map_style > Atom::MAP_NONE)
+    return lmp->atom->map(*tag);
+  else
+    return -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
 /** Get data type of a LAMMPS per-atom property
  *
 \verbatim embed:rst
 
-This function returns an integer that encodes the data type of the per-atom
-property with the specified name. See :cpp:enum:`_LMP_DATATYPE_CONST` for valid
-values. Callers of :cpp:func:`lammps_extract_atom` can use this information
-to then decide how to cast the ``void *`` pointer and access the data.
-
 .. versionadded:: 18Sep2020
+
+This function returns an integer that encodes the data type of the
+per-atom property with the specified name. See
+:cpp:enum:`_LMP_DATATYPE_CONST` for valid values. Callers of
+:cpp:func:`lammps_extract_atom` can use this information to decide how
+to cast the ``void *`` pointer and access the data.  In addition,
+:cpp:func:`lammps_extract_atom_size` can be used to get information
+about the vector or array dimensions.
 
 \endverbatim
  *
@@ -1677,8 +2515,51 @@ to then decide how to cast the ``void *`` pointer and access the data.
 
 int lammps_extract_atom_datatype(void *handle, const char *name)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
   return lmp->atom->extract_datatype(name);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Get dimension info of a LAMMPS per-atom property
+ *
+\verbatim embed:rst
+
+.. versionadded:: 19Nov2024
+
+This function returns an integer with the size of the per-atom
+property with the specified name.  This allows to accurately determine
+the size of the per-atom data vectors or arrays.  For per-atom arrays,
+the *type* argument is required to return either the number of rows or the
+number of columns.  It is ignored for per-atom vectors.
+
+Callers of :cpp:func:`lammps_extract_atom` can use this information in
+combination with the result from :cpp:func:`lammps_extract_atom_datatype`
+to decide how to cast the ``void *`` pointer and access the data.
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  name    string with the name of the extracted property
+ * \param  type    either LMP_SIZE_ROWS or LMP_SIZE_COLS if *name* refers
+                   to a per-atom array otherwise ignored
+ * \return         integer with the size of the vector or array dimension or -1
+ * */
+
+int lammps_extract_atom_size(void *handle, const char *name, int type)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  return lmp->atom->extract_size(name, type);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1687,20 +2568,38 @@ int lammps_extract_atom_datatype(void *handle, const char *name)
  *
 \verbatim embed:rst
 
-This function returns a pointer to the location of per-atom properties
-(and per-atom-type properties in the case of the 'mass' keyword).
-Per-atom data is distributed across sub-domains and thus MPI ranks.  The
-returned pointer is cast to ``void *`` and needs to be cast to a pointer
-of data type that the entity represents.
+This function returns a pointer to the location of per-atom properties (and
+per-atom-type properties in the case of the 'mass' keyword).  Per-atom data is
+distributed across sub-domains and thus MPI ranks.  The returned pointer is cast
+to ``void *`` and needs to be cast to a pointer of data type that the entity
+represents.  You can use the functions :cpp:func:`lammps_extract_atom_datatype`
+and :cpp:func:`lammps_extract_atom_size` to determine data type, dimensions and
+sizes of the storage pointed to by the returned pointer.
 
-A table with supported keywords is included in the documentation
-of the :cpp:func:`Atom::extract() <LAMMPS_NS::Atom::extract>` function.
+A table with supported keywords is included in the documentation of the
+:cpp:func:`Atom::extract() <LAMMPS_NS::Atom::extract>` function.
 
 .. warning::
 
    The pointers returned by this function are generally not persistent
    since per-atom data may be re-distributed, re-allocated, and
    re-ordered at every re-neighboring operation.
+
+.. note::
+
+   When running with the KOKKOS package and per-atom data residing on an
+   accelerator device (e.g. a GPU), the requested data is synchronized from
+   the device to the host before the pointer is returned, so that the host
+   data accessed through it is current even when this function is called
+   between output steps (for example from the LAMMPS GUI or a Python script
+   while a run is in progress).
+
+.. versionchanged:: 4Jul2026
+
+When using the KOKKOS package with a device back end, per-atom data is now
+synchronized from the device to the host before the pointer is returned.
+Previously the host copy could be out-of-date for calls not aligned with an
+output or end-of-run step.
 
 \endverbatim
  *
@@ -1711,7 +2610,12 @@ of the :cpp:func:`Atom::extract() <LAMMPS_NS::Atom::extract>` function.
 
 void *lammps_extract_atom(void *handle, const char *name)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
   return lmp->atom->extract(name);
 }
 
@@ -1737,7 +2641,7 @@ lists the available options.
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 25 24 14 37
 
    * - Style (see :cpp:enum:`_LMP_STYLE_CONST`)
      - Type (see :cpp:enum:`_LMP_TYPE_CONST`)
@@ -1790,7 +2694,7 @@ lists the available options.
    * - LMP_STYLE_LOCAL
      - LMP_SIZE_VECTOR
      - ``int *``
-     - Alias for using LMP_SIZE_ROWS
+     - Alias for LMP_SIZE_ROWS
    * - LMP_STYLE_LOCAL
      - LMP_SIZE_ROWS
      - ``int *``
@@ -1829,22 +2733,32 @@ lists the available options.
 
 void *lammps_extract_compute(void *handle, const char *id, int style, int type)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
 
   BEGIN_CAPTURE
   {
-    auto compute = lmp->modify->get_compute_by_id(id);
-    if (!compute) return nullptr;
+    auto *compute = lmp->modify->get_compute_by_id(id);
+    if (!compute) lmp->error->all(FLERR, Error::NOLASTLINE,
+                                  "{}(): Compute {} does not exist", FNERR, id);
 
     if (style == LMP_STYLE_GLOBAL) {
       if (type == LMP_TYPE_SCALAR) {
-        if (!compute->scalar_flag) return nullptr;
+        if (!compute->scalar_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Compute {} does not compute global scalar", FNERR, id);
         if (compute->invoked_scalar != lmp->update->ntimestep)
           compute->compute_scalar();
         return (void *) &compute->scalar;
       }
       if ((type == LMP_TYPE_VECTOR) || (type == LMP_SIZE_VECTOR)) {
-        if (!compute->vector_flag) return nullptr;
+        if (!compute->vector_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Compute {} does not compute global vector", FNERR, id);
         if (compute->invoked_vector != lmp->update->ntimestep)
           compute->compute_vector();
         if (type == LMP_TYPE_VECTOR)
@@ -1853,7 +2767,9 @@ void *lammps_extract_compute(void *handle, const char *id, int style, int type)
           return (void *) &compute->size_vector;
       }
       if ((type == LMP_TYPE_ARRAY) || (type == LMP_SIZE_ROWS) || (type == LMP_SIZE_COLS)) {
-        if (!compute->array_flag) return nullptr;
+        if (!compute->array_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Compute {} does not compute global array", FNERR, id);
         if (compute->invoked_array != lmp->update->ntimestep)
           compute->compute_array();
         if (type == LMP_TYPE_ARRAY)
@@ -1866,7 +2782,9 @@ void *lammps_extract_compute(void *handle, const char *id, int style, int type)
     }
 
     if (style == LMP_STYLE_ATOM) {
-      if (!compute->peratom_flag) return nullptr;
+      if (!compute->peratom_flag)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector or array", FNERR, id);
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
       if (type == LMP_TYPE_VECTOR) return (void *) compute->vector_atom;
@@ -1875,7 +2793,9 @@ void *lammps_extract_compute(void *handle, const char *id, int style, int type)
     }
 
     if (style == LMP_STYLE_LOCAL) {
-      if (!compute->local_flag) return nullptr;
+      if (!compute->local_flag)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute vector or array", FNERR, id);
       if (compute->invoked_local != lmp->update->ntimestep)
         compute->compute_local();
       if (type == LMP_TYPE_SCALAR) return (void *) &compute->size_local_rows;  /* for backward compatibility */
@@ -1905,29 +2825,59 @@ Since individual fixes may provide multiple kinds of data, it is
 required to set style and type flags representing what specific data is
 desired.  This also determines to what kind of pointer the returned
 pointer needs to be cast to access the data correctly.  The function
-returns ``NULL`` if the fix ID is not found or the requested data is not
-available.
+set the error status and returns ``NULL`` if the fix ID is not found
+or the requested data is not available.
 
-.. note::
+.. admonition:: Accessing global data
+   :class: warning
 
-   When requesting global data, the fix data can only be accessed one
-   item at a time without access to the pointer itself.  Thus this
-   function will allocate storage for a single double value, copy the
-   returned value to it, and returns a pointer to the location of the
-   copy.  Therefore the allocated storage needs to be freed after its
-   use to avoid a memory leak. Example:
+   When requesting **global** data, the fix data can internally only be
+   accessed one item at a time without access to the underlying pointer
+   itself (it may also be computed on-the-fly).  Thus this function
+   allocates temporary storage for the requested data, copy the the data to it, and return a pointer to the location
+   of the copy.  Therefore the allocated storage needs to be freed
+   with :cpp:func:`lammps_free` after its use to avoid a memory leak. Example:
 
    .. code-block:: c
 
-      double *dptr = (double *) lammps_extract_fix(handle,name,0,1,0,0);
+      double *dptr = (double *) lammps_extract_fix(handle, name, LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR, 0, 0);
       double value = *dptr;
+      lammps_free((void *)dptr);
+
+.. admonition:: Requesting rows, columns, or the entire global array
+   :class: Hint
+
+   In order to avoid the inefficient allocation and deallocation of
+   temporary storage for single values, this functions accepts special
+   values of -1 for the nrow and ncol arguments. For the negative
+   values, the entire row, or column, or full array is copied to a
+   (flat) block of storage and its pointer returned.  This still is a
+   copy and needs to be deallocated with :cpp:func:`lammps_free` as
+   indicated in the note above.  In case of requesting the whole array,
+   the data is returned column by column, i.e. as d(c\_0,r\_0),
+   d(c\_0,r\_1), ... d(c\_0, c\_nrow-1), d(c\_1,r\_0), d(c\_1,r\_1),
+   ... d(c\_ncol-1, r\_nrow-1) for a total of nrow \* ncol elements.
+   Example use:
+
+   .. code-block:: c
+
+      int nrows = *(int *) lammps_extract_fix(handle, name, LMP_STYLE_GLOBAL, LMP_SIZE_ROWS, 0,0);
+      int ncols = *(int *) lammps_extract_fix(handle, name, LMP_STYLE_GLOBAL, LMP_SIZE_COLS, 0,0);
+      double *dptr = (double *) lammps_extract_fix(handle, name, LMP_STYLE_GLOBAL, LMP_TYPE_ARRAY, -1, -1);
+      printf("values[%d][%d] = {\n", ncols, nrows);
+      for (int j = 0; j < ncols; ++j) {
+        printf(" { ");
+        for (int i = 0; i < nrows; ++i) printf("%g, ", dvalue[j * nrows + i]);
+        printf("},\n");
+      }
+      printf("};\n");
       lammps_free((void *)dptr);
 
 The following table lists the available options.
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+   :widths: 25 24 14 37
 
    * - Style (see :cpp:enum:`_LMP_STYLE_CONST`)
      - Type (see :cpp:enum:`_LMP_TYPE_CONST`)
@@ -1997,8 +2947,9 @@ The following table lists the available options.
 
 .. note::
 
-   LAMMPS cannot easily check if it is valid to access the data, so it
-   may fail with an error.  The caller has to avoid such an error.
+   LAMMPS cannot easily check if it is valid to access the data, so it may
+   fail with an error and return a NULL pointer.  The caller has to avoid
+   such an error.
 
 \endverbatim
  *
@@ -2008,46 +2959,96 @@ The following table lists the available options.
                    (global, per-atom, or local)
  * \param  type    constant indicating type of data (scalar, vector,
                    or array) or size of rows or columns
- * \param  nrow    row index (only used for global vectors and arrays)
- * \param  ncol    column index (only used for global arrays)
+ * \param  nrow    row index (only used for global vectors and arrays), zero-based
+ * \param  ncol    column index (only used for global arrays), zero-based
  * \return         pointer (cast to ``void *``) to the location of the
  *                 requested data or ``NULL`` if not found. */
 
-void *lammps_extract_fix(void *handle, const char *id, int style, int type,
-                         int nrow, int ncol)
+void *lammps_extract_fix(void *handle, const char *id, int style, int type, int nrow, int ncol)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) return nullptr;
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix) lmp->error->all(FLERR, Error::NOLASTLINE,
+                              "{}(): Fix {} does not exist", FNERR, id);
 
     if (style == LMP_STYLE_GLOBAL) {
       if (type == LMP_TYPE_SCALAR) {
-        if (!fix->scalar_flag) return nullptr;
-        auto dptr = (double *) malloc(sizeof(double));
+        if (!fix->scalar_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} does not compute global scalar", FNERR, id);
+        auto *dptr = (double *) malloc(sizeof(double));
         *dptr = fix->compute_scalar();
         return (void *) dptr;
       }
       if (type == LMP_TYPE_VECTOR) {
-        if (!fix->vector_flag) return nullptr;
-        auto dptr = (double *) malloc(sizeof(double));
-        *dptr = fix->compute_vector(nrow);
-        return (void *) dptr;
+        if (!fix->vector_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} does not compute global vector", FNERR, id);
+        int veclen = fix->size_vector;
+        if (nrow >= veclen)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} vector accessed out-of-range", FNERR, id);
+        if (nrow < 0) {
+          auto *dptr = (double *) malloc(sizeof(double) * veclen);
+          for (int i = 0; i < veclen; ++i) dptr[i] = fix->compute_vector(i);
+          return (void *) dptr;
+        } else {
+          auto *dptr = (double *) malloc(sizeof(double));
+          *dptr = fix->compute_vector(nrow);
+          return (void *) dptr;
+        }
       }
       if (type == LMP_TYPE_ARRAY) {
-        if (!fix->array_flag) return nullptr;
-        auto dptr = (double *) malloc(sizeof(double));
-        *dptr = fix->compute_array(nrow,ncol);
-        return (void *) dptr;
+        if (!fix->array_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} does not compute global array", FNERR, id);
+        int array_rows = fix->size_array_rows;
+        int array_cols = fix->size_array_cols;
+        if ((nrow >= array_rows) || (ncol >= array_cols))
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} array accessed out-of-range", FNERR, id);
+        if ((nrow < 0) && (ncol < 0)) { // whole array as flat array
+          auto *dptr = (double *) malloc(sizeof(double) * array_rows * array_cols);
+          for (int j = 0; j < array_cols; ++j) {
+            for (int i = 0; i < array_rows; ++i) {
+              dptr[array_rows * j + i] = fix->compute_array(i, j);
+            }
+          }
+          return (void *) dptr;
+        } else if (ncol < 0) { // only one row
+          int array_cols = fix->size_array_cols;
+          auto *dptr = (double *) malloc(sizeof(double) * array_cols);
+          for (int i = 0; i < array_cols; ++i) dptr[i] = fix->compute_array(nrow, i);
+          return (void *) dptr;
+        } else if (nrow < 0) { // only one column
+          int array_rows = fix->size_array_rows;
+          auto *dptr = (double *) malloc(sizeof(double) * array_rows);
+          for (int i = 0; i < array_rows; ++i) dptr[i] = fix->compute_array(i, ncol);
+          return (void *) dptr;
+        } else {
+          auto *dptr = (double *) malloc(sizeof(double));
+          *dptr = fix->compute_array(nrow, ncol);
+          return (void *) dptr;
+        }
       }
       if (type == LMP_SIZE_VECTOR) {
-        if (!fix->vector_flag) return nullptr;
+        if (!fix->vector_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not compute global vector",
+                          FNERR, id);
         return (void *) &fix->size_vector;
       }
       if ((type == LMP_SIZE_ROWS) || (type == LMP_SIZE_COLS)) {
-        if (!fix->array_flag) return nullptr;
+        if (!fix->array_flag)
+          lmp->error->all(FLERR, Error::NOLASTLINE,
+                          "{}(): Fix {} does not compute global array", FNERR, id);
         if (type == LMP_SIZE_ROWS)
           return (void *) &fix->size_array_rows;
         else
@@ -2056,14 +3057,18 @@ void *lammps_extract_fix(void *handle, const char *id, int style, int type,
     }
 
     if (style == LMP_STYLE_ATOM) {
-      if (!fix->peratom_flag) return nullptr;
+      if (!fix->peratom_flag)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom vector or array", FNERR, id);
       if (type == LMP_TYPE_VECTOR) return (void *) fix->vector_atom;
       if (type == LMP_TYPE_ARRAY) return (void *) fix->array_atom;
       if (type == LMP_SIZE_COLS) return (void *) &fix->size_peratom_cols;
     }
 
     if (style == LMP_STYLE_LOCAL) {
-      if (!fix->local_flag) return nullptr;
+      if (!fix->local_flag)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute local vector or array", FNERR, id);
       if (type == LMP_TYPE_SCALAR) return (void *) &fix->size_local_rows;
       if (type == LMP_TYPE_VECTOR) return (void *) fix->vector_local;
       if (type == LMP_TYPE_ARRAY) return (void *) fix->array_local;
@@ -2106,7 +3111,7 @@ use to avoid a memory leak. Example:
 
 .. code-block:: c
 
-   double *dptr = (double *) lammps_extract_variable(handle,name,NULL);
+   double *dptr = (double *) lammps_extract_variable(handle, name, NULL);
    double value = *dptr;
    lammps_free((void *)dptr);
 
@@ -2117,16 +3122,25 @@ content will not be updated in case the variable is re-evaluated.
 To avoid a memory leak, this pointer needs to be freed after use in
 the calling program.
 
-For *vector*\ -style variables, the returned pointer is to actual LAMMPS data.
-The pointer should not be deallocated. Its length depends on the variable,
-compute, or fix data used to construct the *vector*\ -style variable.
-This length can be fetched by calling this function with *group* set to the
-constant "LMP_SIZE_VECTOR", which returns a ``void *`` pointer that can be
-dereferenced to an integer that is the length of the vector. This pointer
-needs to be deallocated when finished with it to avoid memory leaks.
+For *vector*\ -style variables, the returned pointer points to actual
+LAMMPS data and thus it should **not** be deallocated.  Its length
+depends on the variable, compute, or fix data used to construct the
+*vector*\ -style variable.  This length can be fetched by calling this
+function with *group* set to a non-NULL pointer (NULL returns the vector).
+In that case it will return the vector length as an allocated int
+pointer cast to a ``void *`` pointer.  That pointer can be recast and
+dereferenced to an integer yielding the length of the vector. This pointer
+must be deallocated when finished with it to avoid memory leaks. Example:
+
+.. code-block:: c
+
+   double *vectvals = (double *) lammps_extract_variable(handle, name, NULL);
+   int *intptr = (int *) lammps_extract_variable(handle, name, 1);
+   int vectlen = *intptr;
+   lammps_free((void *)intptr);
 
 For other variable styles the returned pointer needs to be cast to
-a char pointer. It should not be deallocated.
+a char pointer and it should **not** be deallocated. Example:
 
 .. code-block:: c
 
@@ -2138,42 +3152,49 @@ a char pointer. It should not be deallocated.
    LAMMPS cannot easily check if it is valid to access the data
    referenced by the variables (e.g., computes, fixes, or thermodynamic
    info), so it may fail with an error.  The caller has to make certain
-   that the data are extracted only when it safe to evaluate the variable
+   that the data is extracted only when it safe to evaluate the variable
    and thus an error or crash are avoided.
 
 \endverbatim
  *
  * \param  handle  pointer to a previously created LAMMPS instance
  * \param  name    name of the variable
- * \param  group   group-ID for atom style variable or ``NULL``
+ * \param  group   group-ID for atom style variable or ``NULL`` or non-NULL to get vector length
  * \return         pointer (cast to ``void *``) to the location of the
  *                 requested data or ``NULL`` if not found. */
 
 void *lammps_extract_variable(void *handle, const char *name, const char *group)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable || !lmp->group) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
 
   BEGIN_CAPTURE
   {
     int ivar = lmp->input->variable->find(name);
-    if (ivar < 0) return nullptr;
+    if (ivar < 0)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Variable {} does not exist", FNERR, name);
 
     if (lmp->input->variable->equalstyle(ivar)) {
-      auto dptr = (double *) malloc(sizeof(double));
+      auto *dptr = (double *) malloc(sizeof(double));
       *dptr = lmp->input->variable->compute_equal(ivar);
       return (void *) dptr;
     } else if (lmp->input->variable->atomstyle(ivar)) {
       if (group == nullptr) group = (char *)"all";
       int igroup = lmp->group->find(group);
-      if (igroup < 0) return nullptr;
+      if (igroup < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Group {} does not exist", FNERR, group);
       int nlocal = lmp->atom->nlocal;
-      auto vector = (double *) malloc(nlocal*sizeof(double));
+      auto *vector = (double *) malloc(nlocal*sizeof(double));
       lmp->input->variable->compute_atom(ivar,igroup,vector,1,0);
       return (void *) vector;
     } else if (lmp->input->variable->vectorstyle(ivar)) {
       double *values = nullptr;
       int nvector = lmp->input->variable->compute_vector(ivar, &values);
-      if ( group != nullptr && strcmp(group,"LMP_SIZE_VECTOR") == 0 ) {
+      if (group) {
           int* nvecptr = (int *) malloc(sizeof(int));
           *nvecptr = nvector;
           return (void *) nvecptr;
@@ -2184,9 +3205,7 @@ void *lammps_extract_variable(void *handle, const char *name, const char *group)
     }
   }
   END_CAPTURE
-#if defined(LAMMPS_EXCEPTIONS)
   return nullptr;
-#endif
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2195,12 +3214,12 @@ void *lammps_extract_variable(void *handle, const char *name, const char *group)
  *
 \verbatim embed:rst
 
+.. versionadded:: 3Nov2022
+
 This function returns an integer that encodes the data type of the variable
 with the specified name. See :cpp:enum:`_LMP_VAR_CONST` for valid values.
 Callers of :cpp:func:`lammps_extract_variable` can use this information to
 decide how to cast the ``void *`` pointer and access the data.
-
-.. versionadded:: 3Nov2022
 
 \endverbatim
  *
@@ -2212,12 +3231,18 @@ decide how to cast the ``void *`` pointer and access the data.
 
 int lammps_extract_variable_datatype(void *handle, const char *name)
 {
-  auto lmp = (LAMMPS*) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
 
   BEGIN_CAPTURE
   {
     int ivar = lmp->input->variable->find(name);
-    if ( ivar < 0 ) return -1;
+    if (ivar < 0)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Variable {} does not exist", FNERR, name);
 
     if (lmp->input->variable->equalstyle(ivar))
       return LMP_VAR_EQUAL;
@@ -2233,21 +3258,76 @@ int lammps_extract_variable_datatype(void *handle, const char *name)
 }
 
 /* ---------------------------------------------------------------------- */
+// for printing obsolete function call warning only once
+static int set_variable_deprecated_flag = 1;
 
 /** Set the value of a string-style variable.
- *
- * This function assigns a new value from the string str to the
- * string-style variable name. Returns -1 if a variable of that
- * name does not exist or is not a string-style variable, otherwise 0.
- *
+\verbatim embed:rst
+
+.. versionremoved:: 7Feb2024
+
+This function assigns a new value from the string str to the
+string-style variable *name*.  This is a way to directly change the
+string value of a LAMMPS variable that was previous defined with a
+:doc:`variable name string <variable>` command without using any
+LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or if it is not
+a string-style variable, otherwise 0.
+
+.. warning::
+
+   This function is deprecated and :cpp:func:`lammps_set_string_variable`
+   should be used instead.
+
+   \endverbatim
+
+* \param  handle  pointer to a previously created LAMMPS instance
+ * \param  name    name of the variable
+ * \param  str     new value of the variable
+ * \return         0 on success or -1 on failure */
+
+int lammps_set_variable(void *handle, const char *name, const char *str)
+{
+  if (set_variable_deprecated_flag) {
+    fprintf(stderr,"Using the 'lammps_set_variable()' function is deprecated. "
+            "Please use 'lammps_set_string_variable()' instead.\n");
+    set_variable_deprecated_flag = 0;
+  }
+  return lammps_set_string_variable(handle, name, str);
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Set the value of a string-style variable.
+\verbatim embed:rst
+
+.. versionadded:: 7Feb2024
+
+This function assigns a new value from the string str to the
+string-style variable *name*.  This is a way to directly change the
+string value of a LAMMPS variable that was previous defined with a
+:doc:`variable name string <variable>` command without using any
+LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or if it is not
+a string-style variable, otherwise 0.
+
+\endverbatim
+
  * \param  handle  pointer to a previously created LAMMPS instance
  * \param  name    name of the variable
  * \param  str     new value of the variable
  * \return         0 on success or -1 on failure
  */
-int lammps_set_variable(void *handle, char *name, char *str)
+int lammps_set_string_variable(void *handle, const char *name, const char *str)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
   int err = -1;
 
   BEGIN_CAPTURE
@@ -2259,11 +3339,238 @@ int lammps_set_variable(void *handle, char *name, char *str)
   return err;
 }
 
+/* ---------------------------------------------------------------------- */
+
+/** Set the value of an internal-style variable.
+ *
+\verbatim embed:rst
+
+.. versionadded:: 7Feb2024
+
+This function assigns a new value from the floating point number *value*
+to the internal-style variable *name*.  This is a way to directly change
+the numerical value of such a LAMMPS variable that was previous defined
+with a :doc:`variable name internal <variable>` command without using
+any LAMMPS commands to delete and redefine the variable.
+
+Returns -1 if a variable of that name does not exist or is not an
+internal-style variable, otherwise 0.
+
+\endverbatim
+
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  name    name of the variable
+ * \param  value   new value of the variable
+ * \return         0 on success or -1 on failure
+ */
+int lammps_set_internal_variable(void *handle, const char *name, double value)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+
+  BEGIN_CAPTURE
+  {
+    int ivar = lmp->input->variable->find(name);
+    if (ivar < 0)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Variable {} does not exist", FNERR, name);
+
+    if (lmp->input->variable->internalstyle(ivar)) {
+        lmp->input->variable->internal_set(ivar, value);
+        return 0;
+    }
+  }
+  END_CAPTURE
+  return -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Retrieve informational string for a variable.
+ *
+\verbatim embed:rst
+
+.. versionadded:: 21Nov2023
+
+This function copies a string with human readable information about
+a defined variable: name, style, current value(s) into the provided
+C-style string buffer.  That is the same info as produced by the
+:doc:`info variables <info>` command. The length of the buffer must
+be provided as *buf_size* argument.  If the info exceeds the length
+of the buffer, it will be truncated accordingly.  If the index is
+out of range, the function returns 0 and *buffer* is set to an empty
+string, otherwise 1.
+
+\endverbatim
+
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param idx      index of the variable (0 <= idx < nvar)
+ * \param buffer   string buffer to copy the info to
+ * \param buf_size size of the provided string buffer
+ * \return 1 if successful, otherwise 0  */
+
+int lammps_variable_info(void *handle, int idx, char *buffer, int buf_size) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  Info info(lmp);
+
+  if ((idx >= 0) && (idx < lmp->input->variable->get_nvar())) {
+    auto varinfo = info.get_variable_info(idx);
+    strncpy(buffer, varinfo.c_str(), buf_size);
+    return 1;
+  }
+
+  buffer[0] = '\0';
+  return 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Evaluate an immediate variable expression
+ *
+\verbatim embed:rst
+
+.. versionadded:: 4Feb2025
+
+This function takes a string with an expression that can be used
+for :doc:`equal style variables <variable>`, evaluates it and returns
+the resulting (scalar) value as a floating point number.
+
+*See also*
+    :cpp:func:`lammps_expand`
+
+\endverbatim
+
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param expr     string with expression
+ * \return         result from expression */
+
+double lammps_eval(void *handle, const char *expr)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0.0;
+  }
+  double result = 0.0;
+
+  BEGIN_CAPTURE
+  {
+    result = lmp->input->variable->compute_equal(expr);
+  }
+  END_CAPTURE
+
+  return result;
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Clear whether a compute has been invoked.
+ *
+\verbatim embed:rst
+
+.. versionadded:: 4Feb2025
+
+   This function clears the invoked flag of all computes.
+   Called everywhere that computes are used, before computes are invoked.
+   The invoked flag is used to avoid re-invoking same compute multiple times
+   and to flag computes that store invocation times as having been invoked
+
+*See also*
+    :cpp:func:`lammps_addstep_compute_all`
+    :cpp:func:`lammps_addstep_compute`
+
+\endverbatim
+
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ */
+void lammps_clearstep_compute(void *handle) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  lmp->modify->clearstep_compute();
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Add next timestep to all computes
+ *
+\verbatim embed:rst
+
+.. versionadded:: 4Feb2025
+
+   loop over all computes
+   schedule next invocation for those that store invocation times
+   called when not sure what computes will be needed on newstep
+   do not loop only over n_timeflag, since may not be set yet
+
+*See also*
+    :cpp:func:`lammps_clearstep_compute`
+    :cpp:func:`lammps_addstep_compute`
+
+\endverbatim
+
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param newstep  pointer to bigint of next timestep the compute will be invoked
+ */
+void lammps_addstep_compute_all(void *handle, void *newstep) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  auto *ns = (bigint *) newstep;
+  if (lmp && lmp->modify && ns) lmp->modify->addstep_compute_all(*ns);
+}
+/* ---------------------------------------------------------------------- */
+
+/** Add next timestep to compute if it has been invoked in the current timestep
+ *
+\verbatim embed:rst
+
+.. versionadded:: 4Feb2025
+
+   loop over computes that store invocation times
+   if its invoked flag set on this timestep, schedule next invocation
+   called everywhere that computes are used, after computes are invoked
+
+*See also*
+    :cpp:func:`lammps_addstep_compute_all`
+    :cpp:func:`lammps_clearstep_compute`
+
+\endverbatim
+
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param newstep  next timestep the compute will be invoked
+ */
+void lammps_addstep_compute(void *handle, void *newstep) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  auto *ns = (bigint *) newstep;
+  if (lmp && lmp->modify && ns) lmp->modify->addstep_compute(*ns);
+}
+
 // ----------------------------------------------------------------------
 // Library functions for scatter/gather operations of data
 // ----------------------------------------------------------------------
 
-/** Gather the named atom-based entity for all atoms across all processors,
+/** Gather the named atom-based entity for all atoms across all processes,
  * in order.
  *
 \verbatim embed:rst
@@ -2282,12 +3589,21 @@ x[0][2], x[1][0], x[1][1], x[1][2], x[2][0], :math:`\dots`);
 *natoms*), as queried by :cpp:func:`lammps_get_natoms`,
 :cpp:func:`lammps_extract_global`, or :cpp:func:`lammps_extract_setting`.
 
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and consecutive.
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
 \endverbatim
  *
  * \param handle  pointer to a previously created LAMMPS instance
- * \param name    desired quantity (e.g., *x* or *charge*)
- * \param type    0 for ``int`` values, 1 for ``double`` values
- * \param count   number of per-atom values (e.g., 1 for *type* or *charge*,
+ * \param name    desired quantity (e.g., *x* or *q*)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
  *                3 for *x* or *f*); use *count* = 3 with *image* if you want
  *                a single image flag unpacked into (*x*,*y*,*z*) components.
  * \param data    per-atom values packed in a 1-dimensional array of length
@@ -2301,15 +3617,20 @@ x[0][2], x[1][0], x[1][1], x[1][2], x[2][0], :math:`\dots`);
      Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_gather_atoms(void *handle, char *name, int type, int count, void *data)
+void lammps_gather_atoms(void *handle, const char *name, int dtype, int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather_atoms() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,offset;
 
@@ -2320,26 +3641,19 @@ void lammps_gather_atoms(void *handle, char *name, int type, int count, void *da
     if (lmp->atom->tag_enable == 0 || lmp->atom->tag_consecutive() == 0)
       flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather_atoms");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist and be consecutive", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
 
     void *vptr = lmp->atom->extract(name);
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_atoms: unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): unknown property {}", FNERR, name);
 
     // copy = Natom length vector of per-atom values
     // use atom ID to insert each atom's values into copy
     // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
 
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgunpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -2348,7 +3662,7 @@ void lammps_gather_atoms(void *handle, char *name, int type, int count, void *da
       else array = (int **) vptr;
 
       int *copy;
-      lmp->memory->create(copy,count*natoms,"lib/gather:copy");
+      lmp->memory->create(copy, count*natoms, "lib/gather:copy");
       for (i = 0; i < count*natoms; i++) copy[i] = 0;
 
       tagint *tag = lmp->atom->tag;
@@ -2375,17 +3689,17 @@ void lammps_gather_atoms(void *handle, char *name, int type, int count, void *da
         }
       }
 
-      MPI_Allreduce(copy,data,count*natoms,MPI_INT,MPI_SUM,lmp->world);
+      MPI_Allreduce(copy, data, count * natoms, MPI_INT, MPI_SUM, lmp->world);
       lmp->memory->destroy(copy);
 
-    } else if (type == 1) {
+    } else if (dtype == 1) {
       double *vector = nullptr;
       double **array = nullptr;
       if (count == 1) vector = (double *) vptr;
       else array = (double **) vptr;
 
       double *copy;
-      lmp->memory->create(copy,count*natoms,"lib/gather:copy");
+      lmp->memory->create(copy, count*natoms, "lib/gather:copy");
       for (i = 0; i < count*natoms; i++) copy[i] = 0.0;
 
       tagint *tag = lmp->atom->tag;
@@ -2403,11 +3717,10 @@ void lammps_gather_atoms(void *handle, char *name, int type, int count, void *da
         }
       }
 
-      MPI_Allreduce(copy,data,count*natoms,MPI_DOUBLE,MPI_SUM,lmp->world);
+      MPI_Allreduce(copy, data, count*natoms, MPI_DOUBLE, MPI_SUM, lmp->world);
       lmp->memory->destroy(copy);
     } else {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_atoms: unsupported data type");
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): unsupported data type: {}", FNERR, dtype);
       return;
     }
 #endif
@@ -2415,7 +3728,7 @@ void lammps_gather_atoms(void *handle, char *name, int type, int count, void *da
   END_CAPTURE
 }
 
-/** Gather the named atom-based entity for all atoms across all processors,
+/** Gather the named atom-based entity for all atoms across all processes,
  * unordered.
  *
 \verbatim embed:rst
@@ -2432,21 +3745,30 @@ of atoms, use :cpp:func:`lammps_gather_atoms_subset`.
 
 The *data* array will be in groups of *count* values, with *natoms*
 groups total, but not in order by atom ID (e.g., if *name* is *x* and *count*
-is 3, then *data* might be something like = x[10][0], x[10][1], x[10][2],
+is 3, then *data* might be something like x[10][0], x[10][1], x[10][2],
 x[2][0], x[2][1], x[2][2], x[4][0], :math:`\dots`); *data* must be
 pre-allocated by the caller to length (*count* :math:`\times` *natoms*), as
-queried by :cpp:func:`lammps_get_natoms`,
-:cpp:func:`lammps_extract_global`, or :cpp:func:`lammps_extract_setting`.
+queried by :cpp:func:`lammps_get_natoms`, :cpp:func:`lammps_extract_global`,
+or :cpp:func:`lammps_extract_setting`.
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined.
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
 
 \endverbatim
  *
- * \param handle: pointer to a previously created LAMMPS instance
- * \param name:   desired quantity (e.g., *x* or *charge*\ )
- * \param type:   0 for ``int`` values, 1 for ``double`` values
- * \param count:  number of per-atom values (e.g., 1 for *type* or *charge*,
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., *x* or *q*\ )
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
  *                3 for *x* or *f*); use *count* = 3 with "image" if you want
  *                single image flags unpacked into (*x*,*y*,*z*)
- * \param data:   per-atom values packed in a 1-dimensional array of length
+ * \param data    per-atom values packed in a 1-dimensional array of length
  *                *natoms* \* *count*.
  *
  */
@@ -2456,15 +3778,20 @@ queried by :cpp:func:`lammps_get_natoms`,
      Allgather Nlocal atoms from each proc into data
 ------------------------------------------------------------------------- */
 
-void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, void *data)
+void lammps_gather_atoms_concat(void *handle, const char *name, int dtype,
+                                int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->comm || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather_atoms_concat() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,offset;
 
@@ -2474,20 +3801,13 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
     int flag = 0;
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather_atoms");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
 
     void *vptr = lmp->atom->extract(name);
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_atoms: unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown property {}", FNERR, name);
 
     // perform MPI_Allgatherv on each proc's chunk of Nlocal atoms
 
@@ -2497,17 +3817,13 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
     lmp->memory->create(recvcounts,nprocs,"lib/gather:recvcounts");
     lmp->memory->create(displs,nprocs,"lib/gather:displs");
 
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgunpack = (count == 3) && (strcmp(name,"image") == 0);
 
       if ((count == 1) || imgunpack) vector = (int *) vptr;
       else array = (int **) vptr;
-
-      int *copy;
-      lmp->memory->create(copy,count*natoms,"lib/gather:copy");
-      for (i = 0; i < count*natoms; i++) copy[i] = 0;
 
       int nlocal = lmp->atom->nlocal;
 
@@ -2516,11 +3832,13 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(vector,nlocal,MPI_INT,data,recvcounts,displs,
-                       MPI_INT,lmp->world);
+        MPI_Allgatherv(vector,nlocal,MPI_INT,data,recvcounts,displs,MPI_INT,lmp->world);
 
       } else if (imgunpack) {
-        lmp->memory->create(copy,count*nlocal,"lib/gather:copy");
+        int *copy;
+        lmp->memory->create(copy,count*natoms,"lib/gather:copy");
+        for (i = 0; i < count*natoms; i++) copy[i] = 0;
+
         offset = 0;
         for (i = 0; i < nlocal; i++) {
           const int image = vector[i];
@@ -2533,8 +3851,7 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(copy,count*nlocal,MPI_INT,
-                       data,recvcounts,displs,MPI_INT,lmp->world);
+        MPI_Allgatherv(copy,count*nlocal,MPI_INT,data,recvcounts,displs,MPI_INT,lmp->world);
         lmp->memory->destroy(copy);
 
       } else {
@@ -2543,8 +3860,7 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(&array[0][0],count*nlocal,MPI_INT,
-                       data,recvcounts,displs,MPI_INT,lmp->world);
+        MPI_Allgatherv(&array[0][0],count*nlocal,MPI_INT,data,recvcounts,displs,MPI_INT,lmp->world);
       }
 
     } else {
@@ -2560,8 +3876,7 @@ void lammps_gather_atoms_concat(void *handle, char *name, int type, int count, v
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(vector,nlocal,MPI_DOUBLE,data,recvcounts,displs,
-                       MPI_DOUBLE,lmp->world);
+        MPI_Allgatherv(vector,nlocal,MPI_DOUBLE,data,recvcounts,displs,MPI_DOUBLE,lmp->world);
 
       } else {
         int n = count*nlocal;
@@ -2599,17 +3914,26 @@ x[100][2], x[57][0], x[57][1], x[57][2], x[210][0], :math:`\dots`);
 *data* must be pre-allocated by the caller to length
 (*count* :math:`\times` *ndata*).
 
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and an :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
 \endverbatim
  *
- * \param handle: pointer to a previously created LAMMPS instance
- * \param name:   desired quantity (e.g., *x* or *charge*)
- * \param type:   0 for ``int`` values, 1 for ``double`` values
- * \param count:  number of per-atom values (e.g., 1 for *type* or *charge*,
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., *x* or *q*)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
  *                3 for *x* or *f*); use *count* = 3 with "image" if you want
  *                single image flags unpacked into (*x*,*y*,*z*)
- * \param ndata:  number of atoms for which to return data (can be all of them)
- * \param ids:    list of *ndata* atom IDs for which to return data
- * \param data:   per-atom values packed in a 1-dimensional array of length
+ * \param ndata   number of atoms for which to return data (can be all of them)
+ * \param ids     list of *ndata* atom IDs for which to return data
+ * \param data    per-atom values packed in a 1-dimensional array of length
  *                *ndata* \* *count*.
  *
  */
@@ -2621,16 +3945,21 @@ x[100][2], x[57][0], x[57][1], x[57][2], x[210][0], :math:`\dots`);
      Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_gather_atoms_subset(void *handle, char *name, int type, int count,
-                                int ndata, int *ids, void *data)
+void lammps_gather_atoms_subset(void *handle, const char *name, int dtype,
+                                int count, int ndata, int *ids, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !ids || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather_atoms_subset() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset;
     tagint id;
@@ -2642,25 +3971,17 @@ void lammps_gather_atoms_subset(void *handle, char *name, int type, int count,
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather_atoms_subset: atoms must have mappable ids");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist and be mapped", FNERR);
 
     void *vptr = lmp->atom->extract(name);
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_atoms_subset: "
-                            "unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): unknown property {}", FNERR, name);
 
     // copy = Ndata length vector of per-atom values
     // use atom ID to insert each atom's values into copy
     // MPI_Allreduce with MPI_SUM to merge into data
 
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgunpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -2745,30 +4066,40 @@ void lammps_gather_atoms_subset(void *handle, char *name, int type, int count,
   END_CAPTURE
 }
 
-/** Scatter the named atom-based entities in *data* to all processors.
+/** Scatter the named atom-based entities in *data* to all processes.
  *
 \verbatim embed:rst
 
 This subroutine takes data stored in a one-dimensional array supplied by the
-user and scatters them to all atoms on all processors. The data must be
+user and scatters them to all atoms on all processes. The data must be
 ordered by atom ID, with the requirement that the IDs be consecutive.
 Use :cpp:func:`lammps_scatter_atoms_subset` to scatter data for some (or all)
 atoms, unordered.
 
 The *data* array needs to be ordered in groups of *count* values, sorted by
 atom ID (e.g., if *name* is *x* and *count* = 3, then
-*data* = x[0][0], x[0][1], x[0][2], x[1][0], x[1][1], x[1][2], x[2][0],
-:math:`\dots`); *data* must be of length (*count* :math:`\times` *natoms*).
+*data* = {x[0][0], x[0][1], x[0][2], x[1][0], x[1][1], x[1][2], x[2][0],
+:math:`\dots`}); *data* must be of length (*count* :math:`\times` *natoms*).
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined, must be consecutive, and an
+    :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
 
 \endverbatim
  *
  * \param handle  pointer to a previously created LAMMPS instance
- * \param name    desired quantity (e.g., *x* or *charge*)
- * \param type    0 for ``int`` values, 1 for ``double`` values
- * \param count   number of per-atom values (e.g., 1 for *type* or *charge*,
+ * \param name    desired quantity (e.g., *x* or *q*)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
  *                3 for *x* or *f*); use *count* = 3 with *image* if you have
  *                a single image flag packed into (*x*,*y*,*z*) components.
- * \param data    per-atom values packed in a 1-dimensional array of length
+ * \param data    per-atom values packed in a one-dimensional array of length
  *                *natoms* \* *count*.
  *
  */
@@ -2778,15 +4109,20 @@ atom ID (e.g., if *name* is *x* and *count* = 3, then
      loop over Natoms, if I own atom ID, set its values from data
 ------------------------------------------------------------------------- */
 
-void lammps_scatter_atoms(void *handle, char *name, int type, int count, void *data)
+void lammps_scatter_atoms(void *handle, const char *name, int dtype, int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_scatter_atoms() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset;
 
@@ -2798,27 +4134,16 @@ void lammps_scatter_atoms(void *handle, char *name, int type, int count, void *d
       flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_scatter_atoms: ids must exist, be consecutive, and be mapped");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Atom-IDs must exist, be consecutive, and be mapped", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
 
     void *vptr = lmp->atom->extract(name);
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,
-                            "lammps_scatter_atoms: unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): unknown property {}", FNERR, name);
 
-    // copy = Natom length vector of per-atom values
-    // use atom ID to insert each atom's values into copy
-    // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
-
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -2856,7 +4181,7 @@ void lammps_scatter_atoms(void *handle, char *name, int type, int count, void *d
       double **array = nullptr;
       if (count == 1) vector = (double *) vptr;
       else array = (double **) vptr;
-      auto dptr = (double *) data;
+      auto *dptr = (double *) data;
 
       if (count == 1) {
         for (i = 0; i < natoms; i++)
@@ -2879,12 +4204,12 @@ void lammps_scatter_atoms(void *handle, char *name, int type, int count, void *d
 }
 
 /** Scatter the named atom-based entities in *data* from a subset of atoms
- *  to all processors.
+ *  to all processes.
  *
 \verbatim embed:rst
 
 This subroutine takes data stored in a one-dimensional array supplied by the
-user and scatters them to a subset of atoms on all processors. The array
+user and scatters them to a subset of atoms on all processes. The array
 *data* contains data associated with atom IDs, but there is no requirement that
 the IDs be consecutive, as they are provided in a separate array.
 Use :cpp:func:`lammps_scatter_atoms` to scatter data for all atoms, in order.
@@ -2895,16 +4220,25 @@ to be the array {x[1][0], x[1][1], x[1][2], x[100][0], x[100][1], x[100][2],
 x[57][0], x[57][1], x[57][2]}, then *count* = 3, *ndata* = 3, and *ids* would
 be {1, 100, 57}.
 
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and an :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
 \endverbatim
  *
- * \param handle: pointer to a previously created LAMMPS instance
- * \param name:   desired quantity (e.g., *x* or *charge*)
- * \param type:   0 for ``int`` values, 1 for ``double`` values
- * \param count:  number of per-atom values (e.g., 1 for *type* or *charge*,
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., *x* or *q*)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *dtype* or *q*,
  *                3 for *x* or *f*); use *count* = 3 with "image" if you have
  *                all the image flags packed into (*xyz*)
- * \param ndata:  number of atoms listed in *ids* and *data* arrays
- * \param ids:    list of *ndata* atom IDs to scatter data to
+ * \param ndata   number of atoms listed in *ids* and *data* arrays
+ * \param ids     list of *ndata* atom IDs to scatter data to
  * \param data    per-atom values packed in a 1-dimensional array of length
  *                *ndata* \* *count*.
  *
@@ -2915,9 +4249,9 @@ be {1, 100, 57}.
    data is ordered by provided atom IDs
      no requirement for consecutive atom IDs (1 to N)
    see scatter_atoms() to scatter data for all atoms, ordered by consecutive IDs
-   name = desired quantity (e.g., x or charge)
-   type = 0 for integer values, 1 for double values
-   count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+   name = desired quantity (e.g., x or q)
+   dtype = 0 for integer values, 1 for double values
+   count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
      use count = 3 with "image" for xyz to be packed into single image flag
    ndata = # of atoms in ids and data (could be all atoms)
    ids = list of Ndata atom IDs to scatter data to
@@ -2928,16 +4262,21 @@ be {1, 100, 57}.
      loop over Ndata, if I own atom ID, set its values from data
 ------------------------------------------------------------------------- */
 
-void lammps_scatter_atoms_subset(void *handle, char *name, int type, int count,
-                                 int ndata, int *ids, void *data)
+void lammps_scatter_atoms_subset(void *handle, const char *name, int dtype,
+                                 int count, int ndata, int *ids, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !ids || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_scatter_atoms_subset() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset;
     tagint id;
@@ -2949,25 +4288,13 @@ void lammps_scatter_atoms_subset(void *handle, char *name, int type, int count,
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_scatter_atoms_subset: atoms must have mapped ids");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist and be mapped", FNERR);
 
     void *vptr = lmp->atom->extract(name);
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,
-                            "lammps_scatter_atoms_subset: unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown property {}", FNERR, name);
 
-    // copy = Natom length vector of per-atom values
-    // use atom ID to insert each atom's values into copy
-    // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
-
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -3011,7 +4338,7 @@ void lammps_scatter_atoms_subset(void *handle, char *name, int type, int count,
       double **array = nullptr;
       if (count == 1) vector = (double *) vptr;
       else array = (double **) vptr;
-      auto dptr = (double *) data;
+      auto *dptr = (double *) data;
 
       if (count == 1) {
         for (i = 0; i < ndata; i++) {
@@ -3040,6 +4367,8 @@ void lammps_scatter_atoms_subset(void *handle, char *name, int type, int count,
  *
 \verbatim embed:rst
 
+.. versionadded:: 28Jul2021
+
 This function copies the list of all bonds into a buffer provided by
 the calling code. The buffer will be filled with bond type, bond atom 1,
 bond atom 2 for each bond. Thus the buffer has to be allocated to the
@@ -3053,8 +4382,6 @@ the LAMMPS library and can be queried by calling
 When running in parallel, the data buffer must be allocated on **all**
 MPI ranks and will be filled with the information for **all** bonds
 in the system.
-
-.. versionadded:: 28Jul2021
 
 Below is a brief C code demonstrating accessing this collected bond information.
 
@@ -3113,9 +4440,16 @@ Below is a brief C code demonstrating accessing this collected bond information.
 
 void lammps_gather_bonds(void *handle, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->atom->avec || !lmp->comm || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!data) return;
+
   BEGIN_CAPTURE {
-    void *val = lammps_extract_global(handle,"nbonds");
+    void *val = lammps_extract_global(handle, "nbonds");
     bigint nbonds = *(bigint *)val;
 
     // no bonds
@@ -3135,7 +4469,8 @@ void lammps_gather_bonds(void *handle, void *data)
     }
 
     tagint **bonds;
-    lmp->memory->create(bonds, localbonds, 3, "library:gather_bonds:localbonds");
+    // add 1 to localbonds, so "bonds" does not become a NULL pointer
+    lmp->memory->create(bonds, localbonds+1, 3, "library:gather_bonds:localbonds");
     lmp->atom->avec->pack_bond(bonds);
     MPI_Allgatherv(&bonds[0][0], 3*localbonds, MPI_LMP_TAGINT, data, bufsizes,
                    bufoffsets, MPI_LMP_TAGINT, lmp->world);
@@ -3146,6 +4481,406 @@ void lammps_gather_bonds(void *handle, void *data)
   END_CAPTURE
 }
 
+/** Gather type and constituent atom info for all angles
+ *
+\verbatim embed:rst
+
+.. versionadded:: 8Feb2023
+
+This function copies the list of all angles into a buffer provided by
+the calling code. The buffer will be filled with angle type, angle atom 1,
+angle atom 2, angle atom 3 for each angle. Thus the buffer has to be allocated to the
+dimension of 4 times the **total** number of angles times the size of
+the LAMMPS "tagint" type, which is either 4 or 8 bytes depending on
+whether they are stored in 32-bit or 64-bit integers, respectively.
+This size depends on the compile time settings used when compiling
+the LAMMPS library and can be queried by calling
+:cpp:func:`lammps_extract_setting()` with the keyword "tagint".
+
+When running in parallel, the data buffer must be allocated on **all**
+MPI ranks and will be filled with the information for **all** angles
+in the system.
+
+Below is a brief C code demonstrating accessing this collected angle information.
+
+.. code-block:: c
+
+   #include "library.h"
+
+   #include <stdint.h>
+   #include <stdio.h>
+   #include <stdlib.h>
+
+   int main(int argc, char **argv)
+   {
+       int tagintsize;
+       int64_t i, nangles;
+       void *handle, *angles;
+
+       handle = lammps_open_no_mpi(0, NULL, NULL);
+       lammps_file(handle, "in.some_input");
+
+       tagintsize = lammps_extract_setting(handle, "tagint");
+       if (tagintsize == 4)
+           nangles = *(int32_t *)lammps_extract_global(handle, "nangles");
+        else
+           nangles = *(int64_t *)lammps_extract_global(handle, "nangles");
+       angles = malloc(nangles * 4 * tagintsize);
+
+       lammps_gather_angles(handle, angles);
+
+       if (lammps_extract_setting(handle, "world_rank") == 0) {
+           if (tagintsize == 4) {
+               int32_t *angles_real = (int32_t *)angles;
+               for (i = 0; i < nangles; ++i) {
+                   printf("angle % 4ld: type = %d, atoms: % 4d  % 4d  % 4d\n",i,
+                          angles_real[4*i], angles_real[4*i+1], angles_real[4*i+2], angles_real[4*i+3]);
+               }
+           } else {
+               int64_t *angles_real = (int64_t *)angles;
+               for (i = 0; i < nangles; ++i) {
+                   printf("angle % 4ld: type = %ld, atoms: % 4ld  % 4ld  % 4ld\n",i,
+                          angles_real[4*i], angles_real[4*i+1], angles_real[4*i+2], angles_real[4*i+3]);
+               }
+           }
+       }
+
+       lammps_close(handle);
+       lammps_mpi_finalize();
+       free(angles);
+       return 0;
+   }
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  data    pointer to data to copy the result to */
+
+void lammps_gather_angles(void *handle, void *data)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->atom->avec || !lmp->comm || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!data) return;
+
+  BEGIN_CAPTURE {
+    void *val = lammps_extract_global(handle, "nangles");
+    bigint nangles = *(bigint *)val;
+
+    // no angles
+    if (nangles == 0) return;
+
+    // count per MPI rank angles, determine offsets and allocate local buffers
+    int localangles = lmp->atom->avec->pack_angle(nullptr);
+    int nprocs = lmp->comm->nprocs;
+    int *bufsizes = new int[nprocs];
+    int *bufoffsets = new int[nprocs];
+    MPI_Allgather(&localangles, 1, MPI_INT, bufsizes, 1, MPI_INT, lmp->world);
+    bufoffsets[0] = 0;
+    bufsizes[0] *= 4;           // 4 items per angle: type, atom1, atom2, atom3
+    for (int i = 1; i < nprocs; ++i) {
+      bufoffsets[i] = bufoffsets[i-1] + bufsizes[i-1];
+      bufsizes[i] *= 4;         // 4 items per angle: type, atom1, atom2, atom3
+    }
+
+    tagint **angles;
+    // add 1 to localangles, so "angles" does not become a NULL pointer
+    lmp->memory->create(angles, localangles+1, 4, "library:gather_angles:localangles");
+    lmp->atom->avec->pack_angle(angles);
+    MPI_Allgatherv(&angles[0][0], 4*localangles, MPI_LMP_TAGINT, data, bufsizes,
+                   bufoffsets, MPI_LMP_TAGINT, lmp->world);
+    lmp->memory->destroy(angles);
+    delete[] bufsizes;
+    delete[] bufoffsets;
+  }
+  END_CAPTURE
+}
+
+/** Gather type and constituent atom info for all dihedrals
+ *
+\verbatim embed:rst
+
+.. versionadded:: 8Feb2023
+
+This function copies the list of all dihedrals into a buffer provided by
+the calling code. The buffer will be filled with dihedral type, dihedral atom 1,
+dihedral atom 2, dihedral atom 3, dihedral atom 4 for each dihedral.
+Thus the buffer has to be allocated to the
+dimension of 5 times the **total** number of dihedrals times the size of
+the LAMMPS "tagint" type, which is either 4 or 8 bytes depending on
+whether they are stored in 32-bit or 64-bit integers, respectively.
+This size depends on the compile time settings used when compiling
+the LAMMPS library and can be queried by calling
+:cpp:func:`lammps_extract_setting()` with the keyword "tagint".
+
+When running in parallel, the data buffer must be allocated on **all**
+MPI ranks and will be filled with the information for **all** dihedrals
+in the system.
+
+Below is a brief C code demonstrating accessing this collected dihedral information.
+
+.. code-block:: c
+
+   #include "library.h"
+
+   #include <stdint.h>
+   #include <stdio.h>
+   #include <stdlib.h>
+
+   int main(int argc, char **argv)
+   {
+       int tagintsize;
+       int64_t i, ndihedrals;
+       void *handle, *dihedrals;
+
+       handle = lammps_open_no_mpi(0, NULL, NULL);
+       lammps_file(handle, "in.some_input");
+
+       tagintsize = lammps_extract_setting(handle, "tagint");
+       if (tagintsize == 4)
+           ndihedrals = *(int32_t *)lammps_extract_global(handle, "ndihedrals");
+        else
+           ndihedrals = *(int64_t *)lammps_extract_global(handle, "ndihedrals");
+       dihedrals = malloc(ndihedrals * 5 * tagintsize);
+
+       lammps_gather_dihedrals(handle, dihedrals);
+
+       if (lammps_extract_setting(handle, "world_rank") == 0) {
+           if (tagintsize == 4) {
+               int32_t *dihedrals_real = (int32_t *)dihedrals;
+               for (i = 0; i < ndihedrals; ++i) {
+                   printf("dihedral % 4ld: type = %d, atoms: % 4d  % 4d  % 4d  % 4d\n",i,
+                          dihedrals_real[5*i], dihedrals_real[5*i+1], dihedrals_real[5*i+2], dihedrals_real[5*i+3], dihedrals_real[5*i+4]);
+               }
+           } else {
+               int64_t *dihedrals_real = (int64_t *)dihedrals;
+               for (i = 0; i < ndihedrals; ++i) {
+                   printf("dihedral % 4ld: type = %ld, atoms: % 4ld  % 4ld  % 4ld  % 4ld\n",i,
+                          dihedrals_real[5*i], dihedrals_real[5*i+1], dihedrals_real[5*i+2], dihedrals_real[5*i+3], dihedrals_real[5*i+4]);
+               }
+           }
+       }
+
+       lammps_close(handle);
+       lammps_mpi_finalize();
+       free(dihedrals);
+       return 0;
+   }
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  data    pointer to data to copy the result to */
+
+void lammps_gather_dihedrals(void *handle, void *data)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->atom->avec || !lmp->comm || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!data) return;
+
+  BEGIN_CAPTURE {
+    void *val = lammps_extract_global(handle,"ndihedrals");
+    bigint ndihedrals = *(bigint *)val;
+
+    // no dihedrals
+    if (ndihedrals == 0) return;
+
+    // count per MPI rank dihedrals, determine offsets and allocate local buffers
+    int localdihedrals = lmp->atom->avec->pack_dihedral(nullptr);
+    int nprocs = lmp->comm->nprocs;
+    int *bufsizes = new int[nprocs];
+    int *bufoffsets = new int[nprocs];
+    MPI_Allgather(&localdihedrals, 1, MPI_INT, bufsizes, 1, MPI_INT, lmp->world);
+    bufoffsets[0] = 0;
+    bufsizes[0] *= 5;           // 5 items per dihedral: type, atom1, atom2, atom3, atom4
+    for (int i = 1; i < nprocs; ++i) {
+      bufoffsets[i] = bufoffsets[i-1] + bufsizes[i-1];
+      bufsizes[i] *= 5;         // 5 items per dihedral: type, atom1, atom2, atom3, atom4
+    }
+
+    tagint **dihedrals;
+    // add 1 to localdihedrals, so "dihedrals" does not become a NULL pointer
+    lmp->memory->create(dihedrals, localdihedrals+1, 5, "library:gather_dihedrals:localdihedrals");
+    lmp->atom->avec->pack_dihedral(dihedrals);
+    MPI_Allgatherv(&dihedrals[0][0], 5*localdihedrals, MPI_LMP_TAGINT, data, bufsizes,
+                   bufoffsets, MPI_LMP_TAGINT, lmp->world);
+    lmp->memory->destroy(dihedrals);
+    delete[] bufsizes;
+    delete[] bufoffsets;
+  }
+  END_CAPTURE
+}
+
+/** Gather type and constituent atom info for all impropers
+ *
+\verbatim embed:rst
+
+.. versionadded:: 8Feb2023
+
+This function copies the list of all impropers into a buffer provided by
+the calling code. The buffer will be filled with improper type, improper atom 1,
+improper atom 2, improper atom 3, improper atom 4 for each improper.
+Thus the buffer has to be allocated to the
+dimension of 5 times the **total** number of impropers times the size of
+the LAMMPS "tagint" type, which is either 4 or 8 bytes depending on
+whether they are stored in 32-bit or 64-bit integers, respectively.
+This size depends on the compile time settings used when compiling
+the LAMMPS library and can be queried by calling
+:cpp:func:`lammps_extract_setting()` with the keyword "tagint".
+
+When running in parallel, the data buffer must be allocated on **all**
+MPI ranks and will be filled with the information for **all** impropers
+in the system.
+
+Below is a brief C code demonstrating accessing this collected improper information.
+
+.. code-block:: c
+
+   #include "library.h"
+
+   #include <stdint.h>
+   #include <stdio.h>
+   #include <stdlib.h>
+
+   int main(int argc, char **argv)
+   {
+       int tagintsize;
+       int64_t i, nimpropers;
+       void *handle, *impropers;
+
+       handle = lammps_open_no_mpi(0, NULL, NULL);
+       lammps_file(handle, "in.some_input");
+
+       tagintsize = lammps_extract_setting(handle, "tagint");
+       if (tagintsize == 4)
+           nimpropers = *(int32_t *)lammps_extract_global(handle, "nimpropers");
+        else
+           nimpropers = *(int64_t *)lammps_extract_global(handle, "nimpropers");
+       impropers = malloc(nimpropers * 5 * tagintsize);
+
+       lammps_gather_impropers(handle, impropers);
+
+       if (lammps_extract_setting(handle, "world_rank") == 0) {
+           if (tagintsize == 4) {
+               int32_t *impropers_real = (int32_t *)impropers;
+               for (i = 0; i < nimpropers; ++i) {
+                   printf("improper % 4ld: type = %d, atoms: % 4d  % 4d  % 4d  % 4d\n",i,
+                          impropers_real[5*i], impropers_real[5*i+1], impropers_real[5*i+2], impropers_real[5*i+3], impropers_real[5*i+4]);
+               }
+           } else {
+               int64_t *impropers_real = (int64_t *)impropers;
+               for (i = 0; i < nimpropers; ++i) {
+                   printf("improper % 4ld: type = %ld, atoms: % 4ld  % 4ld  % 4ld  % 4ld\n",i,
+                          impropers_real[5*i], impropers_real[5*i+1], impropers_real[5*i+2], impropers_real[5*i+3], impropers_real[5*i+4]);
+               }
+           }
+       }
+
+       lammps_close(handle);
+       lammps_mpi_finalize();
+       free(impropers);
+       return 0;
+   }
+
+\endverbatim
+ *
+ * \param  handle  pointer to a previously created LAMMPS instance
+ * \param  data    pointer to data to copy the result to */
+
+void lammps_gather_impropers(void *handle, void *data)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->atom->avec || !lmp->comm || !lmp->memory) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!data) return;
+
+  BEGIN_CAPTURE {
+    void *val = lammps_extract_global(handle,"nimpropers");
+    bigint nimpropers = *(bigint *)val;
+
+    // no impropers
+    if (nimpropers == 0) return;
+
+    // count per MPI rank impropers, determine offsets and allocate local buffers
+    int localimpropers = lmp->atom->avec->pack_improper(nullptr);
+    int nprocs = lmp->comm->nprocs;
+    int *bufsizes = new int[nprocs];
+    int *bufoffsets = new int[nprocs];
+    MPI_Allgather(&localimpropers, 1, MPI_INT, bufsizes, 1, MPI_INT, lmp->world);
+    bufoffsets[0] = 0;
+    bufsizes[0] *= 5;           // 5 items per improper: type, atom1, atom2, atom3, atom4
+    for (int i = 1; i < nprocs; ++i) {
+      bufoffsets[i] = bufoffsets[i-1] + bufsizes[i-1];
+      bufsizes[i] *= 5;         // 5 items per improper: type, atom1, atom2, atom3, atom4
+    }
+
+    tagint **impropers;
+    // add 1 to localimpropers, so "impropers" does not become a NULL pointer
+    lmp->memory->create(impropers, localimpropers+1, 5, "library:gather_impropers:localimpropers");
+    lmp->atom->avec->pack_improper(impropers);
+    MPI_Allgatherv(&impropers[0][0], 5*localimpropers, MPI_LMP_TAGINT, data, bufsizes,
+                   bufoffsets, MPI_LMP_TAGINT, lmp->world);
+    lmp->memory->destroy(impropers);
+    delete[] bufsizes;
+    delete[] bufoffsets;
+  }
+  END_CAPTURE
+}
+
+/** Gather the named per-atom, per-atom fix, per-atom compute, or fix property/atom-based entities
+ *  from all processes, in order by atom ID.
+ *
+\verbatim embed:rst
+
+This subroutine gathers data from all processes and stores them in a one-dimensional array
+allocated by the user. The array *data* will be ordered by atom ID, which requires consecutive IDs
+(1 to *natoms*\ ). If you need a similar array but for non-consecutive atom IDs, see
+:cpp:func:`lammps_gather_concat`; for a similar array but for a subset of atoms, see
+:cpp:func:`lammps_gather_subset`.
+
+The *data* array will be ordered in groups of *count* values, sorted by atom ID (e.g., if *name* is
+*x*, then *data* is {x[0][0], x[0][1], x[0][2], x[1][0], x[1][1], x[1][2], x[2][0],
+:math:`\dots`}); *data* must be pre-allocated by the caller to the correct length
+(*count*\ :math:`{}\times{}`\ *natoms*), as queried by :cpp:func:`lammps_get_natoms`,
+:cpp:func:`lammps_extract_global`, or :cpp:func:`lammps_extract_setting`.
+
+This function will return an error if fix or compute data are requested and the fix or compute ID
+given does not have per-atom data.
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and must be consecutive.
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
+\endverbatim
+ *
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., "x" or "f" for atom properties, "f_id" for per-atom fix
+ *                data, "c_id" for per-atom compute data, "d_name" or "i_name" for fix
+ *                property/atom vectors with *count* = 1, "d2_name" or "i2_name" for fix
+ *                property/atom vectors with *count* > 1)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*, 3 for *x* or *f*);
+ *                use *count* = 3 with *image* if you want the image flags unpacked into
+ *                (*x*,*y*,*z*) components.
+ * \param data    per-atom values packed into a one-dimensional array of length
+ *                *natoms* \* *count*.
+ *
+ */
 /* ----------------------------------------------------------------------
   Contributing author: Thomas Swinburne (CNRS & CINaM, Marseille, France)
   gather the named atom-based entity for all atoms
@@ -3159,8 +4894,8 @@ void lammps_gather_bonds(void *handle, void *data)
          "d_name" or "i_name" for fix property/atom vectors with count = 1
          "d2_name" or "i2_name" for fix property/atom arrays with count > 1
          will return error if fix/compute isn't atom-based
-  type = 0 for integer values, 1 for double values
-  count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+  dtype = 0 for integer values, 1 for double values
+  count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
     use count = 3 with "image" if want single image flag unpacked into xyz
   return atom-based values in 1d data, ordered by count, then by atom ID
     (e.g., x[0][0],x[0][1],x[0][2],x[1][0],x[1][1],x[1][2],x[2][0],...)
@@ -3172,14 +4907,20 @@ void lammps_gather_bonds(void *handle, void *data)
     Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_gather(void *handle, char *name, int type, int count, void *data)
+void lammps_gather(void *handle, const char *name, int dtype, int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,offset,ltype;
 
@@ -3189,42 +4930,32 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
     if (lmp->atom->tag_enable == 0 || lmp->atom->tag_consecutive() == 0)
       flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist and be consecutive", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
     void *vptr = lmp->atom->extract(name);
 
     // fix
 
-    if (vptr==nullptr && utils::strmatch(name,"^f_")) {
-
-      auto fix = lmp->modify->get_fix_by_id(&name[2]);
-      if (!fix) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: unknown fix id");
-        return;
-      }
-
-      if (fix->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: fix does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (fix->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: count != values peratom for fix");
-        return;
-      }
-
-      if (lmp->update->ntimestep % fix->peratom_freq) {
-        if (lmp->comm->me == 0)
-          lmp->error->all(FLERR,"lammps_gather: fix not computed at compatible time");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^f_")) {
+      const char *fixid = name + 2;
+      auto *fix = lmp->modify->get_fix_by_id(fixid);
+      if (!fix)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, fixid);
+      if (fix->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): fix {} does not compute per-atom vector or array", FNERR, fixid);
+      if ((count > 1) && (fix->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom array with {} columns",
+                        FNERR, count, fixid);
+      if ((count == 1) && (fix->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute {} per-atom vector", FNERR, count, fixid);
+      if (lmp->update->ntimestep % fix->peratom_freq)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}: Fix {} not computed at compatible time{}",
+                        FNERR, fixid, utils::errorurl(7));
 
       if (count==1) vptr = (void *) fix->vector_atom;
       else vptr = (void *) fix->array_atom;
@@ -3232,25 +4963,21 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
 
     // compute
 
-    if (vptr==nullptr && utils::strmatch(name,"^c_")) {
-
-      auto compute = lmp->modify->get_compute_by_id(&name[2]);
-      if (!compute) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: unknown compute id");
-        return;
-      }
-
-      if (compute->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: compute does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (compute->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: count != values peratom for compute");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^c_")) {
+      const char *compid = name+2;
+      auto *compute = lmp->modify->get_compute_by_id(compid);
+      if (!compute)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, compid);
+      if (compute->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not compute per-atom "
+                        "vector or array", FNERR, compid);
+      if ((count > 1) && (compute->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom array with {} columns",
+                        FNERR, count, compid);
+      if ((count == 1) && (compute->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector", FNERR, count, compid);
 
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
@@ -3259,35 +4986,27 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
       else vptr = (void *) compute->array_atom;
     }
 
-    // custom fix property/atom vector or array
+    // custom per-atom vector or array
 
-    if ((vptr == nullptr) && utils::strmatch(name,"^[id]2?_")) {
-
+    if (!vptr && utils::strmatch(name, "^[id]2?_")) {
       int idx,icol;
-      if (utils::strmatch(name,"^[id]_")) idx = lmp->atom->find_custom(&name[2],ltype,icol);
-      else idx = lmp->atom->find_custom(&name[3],ltype,icol);
+      const char *propid;
+      if (utils::strmatch(name,"^[id]_")) propid = name + 2;
+      else propid = name + 3;
 
-      if (idx < 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: unknown property/atom id");
-        return;
-      }
-
-      if (ltype != type) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: mismatch property/atom type");
-        return;
-      }
-      if ((count == 1) && (icol != 0)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: mismatch property/atom count");
-        return;
-      }
-      if ((count > 1) && (icol != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: mismatch property/atom count");
-        return;
-      }
+      idx = lmp->atom->find_custom(propid, ltype, icol);
+      if (idx < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Could not find custom per-atom property ID {}", FNERR, propid);
+      if (ltype != dtype)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} type mismatch", FNERR, propid);
+      if ((count == 1) && (icol != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
+      if ((count > 1) && (icol != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
 
       if (count == 1) {
         if (ltype==0) vptr = (void *) lmp->atom->ivector[idx];
@@ -3300,17 +5019,13 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
 
     // no match
 
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather: undefined property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown property {}", name);
 
     // copy = Natom length vector of per-atom values
     // use atom ID to insert each atom's values into copy
     // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
 
-    if (type==0) {
+    if (dtype==0) {
       int *vector = nullptr;
       int **array = nullptr;
 
@@ -3347,7 +5062,7 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
         }
       }
 
-      MPI_Allreduce(copy,data,count*natoms,MPI_INT,MPI_SUM,lmp->world);
+      MPI_Allreduce(copy, data, count * natoms, MPI_INT, MPI_SUM, lmp->world);
       lmp->memory->destroy(copy);
 
     } else {
@@ -3373,7 +5088,7 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
             copy[offset++] = array[i][j];
         }
       }
-      MPI_Allreduce(copy,data,count*natoms,MPI_DOUBLE,MPI_SUM,lmp->world);
+      MPI_Allreduce(copy, data, count * natoms, MPI_DOUBLE, MPI_SUM, lmp->world);
       lmp->memory->destroy(copy);
     }
 #endif
@@ -3381,6 +5096,51 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
   END_CAPTURE
 }
 
+/** Gather the named per-atom, per-atom fix, per-atom compute, or fix property/atom-based entities
+ *  from all processes, unordered.
+ *
+\verbatim embed:rst
+
+This subroutine gathers data for all atoms and stores them in a one-dimensional array allocated by
+the user. The data will be a concatenation of chunks from each processor's owned atoms, in
+whatever order the atoms are in on each processor. This process has no requirement that the atom
+IDs be consecutive. If you need the ID of each atom, you can do another call to either
+:cpp:func:`lammps_gather_atoms_concat` or :cpp:func:`lammps_gather_concat` with *name* set to
+``id``. If you have consecutive IDs and want the data to be in order, use
+:cpp:func:`lammps_gather`; for a similar array but for a subset of atoms, use
+:cpp:func:`lammps_gather_subset`.
+
+The *data* array will be in groups of *count* values, with *natoms* groups total, but not in order
+by atom ID (e.g., if *name* is *x* and *count* is 3, then *data* might be something like
+{x[10][0], x[10][1], x[10][2], x[2][0], x[2][1], x[2][2], x[4][0], :math:`\dots`}); *data* must be
+pre-allocated by the caller to length (*count* :math:`\times` *natoms*), as queried by
+:cpp:func:`lammps_get_natoms`, :cpp:func:`lammps_extract_global`, or
+:cpp:func:`lammps_extract_setting`.
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined.
+
+    The total number of atoms must be less than 2147483647 (max 32-bit signed int).
+
+\endverbatim
+ *
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., "x" or "f" for atom properties, "f_id" for per-atom fix
+ *                data, "c_id" for per-atom compute data, "d_name" or "i_name" for fix
+ *                property/atom vectors with count = 1, "d2_name" or "i2_name" for fix
+ *                property/atom vectors with count > 1)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*, 3 for *x* or *f*);
+ *                use *count* = 3 with *image* if you want the image flags unpacked into
+ *                (*x*,*y*,*z*) components.
+ * \param data    per-atom values packed into a one-dimensional array of length
+ *                *natoms* \* *count*.
+ *
+ */
 /* ----------------------------------------------------------------------
   Contributing author: Thomas Swinburne (CNRS & CINaM, Marseille, France)
   gather the named atom-based entity for all atoms
@@ -3394,8 +5154,8 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
          "d_name" or "i_name" for fix property/atom vectors with count = 1
          "d2_name" or "i2_name" for fix property/atom arrays with count > 1
          will return error if fix/compute isn't atom-based
-  type = 0 for integer values, 1 for double values
-  count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+  dtype = 0 for integer values, 1 for double values
+  count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
     use count = 3 with "image" if want single image flag unpacked into xyz
   return atom-based values in 1d data, ordered by count, then by atom ID
     (e.g., x[0][0],x[0][1],x[0][2],x[1][0],x[1][1],x[1][2],x[2][0],...)
@@ -3407,15 +5167,20 @@ void lammps_gather(void *handle, char *name, int type, int count, void *data)
     Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_gather_concat(void *handle, char *name, int type, int count, void *data)
+void lammps_gather_concat(void *handle, const char *name, int dtype, int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory || !lmp->modify || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather_concat"
-                          " not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,offset,ltype;
 
@@ -3424,41 +5189,31 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
     int flag = 0;
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather_concat");
-      return;
-    }
+    if (flag) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
     void *vptr = lmp->atom->extract(name);
 
     // fix
 
-    if (vptr==nullptr && utils::strmatch(name,"^f_")) {
-
-      auto fix = lmp->modify->get_fix_by_id(&name[2]);
-      if (!fix) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: unknown fix id");
-        return;
-      }
-
-      if (fix->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: fix does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (fix->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: count != values peratom for fix");
-        return;
-      }
-      if (lmp->update->ntimestep % fix->peratom_freq) {
-        if (lmp->comm->me == 0)
-          lmp->error->all(FLERR,"lammps_gather_concat: fix not computed at compatible time");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^f_")) {
+      const char *fixid = name+2;
+      auto *fix = lmp->modify->get_fix_by_id(fixid);
+      if (!fix)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, fixid);
+      if (fix->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): fix {} does not compute per-atom vector or array", FNERR, fixid);
+      if ((count > 1) && (fix->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom array with {} columns",
+                        FNERR, count, fixid);
+      if ((count == 1) && (fix->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute {} per-atom vector", FNERR, count, fixid);
+      if (lmp->update->ntimestep % fix->peratom_freq)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}: Fix {} not computed at compatible time{}",
+                        FNERR, fixid, utils::errorurl(7));
 
       if (count==1) vptr = (void *) fix->vector_atom;
       else vptr = (void *) fix->array_atom;
@@ -3466,25 +5221,21 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
 
     // compute
 
-    if (vptr==nullptr && utils::strmatch(name,"^c_")) {
-
-      auto compute = lmp->modify->get_compute_by_id(&name[2]);
-      if (!compute) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: unknown compute id");
-        return;
-      }
-
-      if (compute->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: compute does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (compute->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: count != values peratom for compute");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^c_")) {
+      const char *compid = name + 2;
+      auto *compute = lmp->modify->get_compute_by_id(compid);
+      if (!compute)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, compid);
+      if (compute->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not compute per-atom "
+                        "vector or array", FNERR, compid);
+      if ((count > 1) && (compute->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom array with {} columns",
+                        FNERR, count, compid);
+      if ((count == 1) && (compute->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector", FNERR, count, compid);
 
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
@@ -3495,33 +5246,25 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
 
     // custom per-atom vector or array
 
-    if ((vptr==nullptr) && utils::strmatch(name,"^[id]2?_")) {
-
+    if (!vptr && utils::strmatch(name, "^[id]2?_")) {
       int idx,icol;
-      if (utils::strmatch(name,"^[id]_")) idx = lmp->atom->find_custom(&name[2],ltype,icol);
-      else idx = lmp->atom->find_custom(&name[3],ltype,icol);
+      const char *propid;
+      if (utils::strmatch(name,"^[id]_")) propid = name + 2;
+      else propid = name + 3;
 
-      if (idx < 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: unknown property/atom id");
-        return;
-      }
-
-      if (ltype != type) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: mismatch property/atom type");
-        return;
-      }
-      if ((count == 1) && (icol != 0)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: mismatch property/atom count");
-        return;
-      }
-      if ((count > 1) && (icol != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_concat: mismatch property/atom count");
-        return;
-      }
+      idx = lmp->atom->find_custom(propid, ltype, icol);
+      if (idx < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Could not find custom per-atom property ID {}", FNERR, propid);
+      if (ltype != dtype)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} type mismatch", FNERR, propid);
+      if ((count == 1) && (icol != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
+      if ((count > 1) && (icol != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
 
       if (count == 1) {
         if (ltype==0) vptr = (void *) lmp->atom->ivector[idx];
@@ -3534,21 +5277,18 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
 
     // no match
 
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_concat: undefined property name");
-      return;
-    }
+    if (!vptr)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown per-atom property {}", FNERR, name);
 
     // perform MPI_Allgatherv on each proc's chunk of Nlocal atoms
 
     int nprocs = lmp->comm->nprocs;
 
-    int *recvcounts,*displs;
+    int *recvcounts, *displs;
     lmp->memory->create(recvcounts,nprocs,"lib/gather:recvcounts");
     lmp->memory->create(displs,nprocs,"lib/gather:displs");
 
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
 
@@ -3557,10 +5297,6 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
       if ((count == 1) || imgunpack) vector = (int *) vptr;
       else array = (int **) vptr;
 
-      int *copy;
-      lmp->memory->create(copy,count*natoms,"lib/gather:copy");
-      for (i = 0; i < count*natoms; i++) copy[i] = 0;
-
       int nlocal = lmp->atom->nlocal;
 
       if (count == 1) {
@@ -3568,11 +5304,13 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(vector,nlocal,MPI_INT,data,recvcounts,displs,
-                       MPI_INT,lmp->world);
+        MPI_Allgatherv(vector, nlocal, MPI_INT, data, recvcounts, displs, MPI_INT, lmp->world);
 
       } else if (imgunpack) {
-        lmp->memory->create(copy,count*nlocal,"lib/gather:copy");
+        int *copy;
+        lmp->memory->create(copy,count*natoms,"lib/gather:copy");
+        for (i = 0; i < count*natoms; i++) copy[i] = 0;
+
         offset = 0;
         for (i = 0; i < nlocal; i++) {
           const int image = vector[i];
@@ -3585,8 +5323,7 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(copy,count*nlocal,MPI_INT,
-                       data,recvcounts,displs,MPI_INT,lmp->world);
+        MPI_Allgatherv(copy,count*nlocal,MPI_INT,data,recvcounts,displs,MPI_INT,lmp->world);
         lmp->memory->destroy(copy);
 
       } else {
@@ -3595,9 +5332,8 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
         displs[0] = 0;
         for (i = 1; i < nprocs; i++)
           displs[i] = displs[i-1] + recvcounts[i-1];
-        MPI_Allgatherv(&array[0][0],count*nlocal,MPI_INT,
-                       data,recvcounts,displs,MPI_INT,lmp->world);
-      }
+        MPI_Allgatherv(&array[0][0],count*nlocal,MPI_INT,data,recvcounts,displs,MPI_INT,lmp->world);
+        }
 
     } else {
       double *vector = nullptr;
@@ -3633,6 +5369,47 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
   END_CAPTURE
 }
 
+/** Gather the named per-atom, per-atom fix, per-atom compute, or fix property/atom-based entities
+ *  from all processes for a subset of atoms.
+ *
+\verbatim embed:rst
+
+This subroutine gathers data for the requested atom IDs and stores them in a one-dimensional array
+allocated by the user. The data will be ordered by atom ID, but there is no requirement that the
+IDs be consecutive. If you wish to return a similar array for *all* the atoms, use
+:cpp:func:`lammps_gather` or :cpp:func:`lammps_gather_concat`.
+
+The *data* array will be in groups of *count* values, sorted by atom ID in the same order as the
+array *ids* (e.g., if *name* is *x*, *count* = 3, and *ids* is {100, 57, 210}, then *data* might
+look like {x[100][0], x[100][1], x[100][2], x[57][0], x[57][1], x[57][2], x[210][0],
+:math:`\dots`}); *ids* must be provided by the user with length *ndata*, and *data* must be
+pre-allocated by the caller to length (*count*\ :math:`{}\times{}`\ *ndata*).
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and an :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
+\endverbatim
+ *
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., "x" or "f" for atom properties, "f_id" for per-atom fix
+ *                data, "c_id" for per-atom compute data, "d_name" or "i_name" for fix
+ *                property/atom vectors with *count* = 1, "d2_name" or "i2_name" for fix
+ *                property/atom vectors with *count* > 1)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*, 3 for *x* or *f*);
+ *                use *count* = 3 with *image* if you want the image flags unpacked into
+ *                (*x*,*y*,*z*) components.
+ * \param ndata   number of atoms for which to return data (can be all of them)
+ * \param ids     list of *ndata* atom IDs for which to return data
+ * \param data    per-atom values packed into a one-dimensional array of length
+ *                *ndata* \* *count*.
+ */
 /* ----------------------------------------------------------------------
   Contributing author: Thomas Swinburne (CNRS & CINaM, Marseille, France)
   gather the named atom-based entity for all atoms
@@ -3646,8 +5423,8 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
          "d_name" or "i_name" for fix property/atom vectors with count = 1
          "d2_name" or "i2_name" for fix property/atom arrays with count > 1
          will return error if fix/compute isn't atom-based
-  type = 0 for integer values, 1 for double values
-  count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+  dtype = 0 for integer values, 1 for double values
+  count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
     use count = 3 with "image" if want single image flag unpacked into xyz
   return atom-based values in 1d data, ordered by count, then by atom ID
     (e.g., x[0][0],x[0][1],x[0][2],x[1][0],x[1][1],x[1][2],x[2][0],...)
@@ -3659,17 +5436,21 @@ void lammps_gather_concat(void *handle, char *name, int type, int count, void *d
     Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_gather_subset(void *handle, char *name,
-                                int type, int count,
-                                int ndata, int *ids, void *data)
+void lammps_gather_subset(void *handle, const char *name, int dtype, int count, int ndata, int *ids,
+                          void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory || !lmp->modify || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !ids || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_gather_subset() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset,ltype;
     tagint id;
@@ -3680,39 +5461,31 @@ void lammps_gather_subset(void *handle, char *name,
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_gather_subset");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must be enabled and mapped", FNERR);
 
     void *vptr = lmp->atom->extract(name);
 
     // fix
 
-    if (vptr==nullptr && utils::strmatch(name,"^f_")) {
-
-      auto fix = lmp->modify->get_fix_by_id(&name[2]);
-      if (!fix) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: unknown fix id");
-        return;
-      }
-
-      if (fix->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: fix does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (fix->size_peratom_cols != count)) {
-        lmp->error->warning(FLERR,"lammps_gather_subset: count != values peratom for fix");
-        return;
-      }
-      if (lmp->update->ntimestep % fix->peratom_freq) {
-        if (lmp->comm->me == 0)
-          lmp->error->all(FLERR,"lammps_gather_subset: fix not computed at compatible time");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^f_")) {
+      const char *fixid = name+2;
+      auto *fix = lmp->modify->get_fix_by_id(fixid);
+      if (!fix)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, fixid);
+      if (fix->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): fix {} does not compute per-atom vector or array", FNERR, fixid);
+      if ((count > 1) && (fix->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom array with {} columns",
+                        FNERR, count, fixid);
+      if ((count == 1) && (fix->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute {} per-atom vector", FNERR, count, fixid);
+      if (lmp->update->ntimestep % fix->peratom_freq)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}: Fix {} not computed at compatible time{}",
+                        FNERR, fixid, utils::errorurl(7));
 
       if (count==1) vptr = (void *) fix->vector_atom;
       else vptr = (void *) fix->array_atom;
@@ -3720,25 +5493,21 @@ void lammps_gather_subset(void *handle, char *name,
 
     // compute
 
-    if (vptr==nullptr && utils::strmatch(name,"^c_")) {
-
-      auto compute = lmp->modify->get_compute_by_id(&name[2]);
-      if (!compute) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: unknown compute id");
-        return;
-      }
-
-      if (compute->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: compute does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (compute->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: count != values peratom for compute");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^c_")) {
+      const char *compid = name + 2;
+      auto *compute = lmp->modify->get_compute_by_id(compid);
+      if (!compute)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, compid);
+      if (compute->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not compute per-atom "
+                        "vector or array", FNERR, compid);
+      if ((count > 1) && (compute->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom array with {} columns",
+                        FNERR, count, compid);
+      if ((count == 1) && (compute->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector", FNERR, count, compid);
 
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
@@ -3747,35 +5516,27 @@ void lammps_gather_subset(void *handle, char *name,
       else vptr = (void *) compute->array_atom;
     }
 
-    // custom fix property/atom vector or array
+    // custom per-atom vector or array
 
-    if ((vptr == nullptr) && utils::strmatch(name,"^[id]2?_")) {
-
+    if (!vptr && utils::strmatch(name, "^[id]2?_")) {
       int idx,icol;
-      if (utils::strmatch(name,"^[id]_")) idx = lmp->atom->find_custom(&name[2],ltype,icol);
-      else idx = lmp->atom->find_custom(&name[3],ltype,icol);
+      const char *propid;
+      if (utils::strmatch(name,"^[id]_")) propid = name + 2;
+      else propid = name + 3;
 
-      if (idx < 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: unknown property/atom id");
-        return;
-      }
-
-      if (ltype != type) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: mismatch property/atom type");
-        return;
-      }
-      if (count == 1 && icol != 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: mismatch property/atom count");
-        return;
-      }
-      if (count > 1 && icol != count) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather_subset: mismatch property/atom count");
-        return;
-      }
+      idx = lmp->atom->find_custom(propid, ltype, icol);
+      if (idx < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Could not find custom per-atom property ID {}", FNERR, propid);
+      if (ltype != dtype)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} type mismatch", FNERR, propid);
+      if ((count == 1) && (icol != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
+      if ((count > 1) && (icol != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
 
       if (count == 1) {
         if (ltype==0) vptr = (void *) lmp->atom->ivector[idx];
@@ -3788,17 +5549,14 @@ void lammps_gather_subset(void *handle, char *name,
 
     // no match
 
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_gather_subset: undefined property name");
-      return;
-    }
+    if (!vptr)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown per-atom property {}", FNERR, name);
 
     // copy = Ndata length vector of per-atom values
     // use atom ID to insert each atom's values into copy
     // MPI_Allreduce with MPI_SUM to merge into data
 
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgunpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -3884,6 +5642,45 @@ void lammps_gather_subset(void *handle, char *name,
   END_CAPTURE
 }
 
+/** Scatter the named per-atom, per-atom fix, per-atom compute, or fix property/atom-based
+ *  entity in *data* to all processes.
+ *
+\verbatim embed:rst
+
+This subroutine takes data stored in a one-dimensional array supplied by the user and scatters
+them to all atoms on all processes. The data must be ordered by atom ID, with the requirement that
+the IDs be consecutive. Use :cpp:func:`lammps_scatter_subset` to scatter data for some (or all)
+atoms, unordered.
+
+The *data* array needs to be ordered in groups of *count* values, sorted by atom ID (e.g., if
+*name* is *x* and *count* = 3, then *data* = {x[0][0], x[0][1], x[0][2], x[1][0], x[1][1],
+x[1][2], x[2][0], :math:`\dots`}); *data* must be of length (*count* :math:`\times` *natoms*).
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined, must be consecutive, and an
+    :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
+\endverbatim
+ *
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., "x" or "f" for atom properties, "f_id" for per-atom fix
+ *                data, "c_id" for per-atom compute data, "d_name" or "i_name" for fix
+ *                property/atom vectors with *count* = 1, "d2_name" or "i2_name" for fix
+ *                property/atom vectors with *count* > 1)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
+ *                3 for *x* or *f*); use *count* = 3 with *image* if you have
+ *                a single image flag packed into (*x*,*y*,*z*) components.
+ * \param data    per-atom values packed in a one-dimensional array of length
+ *                *natoms* \* *count*.
+ *
+ */
 /* ----------------------------------------------------------------------
   Contributing author: Thomas Swinburne (CNRS & CINaM, Marseille, France)
   scatter the named atom-based entity in data to all atoms
@@ -3895,8 +5692,8 @@ void lammps_gather_subset(void *handle, char *name,
          "d_name" or "i_name" for fix property/atom vectors with count = 1
          "d2_name" or "i2_name" for fix property/atom arrays with count > 1
          will return error if fix/compute isn't atom-based
-  type = 0 for integer values, 1 for double values
-  count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+  dtype = 0 for integer values, 1 for double values
+  count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
     use count = 3 with "image" if want single image flag unpacked into xyz
   return atom-based values in 1d data, ordered by count, then by atom ID
     (e.g., x[0][0],x[0][1],x[0][2],x[1][0],x[1][1],x[1][2],x[2][0],...)
@@ -3908,15 +5705,20 @@ void lammps_gather_subset(void *handle, char *name,
     Allreduce to sum vector into data across all procs
 ------------------------------------------------------------------------- */
 
-void lammps_scatter(void *handle, char *name, int type, int count, void *data)
+void lammps_scatter(void *handle, const char *name, int dtype, int count, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory || !lmp->modify || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_scatter() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset,ltype;
 
@@ -3928,36 +5730,33 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
       flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_scatter");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Atom-IDs must exist, be consecutive, and be mapped", FNERR);
 
     int natoms = static_cast<int> (lmp->atom->natoms);
     void *vptr = lmp->atom->extract(name);
 
     // fix
 
-    if (vptr==nullptr && utils::strmatch(name,"^f_")) {
-
-      auto fix = lmp->modify->get_fix_by_id(&name[2]);
-      if (!fix) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: unknown fix id");
-        return;
-      }
-
-      if (fix->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: fix does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (fix->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: count != values peratom for fix");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^f_")) {
+      const char *fixid = name + 2;
+      auto *fix = lmp->modify->get_fix_by_id(fixid);
+      if (!fix)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, fixid);
+      if (fix->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): fix {} does not compute per-atom vector or array", FNERR, fixid);
+      if ((count > 1) && (fix->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom array with {} columns",
+                        FNERR, count, fixid);
+      if ((count == 1) && (fix->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute {} per-atom vector", FNERR, count, fixid);
+      if (lmp->update->ntimestep % fix->peratom_freq)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}: Fix {} not computed at compatible time",
+                        FNERR, fixid);
 
       if (count==1) vptr = (void *) fix->vector_atom;
       else vptr = (void *) fix->array_atom;
@@ -3965,25 +5764,21 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
 
     // compute
 
-    if (vptr==nullptr && utils::strmatch(name,"^c_")) {
-
-      auto compute = lmp->modify->get_compute_by_id(&name[2]);
-      if (!compute) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: unknown compute id");
-        return;
-      }
-
-      if (compute->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: compute does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (compute->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: count != values peratom for compute");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^c_")) {
+      const char *compid = name+2;
+      auto *compute = lmp->modify->get_compute_by_id(compid);
+      if (!compute)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, compid);
+      if (compute->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not compute per-atom "
+                        "vector or array", FNERR, compid);
+      if ((count > 1) && (compute->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom array with {} columns",
+                        FNERR, count, compid);
+      if ((count == 1) && (compute->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector", FNERR, count, compid);
 
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
@@ -3992,35 +5787,27 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
       else vptr = (void *) compute->array_atom;
     }
 
-    // custom fix property/atom vector or array
+    // custom per-atom vector or array
 
-    if ((vptr == nullptr) && utils::strmatch(name,"^[id]2?_")) {
-
+    if (!vptr && utils::strmatch(name, "^[id]2?_")) {
       int idx,icol;
-      if (utils::strmatch(name,"^[id]_")) idx = lmp->atom->find_custom(&name[2],ltype,icol);
-      else idx = lmp->atom->find_custom(&name[3],ltype,icol);
+      const char *propid;
+      if (utils::strmatch(name,"^[id]_")) propid = name + 2;
+      else propid = name + 3;
 
-      if (idx < 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: unknown property/atom id");
-        return;
-      }
-
-      if (ltype != type) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: mismatch property/atom type");
-        return;
-      }
-      if (count == 1 && icol != 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: mismatch property/atom count");
-        return;
-      }
-      if (count > 1 && icol != count) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter: mismatch property/atom count");
-        return;
-      }
+      idx = lmp->atom->find_custom(propid, ltype, icol);
+      if (idx < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Could not find custom per-atom property ID {}", FNERR, propid);
+      if (ltype != dtype)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} type mismatch", FNERR, propid);
+      if ((count == 1) && (icol != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
+      if ((count > 1) && (icol != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
 
       if (count == 1) {
         if (ltype==0) vptr = (void *) lmp->atom->ivector[idx];
@@ -4033,17 +5820,9 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
 
     // no match
 
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_scatter: unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown property {}", name);
 
-    // copy = Natom length vector of per-atom values
-    // use atom ID to insert each atom's values into copy
-    // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
-
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -4081,7 +5860,7 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
       double **array = nullptr;
       if (count == 1) vector = (double *) vptr;
       else array = (double **) vptr;
-      auto dptr = (double *) data;
+      auto *dptr = (double *) data;
 
       if (count == 1) {
         for (i = 0; i < natoms; i++)
@@ -4103,6 +5882,49 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
   END_CAPTURE
 }
 
+/** Scatter the named per-atom, per-atom fix, per-atom compute, or fix property/atom-based
+ * entities in *data* from a subset of atoms to all processes.
+ *
+\verbatim embed:rst
+
+This subroutine takes data stored in a one-dimensional array supplied by the
+user and scatters them to a subset of atoms on all processes. The array
+*data* contains data associated with atom IDs, but there is no requirement that
+the IDs be consecutive, as they are provided in a separate array.
+Use :cpp:func:`lammps_scatter` to scatter data for all atoms, in order.
+
+The *data* array needs to be organized in groups of *count* values, with the
+groups in the same order as the array *ids*. For example, if you want *data*
+to be the array {x[1][0], x[1][1], x[1][2], x[100][0], x[100][1], x[100][2],
+x[57][0], x[57][1], x[57][2]}, then *count* = 3, *ndata* = 3, and *ids* would
+be {1, 100, 57}.
+
+.. admonition:: Restrictions
+    :class: warning
+
+    This function is not compatible with ``-DLAMMPS_BIGBIG``.
+
+    Atom IDs must be defined and an :doc:`atom map must be enabled <atom_modify>`
+
+    The total number of atoms must not be more than 2147483647 (max 32-bit signed int).
+
+\endverbatim
+ *
+ * \param handle  pointer to a previously created LAMMPS instance
+ * \param name    desired quantity (e.g., "x" or "f" for atom properties, "f_id" for per-atom fix
+ *                data, "c_id" for per-atom compute data, "d_name" or "i_name" for fix
+ *                property/atom vectors with *count* = 1, "d2_name" or "i2_name" for fix
+ *                property/atom vectors with *count* > 1)
+ * \param dtype   0 for ``int`` values, 1 for ``double`` values
+ * \param count   number of per-atom values (e.g., 1 for *type* or *q*,
+ *                3 for *x* or *f*); use *count* = 3 with "image" if you want
+ *                single image flags unpacked into (*x*,*y*,*z*)
+ * \param ndata   number of atoms listed in *ids* and *data* arrays
+ * \param ids     list of *ndata* atom IDs to scatter data to
+ * \param data    per-atom values packed in a 1-dimensional array of length
+ *                *ndata* \* *count*.
+ *
+ */
 /* ----------------------------------------------------------------------
   Contributing author: Thomas Swinburne (CNRS & CINaM, Marseille, France)
    scatter the named atom-based entity in data to a subset of atoms
@@ -4113,8 +5935,8 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
           "d_name" or "i_name" for fix property/atom quantities
           "f_fix", "c_compute" for fixes / computes
           will return error if fix/compute doesn't isn't atom-based
-   type = 0 for integer values, 1 for double values
-   count = # of per-atom values (e.g., 1 for type or charge, 3 for x or f)
+   dtype = 0 for integer values, 1 for double values
+   count = # of per-atom values (e.g., 1 for type or q, 3 for x or f)
      use count = 3 with "image" for xyz to be packed into single image flag
    ndata = # of atoms in ids and data (could be all atoms)
    ids = list of Ndata atom IDs to scatter data to
@@ -4125,16 +5947,21 @@ void lammps_scatter(void *handle, char *name, int type, int count, void *data)
      loop over Ndata, if I own atom ID, set its values from data
 ------------------------------------------------------------------------- */
 
-void lammps_scatter_subset(void *handle, char *name,int type, int count,
-                                 int ndata, int *ids, void *data)
+void lammps_scatter_subset(void *handle, const char *name, int dtype, int count, int ndata,
+                           int *ids, void *data)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->atom || !lmp->memory || !lmp->modify || !lmp->comm) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!name || !data) return;
 
   BEGIN_CAPTURE
   {
 #if defined(LAMMPS_BIGBIG)
-    lmp->error->all(FLERR,"Library function lammps_scatter_subset() "
-                    "is not compatible with -DLAMMPS_BIGBIG");
+    lmp->error->all(FLERR, Error::NOLASTLINE, "{}() is not compatible with -DLAMMPS_BIGBIG", FNERR);
 #else
     int i,j,m,offset,ltype;
     tagint id;
@@ -4146,35 +5973,29 @@ void lammps_scatter_subset(void *handle, char *name,int type, int count,
     if (lmp->atom->tag_enable == 0) flag = 1;
     if (lmp->atom->natoms > MAXSMALLINT) flag = 1;
     if (lmp->atom->map_style == Atom::MAP_NONE) flag = 1;
-    if (flag) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"Library error in lammps_scatter_atoms_subset");
-      return;
-    }
+    if (flag)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Atom-IDs must exist and be mapped", FNERR);
 
     void *vptr = lmp->atom->extract(name);
 
-    // fix
-
-    if (vptr==nullptr && utils::strmatch(name,"^f_")) {
-
-      auto fix = lmp->modify->get_fix_by_id(&name[2]);
-      if (!fix) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: unknown fix id");
-        return;
-      }
-
-      if (fix->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: fix does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (fix->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: count != values peratom for fix");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^f_")) {
+      const char *fixid = name + 2;
+      auto *fix = lmp->modify->get_fix_by_id(fixid);
+      if (!fix)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, fixid);
+      if (fix->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): fix {} does not compute per-atom vector or array", FNERR, fixid);
+      if ((count > 1) && (fix->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute per-atom array with {} columns",
+                        FNERR, count, fixid);
+      if ((count == 1) && (fix->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Fix {} does not compute {} per-atom vector", FNERR, count, fixid);
+      if (lmp->update->ntimestep % fix->peratom_freq)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}: Fix {} not computed at compatible time",
+                        FNERR, fixid);
 
       if (count==1) vptr = (void *) fix->vector_atom;
       else vptr = (void *) fix->array_atom;
@@ -4182,25 +6003,21 @@ void lammps_scatter_subset(void *handle, char *name,int type, int count,
 
     // compute
 
-    if (vptr==nullptr && utils::strmatch(name,"^c_")) {
-
-      auto compute = lmp->modify->get_compute_by_id(&name[2]);
-      if (!compute) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: unknown compute id");
-        return;
-      }
-
-      if (compute->peratom_flag == 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: compute does not return peratom data");
-        return;
-      }
-      if ((count > 1) && (compute->size_peratom_cols != count)) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: count != values peratom for compute");
-        return;
-      }
+    if (!vptr && utils::strmatch(name,"^c_")) {
+      const char *compid = name+2;
+      auto *compute = lmp->modify->get_compute_by_id(compid);
+      if (!compute)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, compid);
+      if (compute->peratom_flag == 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not compute per-atom "
+                        "vector or array", FNERR, compid);
+      if ((count > 1) && (compute->size_peratom_cols != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom array with {} columns",
+                        FNERR, count, compid);
+      if ((count == 1) && (compute->size_peratom_cols != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Compute {} does not compute per-atom vector", FNERR, count, compid);
 
       if (compute->invoked_peratom != lmp->update->ntimestep)
         compute->compute_peratom();
@@ -4209,35 +6026,27 @@ void lammps_scatter_subset(void *handle, char *name,int type, int count,
       else vptr = (void *) compute->array_atom;
     }
 
-    // custom fix property/atom vector or array
+    // custom per-atom vector or array
 
-    if ((vptr == nullptr) && utils::strmatch(name,"^[id]2?_")) {
-
+    if (!vptr && utils::strmatch(name, "^[id]2?_")) {
       int idx,icol;
-      if (utils::strmatch(name,"^[id]_")) idx = lmp->atom->find_custom(&name[2],ltype,icol);
-      else idx = lmp->atom->find_custom(&name[3],ltype,icol);
+      const char *propid;
+      if (utils::strmatch(name,"^[id]_")) propid = name + 2;
+      else propid = name + 3;
 
-      if (idx < 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: unknown property/atom id");
-        return;
-      }
-
-      if (ltype != type) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_scatter_subset: mismatch property/atom type");
-        return;
-      }
-      if (count == 1 && icol != 0) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: mismatch property/atom count");
-        return;
-      }
-      if (count > 1 && icol != count) {
-        if (lmp->comm->me == 0)
-          lmp->error->warning(FLERR,"lammps_gather: mismatch property/atom count");
-        return;
-      }
+      idx = lmp->atom->find_custom(propid, ltype, icol);
+      if (idx < 0)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Could not find custom per-atom property ID {}", FNERR, propid);
+      if (ltype != dtype)
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} type mismatch", FNERR, propid);
+      if ((count == 1) && (icol != 0))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
+      if ((count > 1) && (icol != count))
+        lmp->error->all(FLERR, Error::NOLASTLINE,
+                        "{}(): Custom per-atom property {} count mismatch", FNERR, propid);
 
       if (count == 1) {
         if (ltype==0) vptr = (void *) lmp->atom->ivector[idx];
@@ -4250,18 +6059,9 @@ void lammps_scatter_subset(void *handle, char *name,int type, int count,
 
     // no match
 
-    if (vptr == nullptr) {
-      if (lmp->comm->me == 0)
-        lmp->error->warning(FLERR,"lammps_scatter_atoms_subset: "
-                                  "unknown property name");
-      return;
-    }
+    if (!vptr) lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Unknown property {}", name);
 
-    // copy = Natom length vector of per-atom values
-    // use atom ID to insert each atom's values into copy
-    // MPI_Allreduce with MPI_SUM to merge into data, ordered by atom ID
-
-    if (type == 0) {
+    if (dtype == 0) {
       int *vector = nullptr;
       int **array = nullptr;
       const int imgpack = (count == 3) && (strcmp(name,"image") == 0);
@@ -4305,7 +6105,7 @@ void lammps_scatter_subset(void *handle, char *name,int type, int count,
       double **array = nullptr;
       if (count == 1) vector = (double *) vptr;
       else array = (double **) vptr;
-      auto dptr = (double *) data;
+      auto *dptr = (double *) data;
 
       if (count == 1) {
         for (i = 0; i < ndata; i++) {
@@ -4366,7 +6166,7 @@ The function returns the number of atoms created or -1 on failure (e.g.,
 when called before as box has been created).
 
 Coordinates and velocities have to be given in a 1d-array in the order
-X(1),Y(1),Z(1),X(2),Y(2),Z(2),...,X(N),Y(N),Z(N).
+X(1), Y(1), Z(1), X(2), Y(2), Z(2), ..., X(N), Y(N), Z(N).
 
 \endverbatim
  *
@@ -4388,27 +6188,23 @@ int lammps_create_atoms(void *handle, int n, const tagint *id, const int *type,
                         const double *x, const double *v, const imageint *image,
                         int bexpand)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->domain || !lmp->atom) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  if (!type || !x) return -1;
   bigint natoms_prev = lmp->atom->natoms;
 
   BEGIN_CAPTURE
   {
     // error if box does not exist or tags not defined
-
-    int flag = 0;
-    std::string msg("Failure in lammps_create_atoms: ");
     if (lmp->domain->box_exist == 0) {
-      flag = 1;
-      msg += "trying to create atoms before before simulation box is defined";
-    }
-    if (lmp->atom->tag_enable == 0) {
-      flag = 1;
-      msg += "must have atom IDs to use this function";
-    }
-
-    if (flag) {
-      if (lmp->comm->me == 0) lmp->error->warning(FLERR,msg);
-      return -1;
+      lmp->error->all(FLERR, Error::NOLASTLINE,
+                      "{}(): Cannot create atoms before before simulation box is defined", FNERR);
+    } else if (lmp->atom->tag_enable == 0) {
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Must have atom IDs to create atoms", FNERR);
     }
 
     // loop over all N atoms on all MPI ranks
@@ -4479,6 +6275,50 @@ int lammps_create_atoms(void *handle, int n, const tagint *id, const int *type,
   return (int) lmp->atom->natoms - natoms_prev;
 }
 
+/* ---------------------------------------------------------------------- */
+
+/** Create new molecule template from JSON data provided as C-style string
+ *
+\verbatim embed:rst
+
+.. versionadded:: 22Jul2025
+
+This function creates a new molecule template similar to the
+:doc:`molecule command <molecule>`, but uses JSON data passed
+as a C-style string instead of reading it from a file.
+
+\endverbatim
+ *
+ * \param  handle   pointer to a previously created LAMMPS instance
+ * \param  id       molecule-ID
+ * \param  jsonstr  molecule data in JSON format as C-style string */
+
+void lammps_create_molecule(void *handle, const char *id, const char *jsonstr)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->atom || !lmp->comm || !lmp->domain || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id || !jsonstr) {
+    const auto &mesg = fmt::format("ERROR: {}(): Non-NULL arguments required\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+
+  BEGIN_CAPTURE
+  {
+    try {
+      auto jsondata = json::parse(jsonstr);
+      lmp->atom->add_molecule(id, jsondata);
+    } catch (std::exception &e) {
+      STORE_ERROR_MESSAGE(lmp, e.what());
+    }
+  }
+  END_CAPTURE;
+}
+
 // ----------------------------------------------------------------------
 // Library functions for accessing neighbor lists
 // ----------------------------------------------------------------------
@@ -4510,18 +6350,29 @@ int lammps_create_atoms(void *handle, int n, const tagint *id, const int *type,
  * \return          return neighbor list index if found, otherwise -1 */
 
 int lammps_find_pair_neighlist(void *handle, const char *style, int exact, int nsub, int reqid) {
-  auto lmp = (LAMMPS *) handle;
-  Pair *pair = lmp->force->pair_match(style, exact, nsub);
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->neighbor || !lmp->force) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  if (!style) return -1;
 
-  if (pair != nullptr) {
-    // find neigh list
-    for (int i = 0; i < lmp->neighbor->nlist; i++) {
-      NeighList *list = lmp->neighbor->lists[i];
-      if ( (list->requestor_type == NeighList::PAIR)
-           && (pair == list->requestor)
-           && (list->id == reqid) ) return i;
+  BEGIN_CAPTURE
+  {
+    auto *pair = lmp->force->pair_match(style, exact, nsub);
+    if (!pair) {
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Pair style {} does not exist", FNERR, style);
+    } else {
+      // find neigh list
+      for (int i = 0; i < lmp->neighbor->nlist; i++) {
+        NeighList *list = lmp->neighbor->lists[i];
+        if ((list->requestor_type == NeighList::PAIR) && (pair == list->requestor)
+            && (list->id == reqid) ) return i;
+      }
     }
   }
+  END_CAPTURE
   return -1;
 }
 
@@ -4540,17 +6391,29 @@ int lammps_find_pair_neighlist(void *handle, const char *style, int exact, int n
  * \return         return neighbor list index if found, otherwise -1  */
 
 int lammps_find_fix_neighlist(void *handle, const char *id, int reqid) {
-  auto lmp = (LAMMPS *) handle;
-  auto fix = lmp->modify->get_fix_by_id(id);
-  if (!fix) return -1;
-
-  // find neigh list
-  for (int i = 0; i < lmp->neighbor->nlist; i++) {
-    NeighList *list = lmp->neighbor->lists[i];
-    if ( (list->requestor_type == NeighList::FIX)
-         && (fix == list->requestor)
-         && (list->id == reqid) ) return i;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->neighbor || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
   }
+  if (!id) return -1;
+
+  BEGIN_CAPTURE
+  {
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix) {
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
+    } else {
+      // find neigh list
+      for (int i = 0; i < lmp->neighbor->nlist; i++) {
+        NeighList *list = lmp->neighbor->lists[i];
+        if ((list->requestor_type == NeighList::FIX) && (fix == list->requestor)
+            && (list->id == reqid) ) return i;
+      }
+    }
+  }
+  END_CAPTURE
   return -1;
 }
 
@@ -4569,18 +6432,127 @@ int lammps_find_fix_neighlist(void *handle, const char *id, int reqid) {
  * \return         return neighbor list index if found, otherwise -1 */
 
 int lammps_find_compute_neighlist(void *handle, const char *id, int reqid) {
-  auto lmp = (LAMMPS *) handle;
-  auto compute = lmp->modify->get_compute_by_id(id);
-  if (!compute) return -1;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->neighbor || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+  if (!id) return -1;
+
+  BEGIN_CAPTURE
+  {
+    auto *compute = lmp->modify->get_compute_by_id(id);
+    if (!compute) {
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Compute {} does not exist", FNERR, id);
+    } else {
+      // find neigh list
+      for (int i = 0; i < lmp->neighbor->nlist; i++) {
+        NeighList *list = lmp->neighbor->lists[i];
+        if ((list->requestor_type == NeighList::COMPUTE) && (compute == list->requestor)
+            && (list->id == reqid) ) return i;
+      }
+    }
+  }
+  END_CAPTURE
+
+  return -1;
+}
+
+/* ---------------------------------------------------------------------- */
+
+// helper Command class for a single neighbor list build
+
+namespace {
+// NOLINTBEGIN
+class NeighProxy : protected Command {
+ public:
+  NeighProxy(class LAMMPS *lmp) : Command(lmp), neigh_idx(-1) {};
+
+  void command(int, char **) override;
+  [[nodiscard]] int get_index() const { return neigh_idx; }
+
+ protected:
+  int neigh_idx;
+};
+// NOLINTEND
+
+void NeighProxy::command(int narg, char **arg)
+{
+  neigh_idx = -1;
+  if (narg != 3) return;
+  auto *req = neighbor->add_request(this, arg[0]);
+  int flags = utils::inumeric(FLERR, arg[1], false, lmp);
+  double cutoff = utils::numeric(FLERR, arg[2], false, lmp);
+  req->apply_flags(flags);
+  if (cutoff > 0.0) {
+    // library-requested cutoff applies to all types
+    req->set_cutoff_fixed(cutoff);
+  }
+  lmp->init();
+
+  // setup domain, communication and neighboring
+  // acquire ghosts and build standard neighbor lists
+
+  if (domain->triclinic) domain->x2lamda(atom->nlocal);
+  domain->pbc();
+  domain->reset_box();
+  comm->setup();
+  if (neighbor->style) neighbor->setup_bins();
+  comm->exchange();
+  comm->borders();
+  if (domain->triclinic) domain->lamda2x(atom->nlocal + atom->nghost);
+  neighbor->build(1);
+
+  // build neighbor list this command needs based on earlier request
+
+  auto *list = neighbor->find_list(this);
+  neighbor->build_one(list);
 
   // find neigh list
-  for (int i = 0; i < lmp->neighbor->nlist; i++) {
-    NeighList * list = lmp->neighbor->lists[i];
-    if ( (list->requestor_type == NeighList::COMPUTE)
-         && (compute == list->requestor)
-         && (list->id == reqid) ) return i;
+  for (int i = 0; i < neighbor->nlist; i++) {
+    NeighList *list = neighbor->lists[i];
+    if (this == list->requestor) {
+      neigh_idx = i;
+      break;
+    }
   }
-  return -1;
+}
+}    // namespace
+
+/** Build a single neighbor list in between runs and return its index
+ *
+ * A neighbor list request is created and the neighbor list built from a
+ * proxy command. The request ID is typically 0, but will be
+ * > 0 in case a compute has multiple neighbor list requests.
+ *
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param id       Identifier of neighbor list request
+ * \param flags    Neighbor list flags
+ * \param cutoff   Custom neighbor list cutoff if > 0, use default cutoff if < 0
+ * \return         return neighbor list index if valid, otherwise -1 */
+
+int lammps_request_single_neighlist(void *handle, const char *id, int flags, double cutoff) {
+  auto *lmp = (LAMMPS *)handle;
+  int idx = -1;
+  if (!lmp || !lmp->error || !lmp->neighbor) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return -1;
+  }
+
+  BEGIN_CAPTURE
+  {
+    NeighProxy proxy(lmp);
+    std::vector<std::string> args = {id, std::to_string(flags), std::to_string(cutoff)};
+    std::vector<char *> c_args;
+    std::transform(args.begin(), args.end(), std::back_inserter(c_args),
+                   [](const std::string& s) { return (char *)s.c_str(); });
+    proxy.command(static_cast<int>(c_args.size()), c_args.data());
+    idx = proxy.get_index();
+  }
+  END_CAPTURE
+  return idx;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -4593,14 +6565,19 @@ int lammps_find_compute_neighlist(void *handle, const char *id, int reqid) {
  *                 not a valid index
  */
 int lammps_neighlist_num_elements(void *handle, int idx) {
-  auto   lmp = (LAMMPS *) handle;
-  Neighbor * neighbor = lmp->neighbor;
+  auto *   lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->neighbor) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  Neighbor *neighbor = lmp->neighbor;
 
   if (idx < 0 || idx >= neighbor->nlist) {
     return -1;
   }
 
-  NeighList * list = neighbor->lists[idx];
+  NeighList *list = neighbor->lists[idx];
   return list->inum;
 }
 
@@ -4617,9 +6594,17 @@ int lammps_neighlist_num_elements(void *handle, int idx) {
  * \param[out] numneigh   number of neighbors of atom iatom or 0
  * \param[out] neighbors  pointer to array of neighbor atom local indices or NULL */
 
-void lammps_neighlist_element_neighbors(void *handle, int idx, int element, int *iatom, int *numneigh, int **neighbors) {
-  auto   lmp = (LAMMPS *) handle;
-  Neighbor * neighbor = lmp->neighbor;
+void lammps_neighlist_element_neighbors(void *handle, int idx, int element, int *iatom,
+                                        int *numneigh, int **neighbors) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->neighbor) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!iatom || !numneigh || !neighbors) return;
+
+  Neighbor *neighbor = lmp->neighbor;
   *iatom = -1;
   *numneigh = 0;
   *neighbors = nullptr;
@@ -4628,7 +6613,7 @@ void lammps_neighlist_element_neighbors(void *handle, int idx, int element, int 
     return;
   }
 
-  NeighList * list = neighbor->lists[idx];
+  NeighList *list = neighbor->lists[idx];
 
   if (element < 0 || element >= list->inum) {
     return;
@@ -4662,13 +6647,21 @@ growing with every new LAMMPS release.
 
 int lammps_version(void *handle)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+
   return lmp->num_ver;
 }
 
 /** Get operating system and architecture information
  *
 \verbatim embed:rst
+
+.. versionadded:: 9Oct2020
 
 The :cpp:func:`lammps_get_os_info` function can be used to retrieve
 detailed information about the hosting operating system and
@@ -4677,8 +6670,6 @@ compiler/runtime.
 A suitable buffer for a C-style string has to be provided and its length.
 The assembled text will be truncated to not overflow this buffer. The
 string is typically a few hundred bytes long.
-
-.. versionadded:: 9Oct2020
 
 \endverbatim
  *
@@ -4689,7 +6680,8 @@ string is typically a few hundred bytes long.
 
 void lammps_get_os_info(char *buffer, int buf_size)
 {
-  if (buf_size <=0) return;
+  if (!buffer || (buf_size <=0)) return;
+
   buffer[0] = buffer[buf_size-1] = '\0';
   std::string txt = platform::os_info() + "\n";
   txt += platform::compiler_info();
@@ -4712,6 +6704,31 @@ int lammps_config_has_mpi_support()
   return 0;
 #else
   return sizeof(MPI_Comm);
+#endif
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** This function is used to query whether LAMMPS was compiled with
+ *  OpenMP enabled.
+ *
+\verbatim embed:rst
+
+.. versionadded:: 10Sep2025
+
+*See also*
+   :cpp:func:`lammps_config_has_mpi_support`
+
+\endverbatim
+ *
+ * \return 1 when compiled with OpenMP enabled, otherwise 0 */
+
+int lammps_config_has_omp_support()
+{
+#ifdef _OPENMP
+  return 1;
+#else
+  return 0;
 #endif
 }
 
@@ -4779,7 +6796,7 @@ int lammps_config_has_jpeg_support() {
 \verbatim embed:rst
 The LAMMPS :doc:`dump style movie <dump_image>` supports generating movies
 from images on-the-fly via creating a pipe to the
-`ffmpeg <https://ffmpeg.org/ffmpeg/>`_ program.
+`ffmpeg <https://ffmpeg.org/>`_ program.
 This function checks whether this feature was :ref:`enabled at compile time <graphics>`.
 It does **not** check whether the ``ffmpeg`` itself is installed and usable.
 \endverbatim
@@ -4792,9 +6809,36 @@ int lammps_config_has_ffmpeg_support() {
 
 /* ---------------------------------------------------------------------- */
 
+/** Check if the LAMMPS library supports downloading files via libcurl
+
+\verbatim embed:rst
+
+.. versionadded::29Aug2024
+
+The LAMMPS :doc:`geturl command <geturl>` supports downloading files
+through using `the libcurl library <https://curl.se/libcurl/>`_.
+This function checks whether this feature was :ref:`enabled at compile
+time <libcurl>` and LAMMPS linked to the libcurl library.
+\endverbatim
+ *
+ * \return 1 if yes, otherwise 0
+ */
+int lammps_config_has_curl_support() {
+  return Info::has_curl_support() ? 1 : 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
 /** Check whether LAMMPS errors will throw C++ exceptions.
  *
 \verbatim embed:rst
+
+.. versionremoved:: 21Nov2023
+
+   LAMMPS has now exceptions always enabled, so this function
+   will now always return 1 and can be removed from applications
+   using the library interface.
+
 In case of an error, LAMMPS will either abort or throw a C++ exception.
 The latter has to be :ref:`enabled at compile time <exceptions>`.
 This function checks if exceptions were enabled.
@@ -4806,7 +6850,7 @@ error status can then be checked by calling
 can be retrieved via :cpp:func:`lammps_get_last_error_message`.
 This can allow to restart a calculation or delete and recreate
 the LAMMPS instance when C++ exceptions are enabled.  One application
-of using exceptions this way is the :ref:`lammps_shell`.  If C++
+of using exceptions this way is the :ref:`lammps_gui`.  If C++
 exceptions are disabled and an error happens during a call to
 LAMMPS, the application will terminate.
 \endverbatim
@@ -4829,6 +6873,7 @@ specific :doc:`LAMMPS package <Packages>` provided as argument.
  * \return 1 if included, 0 if not.
  */
 int lammps_config_has_package(const char *name) {
+  if (!name) return 0;
   return Info::has_package(name) ? 1 : 0;
 }
 
@@ -4869,6 +6914,8 @@ the function returns 0 and *buffer* is set to an empty string, otherwise 1;
  * \return 1 if successful, otherwise 0
  */
 int lammps_config_package_name(int idx, char *buffer, int buf_size) {
+  if (!buffer) return 0;
+
   int maxidx = lammps_config_package_count();
   if ((idx < 0) || (idx >= maxidx)) {
       buffer[0] = '\0';
@@ -4897,9 +6944,7 @@ otherwise 0.
  * \param  setting   string with the name of the specific setting
  * \return 1 if available, 0 if not.
  */
-int lammps_config_accelerator(const char *package,
-                              const char *category,
-                              const char *setting)
+int lammps_config_accelerator(const char *package, const char *category, const char *setting)
 {
   return Info::has_accelerator_feature(package,category,setting) ? 1 : 0;
 }
@@ -4907,6 +6952,8 @@ int lammps_config_accelerator(const char *package,
 /** Check for presence of a viable GPU package device
  *
 \verbatim embed:rst
+
+.. versionadded:: 14May2021
 
 The :cpp:func:`lammps_has_gpu_device` function checks at runtime if
 an accelerator device is present that can be used with the
@@ -4916,8 +6963,6 @@ present the function will return 1, otherwise 0.
 More detailed information about the available device or devices can
 be obtained by calling the
 :cpp:func:`lammps_get_gpu_device_info` function.
-
-.. versionadded:: 14May2021
 
 \endverbatim
  *
@@ -4932,6 +6977,8 @@ int lammps_has_gpu_device()
  *
 \verbatim embed:rst
 
+.. versionadded:: 14May2021
+
 The :cpp:func:`lammps_get_gpu_device_info` function can be used to retrieve
 detailed information about any accelerator devices that are viable for use
 with the :doc:`GPU package <Speed_gpu>`.  It will produce a string that is
@@ -4943,8 +6990,6 @@ A suitable buffer for a C-style string has to be provided and its length.
 The assembled text will be truncated to not overflow this buffer.  This
 string can be several kilobytes long, if multiple devices are present.
 
-.. versionadded:: 14May2021
-
 \endverbatim
  *
  * \param  buffer    string buffer to copy the information to
@@ -4952,7 +6997,8 @@ string can be several kilobytes long, if multiple devices are present.
 
 void lammps_get_gpu_device_info(char *buffer, int buf_size)
 {
-  if (buf_size <= 0) return;
+  if (!buffer || (buf_size <= 0)) return;
+
   buffer[0] = buffer[buf_size-1] = '\0';
   std::string devinfo = Info::get_gpu_device_info();
   strncpy(buffer, devinfo.c_str(), buf_size-1);
@@ -4976,7 +7022,14 @@ Valid categories are: *atom*\ , *integrate*\ , *minimize*\ ,
  * \return           1 if included, 0 if not.
  */
 int lammps_has_style(void *handle, const char *category, const char *name) {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!category || !name) return 0;
+
   Info info(lmp);
   return info.has_style(category, name) ? 1 : 0;
 }
@@ -4997,7 +7050,14 @@ categories.
  * \return number of styles in category
  */
 int lammps_style_count(void *handle, const char *category) {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!category) return 0;
+
   Info info(lmp);
   return info.get_available_styles(category).size();
 }
@@ -5021,13 +7081,19 @@ int lammps_style_count(void *handle, const char *category) {
  * \param buf_size size of the provided string buffer
  * \return 1 if successful, otherwise 0
  */
-int lammps_style_name(void *handle, const char *category, int idx,
-                      char *buffer, int buf_size) {
-  auto lmp = (LAMMPS *) handle;
+int lammps_style_name(void *handle, const char *category, int idx, char *buffer, int buf_size) {
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!category || !buffer) return 0;
+
   Info info(lmp);
   auto styles = info.get_available_styles(category);
 
-  if ((idx >=0) && (idx < (int) styles.size())) {
+  if ((idx >= 0) && (idx < (int) styles.size())) {
     strncpy(buffer, styles[idx].c_str(), buf_size);
     return 1;
   }
@@ -5041,11 +7107,12 @@ int lammps_style_name(void *handle, const char *category, int idx,
 /** Check if a specific ID exists in the current LAMMPS instance
  *
 \verbatim embed:rst
+
+.. versionadded:: 9Oct2020
+
 This function checks if the current LAMMPS instance a *category* ID of
 the given *name* exists.  Valid categories are: *compute*\ , *dump*\ ,
 *fix*\ , *group*\ , *molecule*\ , *region*\ , and *variable*\ .
-
-.. versionadded:: 9Oct2020
 
 \endverbatim
  *
@@ -5055,7 +7122,14 @@ the given *name* exists.  Valid categories are: *compute*\ , *dump*\ ,
  * \return           1 if included, 0 if not.
  */
 int lammps_has_id(void *handle, const char *category, const char *name) {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify || !lmp->output || !lmp->group || !lmp->atom
+      || !lmp->domain || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!category || !name) return 0;
 
   if (strcmp(category,"compute") == 0) {
     if (lmp->modify->get_compute_by_id(name)) return 1;
@@ -5080,12 +7154,13 @@ int lammps_has_id(void *handle, const char *category, const char *name) {
 /** Count the number of IDs of a category.
  *
 \verbatim embed:rst
+
+.. versionadded:: 9Oct2020
+
 This function counts how many IDs in the provided *category*
 are defined in the current LAMMPS instance.
 Please see :cpp:func:`lammps_has_id` for a list of valid
 categories.
-
-.. versionadded:: 9Oct2020
 
 \endverbatim
  *
@@ -5094,7 +7169,15 @@ categories.
  * \return number of IDs in category
  */
 int lammps_id_count(void *handle, const char *category) {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify || !lmp->output || !lmp->group || !lmp->atom
+      || !lmp->domain || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!category) return 0;
+
   if (strcmp(category,"compute") == 0) {
     return lmp->modify->get_compute_list().size();
   } else if (strcmp(category,"dump") == 0) {
@@ -5108,7 +7191,7 @@ int lammps_id_count(void *handle, const char *category) {
   } else if (strcmp(category,"region") == 0) {
     return lmp->domain->get_region_list().size();
   } else if (strcmp(category,"variable") == 0) {
-    return lmp->input->variable->nvar;
+    return lmp->input->variable->get_nvar();
   }
   return 0;
 }
@@ -5118,14 +7201,15 @@ int lammps_id_count(void *handle, const char *category) {
 /** Look up the name of an ID by index in the list of IDs of a given category.
  *
 \verbatim embed:rst
+
+.. versionadded:: 9Oct2020
+
 This function copies the name of the *category* ID with the index
 *idx* into the provided C-style string buffer.  The length of the buffer
 must be provided as *buf_size* argument.  If the name of the style
 exceeds the length of the buffer, it will be truncated accordingly.
 If the index is out of range, the function returns 0 and *buffer* is
 set to an empty string, otherwise 1.
-
-.. versionadded:: 9Oct2020
 
 \endverbatim
  *
@@ -5137,46 +7221,59 @@ set to an empty string, otherwise 1.
  * \return 1 if successful, otherwise 0
  */
 int lammps_id_name(void *handle, const char *category, int idx, char *buffer, int buf_size) {
-  auto lmp = (LAMMPS *) handle;
-  if (idx < 0) return 0;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify || !lmp->output || !lmp->group || !lmp->atom
+      || !lmp->domain || !lmp->input || !lmp->input->variable) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
+  if (!buffer || !category || (idx < 0)) return 0;
 
   if (strcmp(category,"compute") == 0) {
-    auto icompute = lmp->modify->get_compute_by_index(idx);
+    auto *icompute = lmp->modify->get_compute_by_index(idx);
     if (icompute) {
       strncpy(buffer, icompute->id, buf_size);
       return 1;
     }
   } else if (strcmp(category,"dump") == 0) {
-    auto idump = lmp->output->get_dump_by_index(idx);
+    auto *idump = lmp->output->get_dump_by_index(idx);
     if (idump) {
       strncpy(buffer, idump->id, buf_size);
       return 1;
     }
   } else if (strcmp(category,"fix") == 0) {
-    auto ifix = lmp->modify->get_fix_by_index(idx);
+    auto *ifix = lmp->modify->get_fix_by_index(idx);
     if (ifix) {
       strncpy(buffer, ifix->id, buf_size);
       return 1;
     }
   } else if (strcmp(category,"group") == 0) {
-    if ((idx >=0) && (idx < lmp->group->ngroup)) {
-      strncpy(buffer, lmp->group->names[idx], buf_size);
-      return 1;
+    // the list of groups may have "holes". So the available range is always 0 to 32
+    if ((idx >= 0) && (idx < Group::MAX_GROUP)) {
+      if (lmp->group->names[idx]) {
+        strncpy(buffer, lmp->group->names[idx], buf_size);
+        return 1;
+      } else {
+        buffer[0] = '\0';
+        return 0;
+      }
     }
   } else if (strcmp(category,"molecule") == 0) {
-    if ((idx >=0) && (idx < lmp->atom->nmolecule)) {
+    if ((idx >= 0) && (idx < lmp->atom->nmolecule)) {
       strncpy(buffer, lmp->atom->molecules[idx]->id, buf_size);
       return 1;
     }
   } else if (strcmp(category,"region") == 0) {
     auto regions = lmp->domain->get_region_list();
-    if ((idx >=0) && (idx < (int) regions.size())) {
+    if ((idx >= 0) && (idx < (int) regions.size())) {
       strncpy(buffer, regions[idx]->id, buf_size);
       return 1;
     }
   } else if (strcmp(category,"variable") == 0) {
-    if ((idx >=0) && (idx < lmp->input->variable->nvar)) {
-      strncpy(buffer, lmp->input->variable->names[idx], buf_size);
+    if ((idx >= 0) && (idx < lmp->input->variable->get_nvar()) &&
+        lmp->input->variable->get_name(idx)) {
+      strncpy(buffer, lmp->input->variable->get_name(idx), buf_size);
       return 1;
     }
   }
@@ -5189,9 +7286,10 @@ int lammps_id_name(void *handle, const char *category, int idx, char *buffer, in
 /** Count the number of loaded plugins
  *
 \verbatim embed:rst
-This function counts how many plugins are currently loaded.
 
 .. versionadded:: 10Mar2021
+
+This function counts how many plugins are currently loaded.
 
 \endverbatim
  *
@@ -5211,14 +7309,15 @@ int lammps_plugin_count()
 /** Look up the info of a loaded plugin by its index in the list of plugins
  *
 \verbatim embed:rst
+
+.. versionadded:: 10Mar2021
+
 This function copies the name of the *style* plugin with the index
 *idx* into the provided C-style string buffer.  The length of the buffer
 must be provided as *buf_size* argument.  If the name of the style
 exceeds the length of the buffer, it will be truncated accordingly.
 If the index is out of range, the function returns 0 and *buffer* is
 set to an empty string, otherwise 1.
-
-.. versionadded:: 10Mar2021
 
 \endverbatim
  *
@@ -5231,12 +7330,13 @@ set to an empty string, otherwise 1.
 int lammps_plugin_name(int idx, char *stylebuf, char *namebuf, int buf_size)
 {
 #if defined(LMP_PLUGIN)
+  if (!stylebuf || !namebuf) return 0;
   stylebuf[0] = namebuf[0] = '\0';
 
   const lammpsplugin_t *plugin = plugin_get_info(idx);
   if (plugin) {
-    strncpy(stylebuf,plugin->style,buf_size);
-    strncpy(namebuf,plugin->name,buf_size);
+    strncpy(stylebuf, plugin->style, buf_size);
+    strncpy(namebuf, plugin->name, buf_size);
     return 1;
   }
 #endif
@@ -5355,20 +7455,29 @@ external code.
  * \param  funcptr  pointer to callback function
  * \param  ptr      pointer to object in calling code, passed to callback function as first argument */
 
-void lammps_set_fix_external_callback(void *handle, const char *id, FixExternalFnPtr funcptr, void *ptr)
+void lammps_set_fix_external_callback(void *handle, const char *id, FixExternalFnPtr funcptr,
+                                      void *ptr)
 {
-  auto lmp = (LAMMPS *) handle;
-  auto  callback = (FixExternal::FnPtr) funcptr;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id || !ptr) return;
+
+  auto callback = (FixExternal::FnPtr) funcptr;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Cannot find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style 'external'", id);
+    auto *fext = dynamic_cast<FixExternal *>(fix);
+    if (!fext || !(utils::strmatch(fix->style, "^external")))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
-    auto fext = dynamic_cast<FixExternal *>(fix);
     fext->set_callback(callback, ptr);
   }
   END_CAPTURE
@@ -5378,9 +7487,11 @@ void lammps_set_fix_external_callback(void *handle, const char *id, FixExternalF
 
 \verbatim embed:rst
 
-Fix :doc:`external <fix_external>` allows programs that are running LAMMPS through
-its library interface to add or modify certain LAMMPS properties on specific
-timesteps, similar to the way other fixes do.
+.. versionadded:: 28Jul2021
+
+Fix :doc:`external <fix_external>` allows programs that are running
+LAMMPS through its library interface to add or modify certain LAMMPS
+properties on specific timesteps, similar to the way other fixes do.
 
 This function provides access to the per-atom force storage in a fix
 external instance with the given fix-ID to be added to the individual
@@ -5393,12 +7504,12 @@ data structures can change as well as the order of atom as they migrate
 between MPI processes because of the domain decomposition
 parallelization, this function should be always called immediately
 before the forces are going to be set to get an up-to-date pointer.
-You can use, for example, :cpp:func:`lammps_extract_setting` to obtain the
-number of local atoms `nlocal` and then assume the dimensions of the returned
-force array as ``double force[nlocal][3]``.
+You can use, for example, :cpp:func:`lammps_extract_setting` to obtain
+the number of local atoms `nlocal` and then assume the dimensions of
+the returned force array as ``double force[nlocal][3]``.
 
-This is an alternative to the callback mechanism in fix external set up by
-:cpp:func:`lammps_set_fix_external_callback`. The main difference is
+This is an alternative to the callback mechanism in fix external set up
+by :cpp:func:`lammps_set_fix_external_callback`. The main difference is
 that this mechanism can be used when forces are be pre-computed and the
 control alternates between LAMMPS and the external code, while the
 callback mechanism can call the external code to compute the force when
@@ -5408,8 +7519,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle     pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5418,16 +7527,24 @@ external code.
 
 double **lammps_fix_external_get_force(void *handle, const char *id)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return nullptr;
+  }
+  if (!id) return nullptr;
+
   double **fexternal = nullptr;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    if (!utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
     int tmp;
     fexternal = (double **)fix->extract("fexternal",tmp);
@@ -5439,6 +7556,8 @@ double **lammps_fix_external_get_force(void *handle, const char *id)
 /** Set the global energy contribution for a fix external instance with the given ID.
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback` and
 :cpp:func:`lammps_fix_external_get_force` to also set the contribution
@@ -5456,8 +7575,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5466,17 +7583,24 @@ external code.
 
 void lammps_fix_external_set_energy_global(void *handle, const char *id, double eng)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "Fix {} is not of style external", FNERR, id);
 
-    auto fext = dynamic_cast<FixExternal*>(fix);
     fext->set_energy_global(eng);
   }
   END_CAPTURE
@@ -5485,6 +7609,8 @@ void lammps_fix_external_set_energy_global(void *handle, const char *id, double 
 /** Set the global virial contribution for a fix external instance with the given ID.
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback`
 and :cpp:func:`lammps_fix_external_get_force` to set the contribution to
@@ -5504,8 +7630,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5514,17 +7638,24 @@ external code.
 
 void lammps_fix_external_set_virial_global(void *handle, const char *id, double *virial)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id || !virial) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
-    auto  fext = dynamic_cast<FixExternal*>(fix);
     fext->set_virial_global(virial);
   }
   END_CAPTURE
@@ -5533,6 +7664,8 @@ void lammps_fix_external_set_virial_global(void *handle, const char *id, double 
 /** Set the per-atom energy contribution for a fix external instance with the given ID.
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback`
 to set the per-atom energy contribution due to the fix from the external code
@@ -5552,8 +7685,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5562,17 +7693,24 @@ external code.
 
 void lammps_fix_external_set_energy_peratom(void *handle, const char *id, double *eng)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id || !eng) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "Fix {} is not of style external", FNERR, id);
 
-    auto fext = dynamic_cast<FixExternal*>(fix);
     fext->set_energy_peratom(eng);
   }
   END_CAPTURE
@@ -5581,6 +7719,8 @@ void lammps_fix_external_set_energy_peratom(void *handle, const char *id, double
 /** Set the per-atom virial contribution for a fix external instance with the given ID.
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback`
 to set the per-atom virial contribution due to the fix from the external code
@@ -5603,8 +7743,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5613,17 +7751,24 @@ external code.
 
 void lammps_fix_external_set_virial_peratom(void *handle, const char *id, double **virial)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id || !virial) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
-    auto  fext = dynamic_cast<FixExternal*>(fix);
     fext->set_virial_peratom(virial);
   }
   END_CAPTURE
@@ -5632,6 +7777,8 @@ void lammps_fix_external_set_virial_peratom(void *handle, const char *id, double
 /** Set the vector length for a global vector stored with fix external for analysis
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback` and
 :cpp:func:`lammps_fix_external_get_force` to set the length of a global vector of
@@ -5647,8 +7794,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5657,17 +7802,24 @@ external code.
 
 void lammps_fix_external_set_vector_length(void *handle, const char *id, int len)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
-    auto fext = dynamic_cast<FixExternal*>(fix);
     fext->set_vector_length(len);
   }
   END_CAPTURE
@@ -5676,6 +7828,8 @@ void lammps_fix_external_set_vector_length(void *handle, const char *id, int len
 /** Store a global vector value for a fix external instance with the given ID.
 
 \verbatim embed:rst
+
+.. versionadded:: 28Jul2021
 
 This is a companion function to :cpp:func:`lammps_set_fix_external_callback` and
 :cpp:func:`lammps_fix_external_get_force` to set the values of a global vector of
@@ -5700,8 +7854,6 @@ Please see the documentation for :doc:`fix external <fix_external>` for
 more information about how to use the fix and how to couple it with an
 external code.
 
-.. versionadded:: 28Jul2021
-
 \endverbatim
  *
  * \param  handle   pointer to a previously created LAMMPS instance cast to ``void *``.
@@ -5711,17 +7863,24 @@ external code.
 
 void lammps_fix_external_set_vector(void *handle, const char *id, int idx, double val)
 {
-  auto lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->modify) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
+  if (!id) return;
 
   BEGIN_CAPTURE
   {
-    auto fix = lmp->modify->get_fix_by_id(id);
-    if (!fix) lmp->error->all(FLERR,"Can not find fix with ID '{}'!", id);
+    auto *fix = lmp->modify->get_fix_by_id(id);
+    if (!fix)
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} does not exist", FNERR, id);
 
-    if (strcmp("external",fix->style) != 0)
-      lmp->error->all(FLERR,"Fix '{}' is not of style external!", id);
+    auto *fext = dynamic_cast<FixExternal*>(fix);
+    if (!fext || !utils::strmatch(fix->style,"^external"))
+      lmp->error->all(FLERR, Error::NOLASTLINE, "{}(): Fix {} is not of style external", FNERR, id);
 
-    auto  fext = dynamic_cast<FixExternal*>(fix);
     fext->set_vector(idx, val);
   }
   END_CAPTURE
@@ -5739,7 +7898,7 @@ and logfile pointers to simplify capturing output from LAMMPS library calls.
  * \param  handle    pointer to a previously created LAMMPS instance cast to ``void *``.
  */
 void lammps_flush_buffers(void *handle) {
-  utils::flush_buffers((LAMMPS *) handle);
+  if (handle) utils::flush_buffers((LAMMPS *) handle);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -5759,7 +7918,7 @@ leaks.
 
 void lammps_free(void *ptr)
 {
-  free(ptr);
+  if (ptr) free(ptr);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -5774,7 +7933,12 @@ void lammps_free(void *ptr)
 
 int lammps_is_running(void *handle)
 {
-  auto   lmp = (LAMMPS *) handle;
+  auto *   lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->update) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return 0;
+  }
   return lmp->update->whichflag;
 }
 
@@ -5787,7 +7951,12 @@ int lammps_is_running(void *handle)
 
 void lammps_force_timeout(void *handle)
 {
-  auto   lmp = (LAMMPS *) handle;
+  auto *lmp = (LAMMPS *) handle;
+  if (!lmp || !lmp->error || !lmp->timer) {
+    const auto &mesg = fmt::format("ERROR: {}(): Invalid LAMMPS handle\n", FNERR);
+    STORE_ERROR_MESSAGE(lmp, mesg);
+    return;
+  }
   return lmp->timer->force_timeout();
 }
 
@@ -5803,24 +7972,58 @@ has thrown a :ref:`C++ exception <exceptions>`.
 
 .. note::
 
-   This function will always report "no error" when the LAMMPS library
-   has been compiled without ``-DLAMMPS_EXCEPTIONS``, which turns fatal
-   errors aborting LAMMPS into C++ exceptions. You can use the library
-   function :cpp:func:`lammps_config_has_exceptions` to check whether this is
-   the case.
+   .. versionchanged:: 2Aug2023
+
+   The *handle* pointer may be ``NULL`` for this function, as would be
+   the case when a call to create a LAMMPS instance has failed.  Then
+   this function will not check the error status inside the LAMMPS
+   instance, but instead would check the global error buffer of the
+   library interface.
+
 \endverbatim
  *
- * \param handle   pointer to a previously created LAMMPS instance cast to ``void *``.
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *`` or NULL
  * \return 0 on no error, 1 on error.
  */
-int lammps_has_error(void *handle) {
-#ifdef LAMMPS_EXCEPTIONS
-  LAMMPS *lmp = (LAMMPS *) handle;
-  Error *error = lmp->error;
-  return (error->get_last_error().empty()) ? 0 : 1;
-#else
-  return 0;
-#endif
+int lammps_has_error(void *handle)
+{
+  if (handle) {
+    auto *lmp = (LAMMPS *) handle;
+    Error *error = lmp->error;
+    return (error->get_last_error().empty()) ? 0 : 1;
+  } else {
+    return lammps_last_global_errormessage.empty() ? 0 : 1;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+/** Enable or disable direct printing of error messages
+
+\verbatim embed:rst
+
+.. versionadded:: 2Apr2025
+
+This function can be used to stop LAMMPS from printing error messages
+*before* LAMMPS throws a :ref:`C++ exception <exceptions>`.  This is so
+it may be left to the code calling the library interface whether to
+check for them, and retrieve and print error messages using the library
+interface functions :cpp:func:`lammps_has_error` and
+:cpp:func:`lammps_get_last_error_message`.  The function returns the
+previous setting so that one can easily override the setting
+temporarily and restore it afterwards.
+
+\endverbatim
+ *
+ * \param handle   pointer to a previously created LAMMPS instance cast to ``void *`` or NULL
+ * \param flag     enable (not 0) or disable (0) printing error messages before throwing exception
+ * \return  previous setting of the flag
+ */
+int lammps_set_show_error(void *handle, const int flag)
+{
+  auto *lmp = (LAMMPS *) handle;
+  if (lmp && lmp->error) return lmp->error->set_show_error(flag);
+  return 1; // default value
 }
 
 /* ---------------------------------------------------------------------- */
@@ -5832,7 +8035,8 @@ This function can be used to retrieve the error message that was set
 in the event of an error inside of LAMMPS which resulted in a
 :ref:`C++ exception <exceptions>`.  A suitable buffer for a C-style
 string has to be provided and its length.  If the internally stored
-error message is longer, it will be truncated accordingly.  The return
+error message is longer, it will be truncated accordingly.  If the
+buffer is a NULL pointer, then nothing will be copied.  The return
 value of the function corresponds to the kind of error: a "1" indicates
 an error that occurred on all MPI ranks and is often recoverable, while
 a "2" indicates an abort that would happen only in a single MPI rank
@@ -5841,30 +8045,48 @@ the failing MPI ranks to send messages.
 
 .. note::
 
-   This function will do nothing when the LAMMPS library has been
-   compiled without ``-DLAMMPS_EXCEPTIONS``, which turns errors aborting
-   LAMMPS into C++ exceptions.  You can use the library function
-   :cpp:func:`lammps_config_has_exceptions` to check whether this is the case.
+   .. versionchanged:: 2Aug2023
+
+   The *handle* pointer may be ``NULL`` for this function, as would be
+   the case when a call to create a LAMMPS instance has failed.  Then
+   this function will not check the error buffer inside the LAMMPS
+   instance, but instead would check the global error buffer of the
+   library interface.
+
+   .. versionchanged:: 21Nov2023
+
+   The *buffer* pointer may be ``NULL``.  This will clear any error
+   status without copying the error message.
+
 \endverbatim
  *
- * \param  handle    pointer to a previously created LAMMPS instance cast to ``void *``.
- * \param  buffer    string buffer to copy the error message to
+ * \param  handle    pointer to a previously created LAMMPS instance cast to ``void *`` or NULL.
+ * \param  buffer    string buffer to copy the error message to, may be NULL
  * \param  buf_size  size of the provided string buffer
  * \return           1 when all ranks had the error, 2 on a single rank error. */
 
-int lammps_get_last_error_message(void *handle, char *buffer, int buf_size) {
-#ifdef LAMMPS_EXCEPTIONS
-  LAMMPS *lmp = (LAMMPS *) handle;
-  Error *error = lmp->error;
-  buffer[0] = buffer[buf_size-1] = '\0';
+int lammps_get_last_error_message(void *handle, char *buffer, int buf_size)
+{
+  if (handle) {
+    auto *lmp = (LAMMPS *) handle;
+    Error *error = lmp->error;
+    if (buffer) buffer[0] = buffer[buf_size-1] = '\0';
 
-  if (!error->get_last_error().empty()) {
-    int error_type = error->get_last_error_type();
-    strncpy(buffer, error->get_last_error().c_str(), buf_size-1);
-    error->set_last_error("", ERROR_NONE);
-    return error_type;
+    if (!error->get_last_error().empty()) {
+      int error_type = error->get_last_error_type();
+      if (buffer) strncpy(buffer, error->get_last_error().c_str(), buf_size-1);
+      error->set_last_error("", ERROR_NONE);
+      return error_type;
+    }
+  } else {
+    if (buffer) buffer[0] = buffer[buf_size-1] = '\0';
+
+    if (!lammps_last_global_errormessage.empty()) {
+      if (buffer) strncpy(buffer, lammps_last_global_errormessage.c_str(), buf_size-1);
+      lammps_last_global_errormessage.clear();
+      return 1;
+    }
   }
-#endif
   return 0;
 }
 
@@ -5873,11 +8095,12 @@ int lammps_get_last_error_message(void *handle, char *buffer, int buf_size) {
 /** Return API version of embedded Python interpreter
 
 \verbatim embed:rst
+
+.. versionadded:: 3Nov2022
+
 This function is used by the ML-IAP python code (mliappy) to verify
 the API version of the embedded python interpreter of the PYTHON
 package.  It returns -1 if the PYTHON package is not enabled.
-
-.. versionadded:: 3Nov2022
 
 \endverbatim
  *
@@ -5892,5 +8115,5 @@ int lammps_python_api_version() {
 }
 
 // Local Variables:
-// fill-column: 72
+// fill-column: 99
 // End:

@@ -36,12 +36,6 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define EPSILON 1.0e-10
-
-// same as fix_wall.cpp
-
-enum{EDGE,CONSTANT,VARIABLE};
-
 /* ---------------------------------------------------------------------- */
 
 PairBrownianOMP::PairBrownianOMP(LAMMPS *lmp) :
@@ -93,7 +87,7 @@ void PairBrownianOMP::compute(int eflag, int vflag)
         for (int m = 0; m < wallfix->nwall; m++) {
           int dim = wallfix->wallwhich[m] / 2;
           int side = wallfix->wallwhich[m] % 2;
-          if (wallfix->xstyle[m] == VARIABLE) {
+          if (wallfix->xstyle[m] == FixWall::VARIABLE) {
             wallcoord = input->variable->compute_equal(wallfix->xindex[m]);
           }
           else wallcoord = wallfix->coord0[m];
@@ -197,7 +191,6 @@ void PairBrownianOMP::eval(int iifrom, int iito, ThrData * const thr)
   double prethermostat;
   double xl[3],a_sq,a_sh,a_pu,Fbmag;
   double p1[3],p2[3],p3[3];
-  int overlaps = 0;
 
   // scale factor for Brownian moments
 
@@ -251,10 +244,6 @@ void PairBrownianOMP::eval(int iifrom, int iito, ThrData * const thr)
         // scalar resistances a_sq and a_sh
 
         h_sep = r - 2.0*radi;
-
-        // check for overlaps
-
-        if (h_sep < 0.0) overlaps++;
 
         // if less than minimum gap, use minimum gap instead
 

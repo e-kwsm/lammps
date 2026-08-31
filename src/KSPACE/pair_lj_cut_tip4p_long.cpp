@@ -29,19 +29,13 @@
 #include "neigh_list.h"
 #include "memory.h"
 #include "error.h"
+#include "ewald_const.h"
 
 #include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
-
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define A1        0.254829592
-#define A2       -0.284496736
-#define A3        1.421413741
-#define A4       -1.453152027
-#define A5        1.061405429
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -69,6 +63,8 @@ PairLJCutTIP4PLong::PairLJCutTIP4PLong(LAMMPS *lmp) :
 
 PairLJCutTIP4PLong::~PairLJCutTIP4PLong()
 {
+  if (copymode) return;
+
   memory->destroy(hneigh);
   memory->destroy(newsite);
 }
@@ -269,7 +265,7 @@ void PairLJCutTIP4PLong::compute(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {
@@ -431,15 +427,15 @@ void PairLJCutTIP4PLong::settings(int narg, char **arg)
 {
   if (narg < 6 || narg > 7) error->all(FLERR,"Illegal pair_style command");
 
-  typeO = utils::inumeric(FLERR,arg[0],false,lmp);
-  typeH = utils::inumeric(FLERR,arg[1],false,lmp);
-  typeB = utils::inumeric(FLERR,arg[2],false,lmp);
-  typeA = utils::inumeric(FLERR,arg[3],false,lmp);
-  qdist = utils::numeric(FLERR,arg[4],false,lmp);
+  typeO_str = arg[0];
+  typeH_str = arg[1];
+  typeB_str = arg[2];
+  typeA_str = arg[3];
+  qdist = utils::numeric(FLERR, arg[4], false, lmp);
 
-  cut_lj_global = utils::numeric(FLERR,arg[5],false,lmp);
+  cut_lj_global = utils::numeric(FLERR, arg[5], false, lmp);
   if (narg == 6) cut_coul = cut_lj_global;
-  else cut_coul = utils::numeric(FLERR,arg[6],false,lmp);
+  else cut_coul = utils::numeric(FLERR, arg[6], false, lmp);
 
   // reset cutoffs that have been explicitly set
 
@@ -449,6 +445,25 @@ void PairLJCutTIP4PLong::settings(int narg, char **arg)
       for (j = i; j <= atom->ntypes; j++)
         if (setflag[i][j]) cut_lj[i][j] = cut_lj_global;
   }
+}
+
+/* ----------------------------------------------------------------------
+   set coeffs for one or more type pairs
+------------------------------------------------------------------------- */
+
+void PairLJCutTIP4PLong::coeff(int narg, char **arg)
+{
+  // set atom types from pair_style command unless we were restarted
+  // and the types are already set and the strings are empty.
+
+  if (!typeO_str.empty()) {
+    typeO = utils::expand_type_int(FLERR, typeO_str, Atom::ATOM, lmp, true);
+    typeH = utils::expand_type_int(FLERR, typeH_str, Atom::ATOM, lmp, true);
+    typeB = utils::expand_type_int(FLERR, typeB_str, Atom::BOND, lmp, true);
+    typeA = utils::expand_type_int(FLERR, typeA_str, Atom::ANGLE, lmp, true);
+  }
+
+  PairLJCutCoulLong::coeff(narg, arg);
 }
 
 /* ----------------------------------------------------------------------

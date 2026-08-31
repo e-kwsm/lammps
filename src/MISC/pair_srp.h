@@ -39,6 +39,7 @@ class PairSRP : public Pair {
   void read_restart(FILE *) override;
   void write_restart_settings(FILE *) override;
   void read_restart_settings(FILE *) override;
+  double memory_usage() override;
 
  protected:
   inline void onetwoexclude(int *&, int &, int *&, int *&, int **&);
@@ -51,10 +52,11 @@ class PairSRP : public Pair {
   double **a0;
   double **srp;
   double cut_global;
+  std::string bptype_str, btype_str;
   int bptype;
   int btype;
   class Fix *f_srp;
-  char *fix_id;
+  std::string fix_id;
   int exclude, maxcount;
   int **segment;
 };

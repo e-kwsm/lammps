@@ -11,15 +11,11 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "atom.h"
 #include "info.h"
-#include "input.h"
 #include "library.h"
-#include "variable.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-#include <cmath>
 #include <cstring>
 #include <functional>
 #include <vector>
@@ -342,7 +338,7 @@ TEST_F(FixPythonInvokeTest, post_force)
         if (line == "PYTHON_POST_FORCE") ++count;
     }
 
-    ASSERT_EQ(count, 5);
+    ASSERT_EQ(count, 6);
 }
 
 } // namespace LAMMPS_NS

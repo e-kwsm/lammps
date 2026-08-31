@@ -26,7 +26,6 @@ namespace LAMMPS_NS {
 
 class FixAdapt : public Fix {
  public:
-  int diamflag;    // 1 if atom diameters will vary, for AtomVecGranular
   int chgflag;
 
   FixAdapt(class LAMMPS *, int, char **);
@@ -45,10 +44,10 @@ class FixAdapt : public Fix {
 
  private:
   int nadapt, resetflag, scaleflag, massflag;
-  int anypair, anybond, anyangle;
+  int anypair, anybond, anyangle, anydihedral, anyimproper;
   int nlevels_respa;
   char *id_fix_diam, *id_fix_chg;
-  class FixStorePeratom *fix_diam, *fix_chg;
+  class FixStoreAtom *fix_diam, *fix_chg;
   double previous_diam_scale, previous_chg_scale;
   int discflag;
 
@@ -58,8 +57,10 @@ class FixAdapt : public Fix {
     char *pstyle, *pparam;
     char *bstyle, *bparam;
     char *astyle, *aparam;
+    char *dstyle, *dparam;
+    char *istyle, *iparam;
     int ilo, ihi, jlo, jhi;
-    int pdim, bdim, adim;
+    int pdim, bdim, adim, ddim, idim;
     double *scalar, scalar_orig;
     double *vector, *vector_orig;
     double **array, **array_orig;
@@ -67,6 +68,8 @@ class FixAdapt : public Fix {
     class Pair *pair;
     class Bond *bond;
     class Angle *angle;
+    class Dihedral *dihedral;
+    class Improper *improper;
   };
 
   Adapt *adapt;

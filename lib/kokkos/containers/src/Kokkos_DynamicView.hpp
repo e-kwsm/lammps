@@ -1,46 +1,5 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_DYNAMIC_VIEW_HPP
 #define KOKKOS_DYNAMIC_VIEW_HPP
@@ -51,8 +10,16 @@
 
 #include <cstdio>
 
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_EXPERIMENTAL_CXX20_MODULES
+import kokkos.core;
+import kokkos.core_impl;
+#else
 #include <Kokkos_Core.hpp>
+#endif
 #include <impl/Kokkos_Error.hpp>
+
+#include <cstdint>
 
 namespace Kokkos {
 namespace Experimental {
@@ -68,14 +35,10 @@ struct ChunkedArrayManager {
   using pointer_type = ValueType*;
   using track_type   = Kokkos::Impl::SharedAllocationTracker;
 
-  ChunkedArrayManager()                           = default;
-  ChunkedArrayManager(ChunkedArrayManager const&) = default;
-  ChunkedArrayManager(ChunkedArrayManager&&)      = default;
-  ChunkedArrayManager& operator=(ChunkedArrayManager&&) = default;
-  ChunkedArrayManager& operator=(const ChunkedArrayManager&) = default;
-
   template <typename Space, typename Value>
   friend struct ChunkedArrayManager;
+
+  ChunkedArrayManager() = default;
 
   template <typename Space, typename Value>
   inline ChunkedArrayManager(const ChunkedArrayManager<Space, Value>& rhs)
@@ -157,11 +120,7 @@ struct ChunkedArrayManager {
   /// allocation
   template <typename Space>
   struct Destroy {
-    Destroy()               = default;
-    Destroy(Destroy&&)      = default;
-    Destroy(const Destroy&) = default;
-    Destroy& operator=(Destroy&&) = default;
-    Destroy& operator=(const Destroy&) = default;
+    Destroy() = default;
 
     Destroy(std::string label, value_type** arg_chunk,
             const unsigned arg_chunk_max, const unsigned arg_chunk_size,
@@ -183,6 +142,7 @@ struct ChunkedArrayManager {
       }
       // Destroy the linked allocation if we have one.
       if (m_linked != nullptr) {
+        // NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
         Space().deallocate(m_label.c_str(), m_linked,
                            (sizeof(value_type*) * (m_chunk_max + 2)));
       }
@@ -223,11 +183,13 @@ struct ChunkedArrayManager {
   void deep_copy_to(
       const ExecutionSpace& exec_space,
       ChunkedArrayManager<OtherMemorySpace, ValueType> const& other) const {
-    if (other.m_chunks != m_chunks) {
-      Kokkos::Impl::DeepCopy<OtherMemorySpace, MemorySpace, ExecutionSpace>(
-          exec_space, other.m_chunks, m_chunks,
-          sizeof(pointer_type) * (m_chunk_max + 2));
-    }
+    // use of ad-hoc unmanaged views
+    Kokkos::deep_copy(
+        exec_space,
+        Kokkos::View<uintptr_t*, OtherMemorySpace>(
+            reinterpret_cast<uintptr_t*>(other.m_chunks), m_chunk_max + 2),
+        Kokkos::View<uintptr_t*, MemorySpace>(
+            reinterpret_cast<uintptr_t*>(m_chunks), m_chunk_max + 2));
   }
 
   KOKKOS_INLINE_FUNCTION
@@ -278,7 +240,7 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
 
   // It is assumed that the value_type is trivially copyable;
   // when this is not the case, potential problems can occur.
-  static_assert(std::is_void<typename traits::specialize>::value,
+  static_assert(std::is_void_v<typename traits::specialize>,
                 "DynamicView only implemented for non-specialized View type");
 
  private:
@@ -292,10 +254,15 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
 
  public:
   //----------------------------------------------------------------------
-
-  /** \brief  Compatible view of array of scalar types */
-  using array_type =
+  /** \brief  Compatible view of data type */
+  using uniform_type =
       DynamicView<typename traits::data_type, typename traits::device_type>;
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_5
+  /** \brief  Compatible view of array of scalar types */
+  using array_type KOKKOS_DEPRECATED_WITH_COMMENT("Use uniform_type instead.") =
+      uniform_type;
+#endif
 
   /** \brief  Compatible view of const data type */
   using const_type = DynamicView<typename traits::const_data_type,
@@ -306,15 +273,20 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
                                      typename traits::device_type>;
 
   /** \brief  Must be accessible everywhere */
-  using HostMirror = DynamicView;
+  using host_mirror_type = DynamicView;
+
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
+  /** \brief  Compatible HostMirror view */
+  using HostMirror KOKKOS_DEPRECATED_WITH_COMMENT(
+      "Use host_mirror_type instead.") = host_mirror_type;
+#endif
 
   /** \brief Unified types */
   using uniform_device =
       Kokkos::Device<typename traits::device_type::execution_space,
                      Kokkos::AnonymousSpace>;
-  using uniform_type               = array_type;
   using uniform_const_type         = const_type;
-  using uniform_runtime_type       = array_type;
+  using uniform_runtime_type       = uniform_type;
   using uniform_runtime_const_type = const_type;
   using uniform_nomemspace_type =
       DynamicView<typename traits::data_type, uniform_device>;
@@ -359,14 +331,18 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
     return r == 0 ? size() : 1;
   }
 
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_0() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_1() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_2() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_3() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_4() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_5() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_6() const { return 0; }
-  KOKKOS_INLINE_FUNCTION constexpr size_t stride_7() const { return 0; }
+  // clang-format off
+#ifdef KOKKOS_ENABLE_DEPRECATED_CODE_4
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(0) instead") KOKKOS_FUNCTION constexpr size_t stride_0() const { return stride(0); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(1) instead") KOKKOS_FUNCTION constexpr size_t stride_1() const { return stride(1); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(2) instead") KOKKOS_FUNCTION constexpr size_t stride_2() const { return stride(2); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(3) instead") KOKKOS_FUNCTION constexpr size_t stride_3() const { return stride(3); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(4) instead") KOKKOS_FUNCTION constexpr size_t stride_4() const { return stride(4); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(5) instead") KOKKOS_FUNCTION constexpr size_t stride_5() const { return stride(5); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(6) instead") KOKKOS_FUNCTION constexpr size_t stride_6() const { return stride(6); }
+  KOKKOS_DEPRECATED_WITH_COMMENT("Use stride(7) instead") KOKKOS_FUNCTION constexpr size_t stride_7() const { return stride(7); }
+#endif
+  // clang-format on
 
   template <typename iType>
   KOKKOS_INLINE_FUNCTION void stride(iType* const s) const {
@@ -391,7 +367,7 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
 
   enum {
     reference_type_is_lvalue_reference =
-        std::is_lvalue_reference<reference_type>::value
+        std::is_lvalue_reference_v<reference_type>
   };
 
   KOKKOS_INLINE_FUNCTION constexpr bool span_is_contiguous() const {
@@ -491,12 +467,7 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
 
   //----------------------------------------------------------------------
 
-  ~DynamicView()                  = default;
-  DynamicView()                   = default;
-  DynamicView(DynamicView&&)      = default;
-  DynamicView(const DynamicView&) = default;
-  DynamicView& operator=(DynamicView&&) = default;
-  DynamicView& operator=(const DynamicView&) = default;
+  DynamicView() = default;
 
   template <class RT, class... RP>
   DynamicView(const DynamicView<RT, RP...>& rhs)
@@ -523,21 +494,19 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
               const unsigned min_chunk_size,
               const unsigned max_extent)
       :  // The chunk size is guaranteed to be a power of two
-        m_chunk_shift(Kokkos::Impl::integral_power_of_two_that_contains(
-            min_chunk_size))  // div ceil(log2(min_chunk_size))
+        m_chunk_shift(min_chunk_size ? Kokkos::bit_width(min_chunk_size - 1)
+                                     : 0)  // div ceil(log2(min_chunk_size))
         ,
         m_chunk_mask((1 << m_chunk_shift) - 1)  // mod
         ,
         m_chunk_max((max_extent + m_chunk_mask) >>
                     m_chunk_shift)  // max num pointers-to-chunks in array
         ,
-        m_chunk_size(2 << (m_chunk_shift - 1)) {
+        m_chunk_size(1 << m_chunk_shift) {
     m_chunks = device_accessor(m_chunk_max, m_chunk_size);
 
     const std::string& label =
-        static_cast<Kokkos::Impl::ViewCtorProp<void, std::string> const&>(
-            arg_prop)
-            .value;
+        Kokkos::Impl::get_property<Kokkos::Impl::LabelTag>(arg_prop);
 
     if (device_accessor::template IsAccessibleFrom<host_space>::value) {
       m_chunks.template allocate_with_destroy<device_space>(label);
@@ -552,17 +521,14 @@ class DynamicView : public Kokkos::ViewTraits<DataType, P...> {
           label, m_chunks.get_ptr());
       m_chunks_host.initialize();
 
-      // Add some properties if not provided to avoid need for if constexpr
       using alloc_prop_input = Kokkos::Impl::ViewCtorProp<Prop...>;
-      using alloc_prop       = Kokkos::Impl::ViewCtorProp<
-          Prop..., std::conditional_t<alloc_prop_input::has_execution_space,
-                                      std::integral_constant<unsigned int, 15>,
-                                      typename device_space::execution_space>>;
-      alloc_prop arg_prop_copy(arg_prop);
 
-      const auto& exec = static_cast<const Kokkos::Impl::ViewCtorProp<
-          void, typename alloc_prop::execution_space>&>(arg_prop_copy)
-                             .value;
+      auto arg_prop_copy = ::Kokkos::Impl::with_properties_if_unset(
+          arg_prop, typename device_space::execution_space{});
+
+      const auto& exec =
+          Kokkos::Impl::get_property<Kokkos::Impl::ExecutionSpaceTag>(
+              arg_prop_copy);
       m_chunks_host.deep_copy_to(exec, m_chunks);
       if (!alloc_prop_input::has_execution_space)
         exec.fence(
@@ -586,6 +552,9 @@ template <class D, class... P>
 struct is_dynamic_view<Kokkos::Experimental::DynamicView<D, P...>>
     : public std::true_type {};
 
+template <class T>
+inline constexpr bool is_dynamic_view_v = is_dynamic_view<T>::value;
+
 }  // namespace Kokkos
 
 namespace Kokkos {
@@ -602,7 +571,7 @@ struct MirrorDynamicViewType {
   // Check whether it is the same memory space
   enum {
     is_same_memspace =
-        std::is_same<memory_space, typename src_view_type::memory_space>::value
+        std::is_same_v<memory_space, typename src_view_type::memory_space>
   };
   // The array_layout
   using array_layout = typename src_view_type::array_layout;
@@ -620,108 +589,89 @@ struct MirrorDynamicViewType {
 }  // namespace Impl
 
 namespace Impl {
+
+// create a mirror
+// private interface that accepts arbitrary view constructor args passed by a
+// view_alloc
 template <class T, class... P, class... ViewCtorArgs>
-inline auto create_mirror(
-    const Kokkos::Experimental::DynamicView<T, P...>& src,
-    const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
-    std::enable_if_t<!Impl::ViewCtorProp<ViewCtorArgs...>::has_memory_space>* =
-        nullptr) {
+inline auto create_mirror(const Kokkos::Experimental::DynamicView<T, P...>& src,
+                          const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop) {
   using alloc_prop_input = Impl::ViewCtorProp<ViewCtorArgs...>;
+  check_view_ctor_args_create_mirror<ViewCtorArgs...>();
 
-  static_assert(
-      !alloc_prop_input::has_label,
-      "The view constructor arguments passed to Kokkos::create_mirror "
-      "must not include a label!");
-  static_assert(
-      !alloc_prop_input::has_pointer,
-      "The view constructor arguments passed to Kokkos::create_mirror must "
-      "not include a pointer!");
-  static_assert(
-      !alloc_prop_input::allow_padding,
-      "The view constructor arguments passed to Kokkos::create_mirror must "
-      "not explicitly allow padding!");
+  auto prop_copy = Impl::with_properties_if_unset(
+      arg_prop, std::string(src.label()).append("_mirror"));
 
-  using alloc_prop = Impl::ViewCtorProp<ViewCtorArgs..., std::string>;
-  alloc_prop prop_copy(arg_prop);
-  static_cast<Impl::ViewCtorProp<void, std::string>&>(prop_copy).value =
-      std::string(src.label()).append("_mirror");
+  if constexpr (Impl::ViewCtorProp<ViewCtorArgs...>::has_memory_space) {
+    using MemorySpace = typename alloc_prop_input::memory_space;
 
-  auto ret = typename Kokkos::Experimental::DynamicView<T, P...>::HostMirror(
-      prop_copy, src.chunk_size(), src.chunk_max() * src.chunk_size());
+    auto ret = typename Kokkos::Impl::MirrorDynamicViewType<
+        MemorySpace, T, P...>::view_type(prop_copy, src.chunk_size(),
+                                         src.chunk_max() * src.chunk_size());
 
-  ret.resize_serial(src.extent(0));
+    ret.resize_serial(src.extent(0));
 
-  return ret;
+    return ret;
+  } else {
+    auto ret =
+        typename Kokkos::Experimental::DynamicView<T, P...>::host_mirror_type(
+            prop_copy, src.chunk_size(), src.chunk_max() * src.chunk_size());
+
+    ret.resize_serial(src.extent(0));
+
+    return ret;
+  }
 }
 
-template <class T, class... P, class... ViewCtorArgs>
-inline auto create_mirror(
-    const Kokkos::Experimental::DynamicView<T, P...>& src,
-    const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
-    std::enable_if_t<Impl::ViewCtorProp<ViewCtorArgs...>::has_memory_space>* =
-        nullptr) {
-  using alloc_prop_input = Impl::ViewCtorProp<ViewCtorArgs...>;
-
-  static_assert(
-      !alloc_prop_input::has_label,
-      "The view constructor arguments passed to Kokkos::create_mirror "
-      "must not include a label!");
-  static_assert(
-      !alloc_prop_input::has_pointer,
-      "The view constructor arguments passed to Kokkos::create_mirror must "
-      "not include a pointer!");
-  static_assert(
-      !alloc_prop_input::allow_padding,
-      "The view constructor arguments passed to Kokkos::create_mirror must "
-      "not explicitly allow padding!");
-
-  using MemorySpace = typename alloc_prop_input::memory_space;
-  using alloc_prop  = Impl::ViewCtorProp<ViewCtorArgs..., std::string>;
-  alloc_prop prop_copy(arg_prop);
-  static_cast<Impl::ViewCtorProp<void, std::string>&>(prop_copy).value =
-      std::string(src.label()).append("_mirror");
-
-  auto ret = typename Kokkos::Impl::MirrorDynamicViewType<
-      MemorySpace, T, P...>::view_type(prop_copy, src.chunk_size(),
-                                       src.chunk_max() * src.chunk_size());
-
-  ret.resize_serial(src.extent(0));
-
-  return ret;
-}
 }  // namespace Impl
 
-// Create a mirror in host space
-template <class T, class... P>
+// public interface
+template <class T, class... P,
+          typename Enable = std::enable_if_t<
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
 inline auto create_mirror(
     const Kokkos::Experimental::DynamicView<T, P...>& src) {
   return Impl::create_mirror(src, Impl::ViewCtorProp<>{});
 }
 
-template <class T, class... P>
+// public interface that accepts a without initializing flag
+template <class T, class... P,
+          typename Enable = std::enable_if_t<
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
 inline auto create_mirror(
     Kokkos::Impl::WithoutInitializing_t wi,
     const Kokkos::Experimental::DynamicView<T, P...>& src) {
   return Impl::create_mirror(src, Kokkos::view_alloc(wi));
 }
 
-// Create a mirror in a new space
-template <class Space, class T, class... P>
+// public interface that accepts a space
+template <class Space, class T, class... P,
+          typename Enable = std::enable_if_t<
+              Kokkos::is_space<Space>::value &&
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
 inline auto create_mirror(
     const Space&, const Kokkos::Experimental::DynamicView<T, P...>& src) {
   return Impl::create_mirror(
-      src, Impl::ViewCtorProp<>{typename Space::memory_space{}});
+      src, Kokkos::view_alloc(typename Space::memory_space{}));
 }
 
-template <class Space, class T, class... P>
-typename Kokkos::Impl::MirrorDynamicViewType<Space, T, P...>::view_type
-create_mirror(Kokkos::Impl::WithoutInitializing_t wi, const Space&,
-              const Kokkos::Experimental::DynamicView<T, P...>& src) {
+// public interface that accepts a space and a without initializing flag
+template <class Space, class T, class... P,
+          typename Enable = std::enable_if_t<
+              Kokkos::is_space<Space>::value &&
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
+inline auto create_mirror(
+    Kokkos::Impl::WithoutInitializing_t wi, const Space&,
+    const Kokkos::Experimental::DynamicView<T, P...>& src) {
   return Impl::create_mirror(
       src, Kokkos::view_alloc(wi, typename Space::memory_space{}));
 }
 
-template <class T, class... P, class... ViewCtorArgs>
+// public interface that accepts arbitrary view constructor args passed by a
+// view_alloc
+template <class T, class... P, class... ViewCtorArgs,
+          typename Enable = std::enable_if_t<
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
 inline auto create_mirror(
     const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
     const Kokkos::Experimental::DynamicView<T, P...>& src) {
@@ -729,57 +679,54 @@ inline auto create_mirror(
 }
 
 namespace Impl {
+
+// create a mirror view
+// private interface that accepts arbitrary view constructor args passed by a
+// view_alloc
 template <class T, class... P, class... ViewCtorArgs>
-inline std::enable_if_t<
-    (std::is_same<
-         typename Kokkos::Experimental::DynamicView<T, P...>::memory_space,
-         typename Kokkos::Experimental::DynamicView<
-             T, P...>::HostMirror::memory_space>::value &&
-     std::is_same<
-         typename Kokkos::Experimental::DynamicView<T, P...>::data_type,
-         typename Kokkos::Experimental::DynamicView<
-             T, P...>::HostMirror::data_type>::value),
-    typename Kokkos::Experimental::DynamicView<T, P...>::HostMirror>
-create_mirror_view(
-    const typename Kokkos::Experimental::DynamicView<T, P...>& src,
-    const Impl::ViewCtorProp<ViewCtorArgs...>&) {
-  return src;
+inline auto create_mirror_view(
+    const Kokkos::Experimental::DynamicView<T, P...>& src,
+    [[maybe_unused]] const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop) {
+  if constexpr (!Impl::ViewCtorProp<ViewCtorArgs...>::has_memory_space) {
+    if constexpr (std::is_same_v<
+                      typename Kokkos::Experimental::DynamicView<
+                          T, P...>::memory_space,
+                      typename Kokkos::Experimental::DynamicView<
+                          T, P...>::host_mirror_type::memory_space> &&
+                  std::is_same_v<typename Kokkos::Experimental::DynamicView<
+                                     T, P...>::data_type,
+                                 typename Kokkos::Experimental::DynamicView<
+                                     T, P...>::host_mirror_type::data_type>) {
+      return
+          typename Kokkos::Experimental::DynamicView<T, P...>::host_mirror_type(
+              src);
+    } else {
+      return Kokkos::Impl::choose_create_mirror(src, arg_prop);
+    }
+  } else {
+    if constexpr (Impl::MirrorDynamicViewType<
+                      typename Impl::ViewCtorProp<
+                          ViewCtorArgs...>::memory_space,
+                      T, P...>::is_same_memspace) {
+      return typename Impl::MirrorDynamicViewType<
+          typename Impl::ViewCtorProp<ViewCtorArgs...>::memory_space, T,
+          P...>::view_type(src);
+    } else {
+      return Kokkos::Impl::choose_create_mirror(src, arg_prop);
+    }
+  }
 }
 
-template <class T, class... P, class... ViewCtorArgs>
-inline std::enable_if_t<
-    !(std::is_same<
-          typename Kokkos::Experimental::DynamicView<T, P...>::memory_space,
-          typename Kokkos::Experimental::DynamicView<
-              T, P...>::HostMirror::memory_space>::value &&
-      std::is_same<
-          typename Kokkos::Experimental::DynamicView<T, P...>::data_type,
-          typename Kokkos::Experimental::DynamicView<
-              T, P...>::HostMirror::data_type>::value),
-    typename Kokkos::Experimental::DynamicView<T, P...>::HostMirror>
-create_mirror_view(const Kokkos::Experimental::DynamicView<T, P...>& src,
-                   const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop) {
-  return Kokkos::create_mirror(arg_prop, src);
-}
-
-template <class Space, class T, class... P, class... ViewCtorArgs>
-inline std::enable_if_t<
-    Impl::MirrorDynamicViewType<Space, T, P...>::is_same_memspace,
-    typename Kokkos::Impl::MirrorDynamicViewType<Space, T, P...>::view_type>
-create_mirror_view(const Space&,
-                   const Kokkos::Experimental::DynamicView<T, P...>& src,
-                   const Impl::ViewCtorProp<ViewCtorArgs...>&) {
-  return src;
-}
 }  // namespace Impl
 
-// Create a mirror view in host space
+// public interface
 template <class T, class... P>
 inline auto create_mirror_view(
     const typename Kokkos::Experimental::DynamicView<T, P...>& src) {
   return Impl::create_mirror_view(src, Impl::ViewCtorProp<>{});
 }
 
+// public interface that accepts a without initializing flag
 template <class T, class... P>
 inline auto create_mirror_view(
     Kokkos::Impl::WithoutInitializing_t wi,
@@ -787,14 +734,18 @@ inline auto create_mirror_view(
   return Impl::create_mirror_view(src, Kokkos::view_alloc(wi));
 }
 
-// Create a mirror in a new space
-template <class Space, class T, class... P>
+// public interface that accepts a space
+template <class Space, class T, class... P,
+          class Enable = std::enable_if_t<Kokkos::is_space<Space>::value>>
 inline auto create_mirror_view(
-    const Space& space, const Kokkos::Experimental::DynamicView<T, P...>& src) {
-  return Impl::create_mirror_view(space, src, Impl::ViewCtorProp<>{});
+    const Space&, const Kokkos::Experimental::DynamicView<T, P...>& src) {
+  return Impl::create_mirror_view(src,
+                                  view_alloc(typename Space::memory_space{}));
 }
 
-template <class Space, class T, class... P>
+// public interface that accepts a space and a without initializing flag
+template <class Space, class T, class... P,
+          class Enable = std::enable_if_t<Kokkos::is_space<Space>::value>>
 inline auto create_mirror_view(
     Kokkos::Impl::WithoutInitializing_t wi, const Space&,
     const Kokkos::Experimental::DynamicView<T, P...>& src) {
@@ -802,6 +753,8 @@ inline auto create_mirror_view(
       src, Kokkos::view_alloc(wi, typename Space::memory_space{}));
 }
 
+// public interface that accepts arbitrary view constructor args passed by a
+// view_alloc
 template <class T, class... P, class... ViewCtorArgs>
 inline auto create_mirror_view(
     const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
@@ -827,10 +780,8 @@ inline void deep_copy(const Kokkos::Experimental::DynamicView<T, DP...>& dst,
       Kokkos::SpaceAccessibility<src_execution_space,
                                  dst_memory_space>::accessible;
 
-  if (DstExecCanAccessSrc)
-    Kokkos::Impl::ViewRemap<dst_type, src_type, dst_execution_space>(dst, src);
-  else if (SrcExecCanAccessDst)
-    Kokkos::Impl::ViewRemap<dst_type, src_type, src_execution_space>(dst, src);
+  if (DstExecCanAccessSrc || SrcExecCanAccessDst)
+    Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
   else
     src.impl_get_chunks().deep_copy_to(dst_execution_space{},
                                        dst.impl_get_chunks());
@@ -857,10 +808,8 @@ inline void deep_copy(const ExecutionSpace& exec,
                                  dst_memory_space>::accessible;
 
   // FIXME use execution space
-  if (DstExecCanAccessSrc)
-    Kokkos::Impl::ViewRemap<dst_type, src_type, dst_execution_space>(dst, src);
-  else if (SrcExecCanAccessDst)
-    Kokkos::Impl::ViewRemap<dst_type, src_type, src_execution_space>(dst, src);
+  if (DstExecCanAccessSrc || SrcExecCanAccessDst)
+    Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
   else
     src.impl_get_chunks().deep_copy_to(exec, dst.impl_get_chunks());
 }
@@ -874,53 +823,45 @@ inline void deep_copy(const View<T, DP...>& dst,
   using dst_execution_space = typename ViewTraits<T, DP...>::execution_space;
   using src_memory_space    = typename ViewTraits<T, SP...>::memory_space;
 
-  enum {
-    DstExecCanAccessSrc =
-        Kokkos::SpaceAccessibility<dst_execution_space,
-                                   src_memory_space>::accessible
-  };
+  constexpr bool DstExecCanAccessSrc =
+      Kokkos::SpaceAccessibility<dst_execution_space,
+                                 src_memory_space>::accessible;
+  static_assert(
+      DstExecCanAccessSrc,
+      "deep_copy given views that would require a temporary allocation");
 
-  if (DstExecCanAccessSrc) {
-    // Copying data between views in accessible memory spaces and either
-    // non-contiguous or incompatible shape.
-    Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
-    Kokkos::fence("Kokkos::deep_copy(DynamicView)");
-  } else {
-    Kokkos::Impl::throw_runtime_exception(
-        "deep_copy given views that would require a temporary allocation");
-  }
+  // Copying data between views in accessible memory spaces and either
+  // non-contiguous or incompatible shape.
+  Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
+  Kokkos::fence("Kokkos::deep_copy(DynamicView)");
 }
 
 template <class T, class... DP, class... SP>
 inline void deep_copy(const Kokkos::Experimental::DynamicView<T, DP...>& dst,
                       const View<T, SP...>& src) {
-  using dst_type = Kokkos::Experimental::DynamicView<T, SP...>;
-  using src_type = View<T, DP...>;
+  using dst_type = Kokkos::Experimental::DynamicView<T, DP...>;
+  using src_type = View<T, SP...>;
 
   using dst_execution_space = typename ViewTraits<T, DP...>::execution_space;
   using src_memory_space    = typename ViewTraits<T, SP...>::memory_space;
 
-  enum {
-    DstExecCanAccessSrc =
-        Kokkos::SpaceAccessibility<dst_execution_space,
-                                   src_memory_space>::accessible
-  };
+  constexpr bool DstExecCanAccessSrc =
+      Kokkos::SpaceAccessibility<dst_execution_space,
+                                 src_memory_space>::accessible;
+  static_assert(
+      DstExecCanAccessSrc,
+      "deep_copy given views that would require a temporary allocation");
 
-  if (DstExecCanAccessSrc) {
-    // Copying data between views in accessible memory spaces and either
-    // non-contiguous or incompatible shape.
-    Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
-    Kokkos::fence("Kokkos::deep_copy(DynamicView)");
-  } else {
-    Kokkos::Impl::throw_runtime_exception(
-        "deep_copy given views that would require a temporary allocation");
-  }
+  // Copying data between views in accessible memory spaces and either
+  // non-contiguous or incompatible shape.
+  Kokkos::Impl::ViewRemap<dst_type, src_type>(dst, src);
+  Kokkos::fence("Kokkos::deep_copy(DynamicView)");
 }
 
 namespace Impl {
 template <class Arg0, class... DP, class... SP>
 struct CommonSubview<Kokkos::Experimental::DynamicView<DP...>,
-                     Kokkos::Experimental::DynamicView<SP...>, 1, Arg0> {
+                     Kokkos::Experimental::DynamicView<SP...>, Arg0> {
   using DstType          = Kokkos::Experimental::DynamicView<DP...>;
   using SrcType          = Kokkos::Experimental::DynamicView<SP...>;
   using dst_subview_type = DstType;
@@ -932,8 +873,7 @@ struct CommonSubview<Kokkos::Experimental::DynamicView<DP...>,
 };
 
 template <class... DP, class SrcType, class Arg0>
-struct CommonSubview<Kokkos::Experimental::DynamicView<DP...>, SrcType, 1,
-                     Arg0> {
+struct CommonSubview<Kokkos::Experimental::DynamicView<DP...>, SrcType, Arg0> {
   using DstType          = Kokkos::Experimental::DynamicView<DP...>;
   using dst_subview_type = DstType;
   using src_subview_type = typename Kokkos::Subview<SrcType, Arg0>;
@@ -944,8 +884,7 @@ struct CommonSubview<Kokkos::Experimental::DynamicView<DP...>, SrcType, 1,
 };
 
 template <class DstType, class... SP, class Arg0>
-struct CommonSubview<DstType, Kokkos::Experimental::DynamicView<SP...>, 1,
-                     Arg0> {
+struct CommonSubview<DstType, Kokkos::Experimental::DynamicView<SP...>, Arg0> {
   using SrcType          = Kokkos::Experimental::DynamicView<SP...>;
   using dst_subview_type = typename Kokkos::Subview<DstType, Arg0>;
   using src_subview_type = SrcType;
@@ -972,7 +911,7 @@ struct ViewCopy<Kokkos::Experimental::DynamicView<DP...>, ViewTypeB, Layout,
   }
 
   KOKKOS_INLINE_FUNCTION
-  void operator()(const iType& i0) const { a(i0) = b(i0); };
+  void operator()(const iType& i0) const { a(i0) = b(i0); }
 };
 
 template <class... DP, class... SP, class Layout, class ExecSpace,
@@ -993,98 +932,58 @@ struct ViewCopy<Kokkos::Experimental::DynamicView<DP...>,
   }
 
   KOKKOS_INLINE_FUNCTION
-  void operator()(const iType& i0) const { a(i0) = b(i0); };
+  void operator()(const iType& i0) const { a(i0) = b(i0); }
 };
 
 }  // namespace Impl
 
-template <class... ViewCtorArgs, class T, class... P>
+// create a mirror view and deep copy it
+// public interface that accepts arbitrary view constructor args passed by a
+// view_alloc
+template <class... ViewCtorArgs, class T, class... P,
+          class Enable = std::enable_if_t<
+              std::is_void_v<typename ViewTraits<T, P...>::specialize>>>
 auto create_mirror_view_and_copy(
-    const Impl::ViewCtorProp<ViewCtorArgs...>&,
-    const Kokkos::Experimental::DynamicView<T, P...>& src,
-    std::enable_if_t<
-        std::is_void<typename ViewTraits<T, P...>::specialize>::value &&
-        Impl::MirrorDynamicViewType<
-            typename Impl::ViewCtorProp<ViewCtorArgs...>::memory_space, T,
-            P...>::is_same_memspace>* = nullptr) {
+    [[maybe_unused]] const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
+    const Kokkos::Experimental::DynamicView<T, P...>& src) {
   using alloc_prop_input = Impl::ViewCtorProp<ViewCtorArgs...>;
-  static_assert(
-      alloc_prop_input::has_memory_space,
-      "The view constructor arguments passed to "
-      "Kokkos::create_mirror_view_and_copy must include a memory space!");
-  static_assert(!alloc_prop_input::has_pointer,
-                "The view constructor arguments passed to "
-                "Kokkos::create_mirror_view_and_copy must "
-                "not include a pointer!");
-  static_assert(!alloc_prop_input::allow_padding,
-                "The view constructor arguments passed to "
-                "Kokkos::create_mirror_view_and_copy must "
-                "not explicitly allow padding!");
 
-  // same behavior as deep_copy(src, src)
-  if (!alloc_prop_input::has_execution_space)
-    fence(
-        "Kokkos::create_mirror_view_and_copy: fence before returning src view");
-  return src;
+  Impl::check_view_ctor_args_create_mirror_view_and_copy<ViewCtorArgs...>();
+
+  if constexpr (Impl::MirrorDynamicViewType<
+                    typename Impl::ViewCtorProp<ViewCtorArgs...>::memory_space,
+                    T, P...>::is_same_memspace) {
+    // same behavior as deep_copy(src, src)
+    if constexpr (!alloc_prop_input::has_execution_space)
+      fence(
+          "Kokkos::create_mirror_view_and_copy: fence before returning src "
+          "view");
+    return src;
+  } else {
+    using Space = typename alloc_prop_input::memory_space;
+    using Mirror =
+        typename Impl::MirrorDynamicViewType<Space, T, P...>::view_type;
+
+    auto arg_prop_copy = Impl::with_properties_if_unset(
+        arg_prop, std::string{}, WithoutInitializing,
+        typename Space::execution_space{});
+
+    std::string& label = Impl::get_property<Impl::LabelTag>(arg_prop_copy);
+    if (label.empty()) label = src.label();
+    auto mirror = typename Mirror::non_const_type(
+        arg_prop_copy, src.chunk_size(), src.chunk_max() * src.chunk_size());
+    mirror.resize_serial(src.extent(0));
+    if constexpr (alloc_prop_input::has_execution_space) {
+      deep_copy(Impl::get_property<Impl::ExecutionSpaceTag>(arg_prop_copy),
+                mirror, src);
+    } else
+      deep_copy(mirror, src);
+    return mirror;
+  }
 }
 
-template <class... ViewCtorArgs, class T, class... P>
-auto create_mirror_view_and_copy(
-    const Impl::ViewCtorProp<ViewCtorArgs...>& arg_prop,
-    const Kokkos::Experimental::DynamicView<T, P...>& src,
-    std::enable_if_t<
-        std::is_void<typename ViewTraits<T, P...>::specialize>::value &&
-        !Impl::MirrorDynamicViewType<
-            typename Impl::ViewCtorProp<ViewCtorArgs...>::memory_space, T,
-            P...>::is_same_memspace>* = nullptr) {
-  using alloc_prop_input = Impl::ViewCtorProp<ViewCtorArgs...>;
-  static_assert(
-      alloc_prop_input::has_memory_space,
-      "The view constructor arguments passed to "
-      "Kokkos::create_mirror_view_and_copy must include a memory space!");
-  static_assert(!alloc_prop_input::has_pointer,
-                "The view constructor arguments passed to "
-                "Kokkos::create_mirror_view_and_copy must "
-                "not include a pointer!");
-  static_assert(!alloc_prop_input::allow_padding,
-                "The view constructor arguments passed to "
-                "Kokkos::create_mirror_view_and_copy must "
-                "not explicitly allow padding!");
-  using Space = typename alloc_prop_input::memory_space;
-  using Mirror =
-      typename Impl::MirrorDynamicViewType<Space, T, P...>::view_type;
-
-  // Add some properties if not provided to avoid need for if constexpr
-  using alloc_prop = Impl::ViewCtorProp<
-      ViewCtorArgs...,
-      std::conditional_t<alloc_prop_input::has_label,
-                         std::integral_constant<unsigned int, 12>, std::string>,
-      std::conditional_t<!alloc_prop_input::initialize,
-                         std::integral_constant<unsigned int, 13>,
-                         Impl::WithoutInitializing_t>,
-      std::conditional_t<alloc_prop_input::has_execution_space,
-                         std::integral_constant<unsigned int, 14>,
-                         typename Space::execution_space>>;
-  alloc_prop arg_prop_copy(arg_prop);
-
-  std::string& label =
-      static_cast<Impl::ViewCtorProp<void, std::string>&>(arg_prop_copy).value;
-  if (label.empty()) label = src.label();
-  auto mirror = typename Mirror::non_const_type(
-      arg_prop_copy, src.chunk_size(), src.chunk_max() * src.chunk_size());
-  mirror.resize_serial(src.extent(0));
-  if (alloc_prop_input::has_execution_space) {
-    using ExecutionSpace = typename alloc_prop::execution_space;
-    deep_copy(
-        static_cast<Impl::ViewCtorProp<void, ExecutionSpace>&>(arg_prop_copy)
-            .value,
-        mirror, src);
-  } else
-    deep_copy(mirror, src);
-  return mirror;
-}
-
-template <class Space, class T, class... P>
+template <class Space, class T, class... P,
+          typename Enable = std::enable_if_t<Kokkos::is_space<Space>::value>>
 auto create_mirror_view_and_copy(
     const Space&, const Kokkos::Experimental::DynamicView<T, P...>& src,
     std::string const& name = "") {

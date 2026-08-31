@@ -21,6 +21,7 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "math_const.h"
 #include "memory.h"
 #include "neigh_list.h"
@@ -34,8 +35,12 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairBuckCoulCut::PairBuckCoulCut(LAMMPS *lmp) : Pair(lmp)
+PairBuckCoulCut::PairBuckCoulCut(LAMMPS *lmp) :
+    Pair(lmp), cut_lj(nullptr), cut_ljsq(nullptr), cut_coul(nullptr), cut_coulsq(nullptr),
+    a(nullptr), rho(nullptr), c(nullptr), rhoinv(nullptr), buck1(nullptr), buck2(nullptr),
+    offset(nullptr)
 {
+  born_matrix_enable = 1;
   writedata = 1;
 }
 
@@ -223,7 +228,7 @@ void PairBuckCoulCut::settings(int narg, char **arg)
 
 void PairBuckCoulCut::coeff(int narg, char **arg)
 {
-  if (narg < 5 || narg > 7) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg < 5 || narg > 7) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi, jlo, jhi;
@@ -232,7 +237,7 @@ void PairBuckCoulCut::coeff(int narg, char **arg)
 
   double a_one = utils::numeric(FLERR, arg[2], false, lmp);
   double rho_one = utils::numeric(FLERR, arg[3], false, lmp);
-  if (rho_one <= 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (rho_one <= 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   double c_one = utils::numeric(FLERR, arg[4], false, lmp);
 
   double cut_lj_one = cut_lj_global;
@@ -253,7 +258,7 @@ void PairBuckCoulCut::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -273,7 +278,9 @@ void PairBuckCoulCut::init_style()
 
 double PairBuckCoulCut::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR, "All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status:\n" + Info::get_pair_coeff_status(lmp));
 
   double cut = MAX(cut_lj[i][j], cut_coul[i][j]);
   cut_ljsq[i][j] = cut_lj[i][j] * cut_lj[i][j];
@@ -471,6 +478,43 @@ double PairBuckCoulCut::single(int i, int j, int itype, int jtype, double rsq, d
     eng += factor_lj * phibuck;
   }
   return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairBuckCoulCut::born_matrix(int i, int j, int itype, int jtype, double rsq,
+                                  double factor_coul, double factor_lj, double &dupair,
+                                  double &du2pair)
+{
+  double rinv, r2inv, r3inv, r6inv, r7inv, r8inv, r, rexp;
+  double du_lj, du2_lj, du_coul, du2_coul;
+
+  double *q = atom->q;
+  double qqrd2e = force->qqrd2e;
+
+  r = sqrt(rsq);
+  rexp = exp(-r * rhoinv[itype][jtype]);
+
+  r2inv = 1.0 / rsq;
+  rinv = sqrt(r2inv);
+  r3inv = r2inv * rinv;
+  r6inv = r2inv * r2inv * r2inv;
+  r7inv = r6inv * rinv;
+  r8inv = r6inv * r2inv;
+
+  // Reminder: buck1[itype][jtype] = a[itype][jtype]/rho[itype][jtype];
+  // Reminder: buck2[itype][jtype] = 6.0*c[itype][jtype];
+
+  du_lj = buck2[itype][jtype] * r7inv - buck1[itype][jtype] * rexp;
+  du2_lj = (buck1[itype][jtype] / rho[itype][jtype]) * rexp - 7 * buck2[itype][jtype] * r8inv;
+
+  // Reminder: qqrd2e converts  q^2/r to energy w/ dielectric constant
+
+  du_coul = -qqrd2e * q[i] * q[j] * r2inv;
+  du2_coul = 2.0 * qqrd2e * q[i] * q[j] * r3inv;
+
+  dupair = factor_lj * du_lj + factor_coul * du_coul;
+  du2pair = factor_lj * du2_lj + factor_coul * du2_coul;
 }
 
 /* ---------------------------------------------------------------------- */

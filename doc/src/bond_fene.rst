@@ -1,8 +1,10 @@
 .. index:: bond_style fene
-.. index:: bond_style fene/nm
 .. index:: bond_style fene/intel
 .. index:: bond_style fene/kk
 .. index:: bond_style fene/omp
+.. index:: bond_style fene/nm
+.. index:: bond_style fene/nm/kk
+.. index:: bond_style fene/nm/omp
 
 bond_style fene command
 =======================
@@ -11,6 +13,8 @@ Accelerator Variants: *fene/intel*, *fene/kk*, *fene/omp*
 
 bond_style fene/nm command
 ==========================
+
+Accelerator Variants: *fene/nm/kk*, *fene/nm/omp*
 
 Syntax
 """"""
@@ -51,7 +55,7 @@ in the same form as in pair style :doc:`nm/cut <pair_nm>`. The bond energy is th
 
 .. math::
 
-  E = -0.5 K r_0^2  \ln \left[ 1 - \left(\frac{r}{R_0}\right)^2\right] + \frac{E_0}{(n-m)} \left[ m \left(\frac{r_0}{r}\right)^n - n \left(\frac{r_0}{r}\right)^m \right]
+  E = -0.5 K R_0^2  \ln \left[ 1 - \left(\frac{r}{R_0}\right)^2\right] + \frac{E_0}{(n-m)} \left[ m \left(\frac{r_0}{r}\right)^n - n \left(\frac{r_0}{r}\right)^m \right]
 
 Similar to the *fene* style, the generalized Lennard-Jones is cut off at
 the potential minimum, :math:`r_0`, to be repulsive only.  The following
@@ -89,6 +93,10 @@ The *fene* bond style can only be used if LAMMPS was built with the MOLECULE
 package; the *fene/nm* bond style can only be used if LAMMPS was built
 with the EXTRA-MOLECULE package. See the :doc:`Build package <Build_package>`
 page for more info.
+
+.. versionadded:: 4Jul2026
+
+   The *fene/nm/omp* style
 
 You typically should specify :doc:`special_bonds fene <special_bonds>`
 or :doc:`special_bonds lj/coul 0 1 1 <special_bonds>` to use this bond

@@ -16,7 +16,7 @@
 #include "atom.h"
 #include "domain.h"
 #include "error.h"
-#include "fix_store_peratom.h"
+#include "fix_store_atom.h"
 #include "group.h"
 #include "modify.h"
 #include "update.h"
@@ -29,7 +29,7 @@ using namespace LAMMPS_NS;
 
 ComputeMSD::ComputeMSD(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, arg), id_fix(nullptr)
 {
-  if (narg < 3) error->all(FLERR, "Illegal compute msd command");
+  if (narg < 3) utils::missing_cmd_args(FLERR, "compute msd", error);
 
   vector_flag = 1;
   size_vector = 4;
@@ -53,18 +53,18 @@ ComputeMSD::ComputeMSD(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, a
       avflag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
     } else
-      error->all(FLERR, "Unknown compute msd keyword: {}", arg[iarg]);
+      error->all(FLERR, iarg, "Unknown compute msd keyword: {}", arg[iarg]);
   }
 
   if (group->dynamic[igroup])
-    error->all(FLERR, "Compute {} is not compatible with dynamic groups", style);
+    error->all(FLERR, 1, "Compute {} is not compatible with dynamic groups", style);
 
   // create a new fix STORE style for reference positions
   // id = compute-ID + COMPUTE_STORE, fix group = compute group
 
   id_fix = utils::strdup(id + std::string("_COMPUTE_STORE"));
-  fix = dynamic_cast<FixStorePeratom *>(
-      modify->add_fix(fmt::format("{} {} STORE/PERATOM 1 3", id_fix, group->names[igroup])));
+  fix = dynamic_cast<FixStoreAtom *>(
+      modify->add_fix(fmt::format("{} {} STORE/ATOM 3 0 0 1", id_fix, group->names[igroup])));
 
   // calculate xu,yu,zu for fix store array
   // skip if reset from restart file
@@ -113,9 +113,7 @@ ComputeMSD::ComputeMSD(LAMMPS *lmp, int narg, char **arg) : Compute(lmp, narg, a
 
 ComputeMSD::~ComputeMSD()
 {
-  // check nfix in case all fixes have already been deleted
-
-  if (modify->nfix) modify->delete_fix(id_fix);
+  modify->delete_fix(id_fix);
 
   delete[] id_fix;
   delete[] vector;
@@ -127,8 +125,9 @@ void ComputeMSD::init()
 {
   // set fix which stores reference atom coords
 
-  fix = dynamic_cast<FixStorePeratom *>(modify->get_fix_by_id(id_fix));
-  if (!fix) error->all(FLERR, "Could not find compute msd fix with ID {}", id_fix);
+  fix = dynamic_cast<FixStoreAtom *>(modify->get_fix_by_id(id_fix));
+  if (!fix)
+    error->all(FLERR, Error::NOLASTLINE, "Could not find compute msd fix with ID {}", id_fix);
 
   // nmsd = # of atoms in group
 
@@ -140,6 +139,12 @@ void ComputeMSD::init()
 
 void ComputeMSD::compute_vector()
 {
+  // check that nmsd is unchanged
+
+  int newnmsd = group->count(igroup);
+  if (newnmsd != nmsd)
+    error->all(FLERR, Error::NOLASTLINE, "Number of atoms in compute msd group must not change.");
+
   invoked_vector = update->ntimestep;
 
   // cm = current center of mass

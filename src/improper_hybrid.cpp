@@ -20,16 +20,16 @@
 #include "memory.h"
 #include "neighbor.h"
 
-#include <cctype>
 #include <cstring>
 
 using namespace LAMMPS_NS;
 
-#define EXTRA 1000
+static constexpr int EXTRA = 1000;
 
 /* ---------------------------------------------------------------------- */
 
-ImproperHybrid::ImproperHybrid(LAMMPS *lmp) : Improper(lmp)
+ImproperHybrid::ImproperHybrid(LAMMPS *lmp) :
+    Improper(lmp), styles(nullptr), keywords(nullptr), map(nullptr)
 {
   writedata = 0;
   nstyles = 0;
@@ -49,14 +49,7 @@ ImproperHybrid::~ImproperHybrid()
     delete[] keywords;
   }
 
-  if (allocated) {
-    memory->destroy(setflag);
-    memory->destroy(map);
-    delete[] nimproperlist;
-    delete[] maximproper;
-    for (int i = 0; i < nstyles; i++) memory->destroy(improperlist[i]);
-    delete[] improperlist;
-  }
+  ImproperHybrid::deallocate();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -173,6 +166,22 @@ void ImproperHybrid::allocate()
   for (int m = 0; m < nstyles; m++) improperlist[m] = nullptr;
 }
 
+/* ---------------------------------------------------------------------- */
+
+void ImproperHybrid::deallocate()
+{
+  if (!allocated) return;
+
+  allocated = 0;
+
+  memory->destroy(setflag);
+  memory->destroy(map);
+  delete[] nimproperlist;
+  delete[] maximproper;
+  for (int i = 0; i < nstyles; i++) memory->destroy(improperlist[i]);
+  delete[] improperlist;
+}
+
 /* ----------------------------------------------------------------------
    create one improper style for each arg in list
 ------------------------------------------------------------------------- */
@@ -192,15 +201,7 @@ void ImproperHybrid::settings(int narg, char **arg)
     delete[] keywords;
   }
 
-  if (allocated) {
-    memory->destroy(setflag);
-    memory->destroy(map);
-    delete[] nimproperlist;
-    delete[] maximproper;
-    for (i = 0; i < nstyles; i++) memory->destroy(improperlist[i]);
-    delete[] improperlist;
-  }
-  allocated = 0;
+  deallocate();
 
   // allocate list of sub-styles
 
@@ -232,7 +233,7 @@ void ImproperHybrid::settings(int narg, char **arg)
     // by looking for the next known improper style name.
 
     int jarg = i + 1;
-    while ((jarg < narg) && !force->improper_map->count(arg[jarg]) &&
+    while ((jarg < narg) && !Force::improper_styles().contains(arg[jarg]) &&
            !lmp->match_style("improper", arg[jarg]))
       jarg++;
 
@@ -270,7 +271,8 @@ void ImproperHybrid::coeff(int narg, char **arg)
     else if (strcmp(arg[1], "aa") == 0)
       error->all(FLERR, "AngleAngle coeff for hybrid improper has invalid format");
     else
-      error->all(FLERR, "Improper coeff for hybrid has invalid style");
+      error->all(FLERR, "Expected hybrid sub-style instead of {} in improper_coeff command",
+                 arg[1]);
   }
 
   // move 1st arg to 2nd arg
@@ -305,8 +307,26 @@ void ImproperHybrid::coeff(int narg, char **arg)
 
 void ImproperHybrid::init_style()
 {
+  // error if sub-style is not used
+
+  int used;
+  for (int istyle = 0; istyle < nstyles; ++istyle) {
+    used = 0;
+    for (int itype = 1; itype <= atom->nimpropertypes; ++itype)
+      if (map[itype] == istyle) used = 1;
+    if (used == 0) error->all(FLERR, "Improper hybrid sub-style {} is not used", keywords[istyle]);
+  }
+
   for (int m = 0; m < nstyles; m++)
     if (styles[m]) styles[m]->init_style();
+}
+
+/* ---------------------------------------------------------------------- */
+
+int ImproperHybrid::check_itype(int itype, char *substyle)
+{
+  if (strcmp(keywords[map[itype]], substyle) == 0) return 1;
+  return 0;
 }
 
 /* ----------------------------------------------------------------------
@@ -335,6 +355,8 @@ void ImproperHybrid::read_restart(FILE *fp)
   int me = comm->me;
   if (me == 0) utils::sfread(FLERR, &nstyles, sizeof(int), 1, fp, nullptr, error);
   MPI_Bcast(&nstyles, 1, MPI_INT, 0, world);
+  if ((nstyles < 1) || (nstyles > 64))
+    error->all(FLERR, "Invalid number of sub-styles in restart file");
   styles = new Improper *[nstyles];
   keywords = new char *[nstyles];
 
@@ -344,10 +366,11 @@ void ImproperHybrid::read_restart(FILE *fp)
   for (int m = 0; m < nstyles; m++) {
     if (me == 0) utils::sfread(FLERR, &n, sizeof(int), 1, fp, nullptr, error);
     MPI_Bcast(&n, 1, MPI_INT, 0, world);
+    if ((n < 1) || (n > 65536)) error->all(FLERR, "Invalid style name length in restart file");
     keywords[m] = new char[n];
     if (me == 0) utils::sfread(FLERR, keywords[m], sizeof(char), n, fp, nullptr, error);
     MPI_Bcast(keywords[m], n, MPI_CHAR, 0, world);
-    styles[m] = force->new_improper(keywords[m], 0, dummy);
+    styles[m] = force->new_improper(keywords[m], 1, dummy);
     styles[m]->read_restart_settings(fp);
   }
 }

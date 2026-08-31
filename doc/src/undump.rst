@@ -6,7 +6,7 @@ undump command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    undump dump-ID
 
@@ -28,7 +28,7 @@ This closes the file associated with the dump.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

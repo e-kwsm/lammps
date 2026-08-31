@@ -26,7 +26,7 @@ namespace LAMMPS_NS {
 
 class ComputeReduce : public Compute {
  public:
-  enum { SUM, SUMSQ, SUMABS, MINN, MAXX, AVE, AVESQ, AVEABS };
+  enum { SUM, SUMSQ, SUMABS, MINN, MAXX, AVE, AVESQ, AVEABS, MINABS, MAXABS };
   enum { PERATOM, LOCAL };
 
   ComputeReduce(class LAMMPS *, int, char **);
@@ -34,15 +34,18 @@ class ComputeReduce : public Compute {
   void init() override;
   double compute_scalar() override;
   void compute_vector() override;
+  std::string get_thermo_colname(int) override;
   double memory_usage() override;
 
  protected:
-  int mode, nvalues;
+  int mode, nvalues, input_mode;
+  std::string modestr;
+
   struct value_t {
     int which;
     int argindex;
+    int iarg;
     std::string id;
-    int flavor;
     union {
       class Compute *c;
       class Fix *f;
@@ -50,8 +53,10 @@ class ComputeReduce : public Compute {
     } val;
   };
   std::vector<value_t> values;
+  [[nodiscard]] std::string valstring(int) const;
   double *onevec;
   int *replace, *indices, *owner;
+  MPI_Op scalar_reduction_operation;
 
   int index;
   char *idregion;

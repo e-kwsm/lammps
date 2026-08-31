@@ -1,3 +1,4 @@
+# -*- CMake -*- file for tests of file reading or writing classes and functions in LAMMPS
 
 add_executable(test_atom_styles test_atom_styles.cpp)
 target_link_libraries(test_atom_styles PRIVATE lammps GTest::GMock)
@@ -32,6 +33,15 @@ if(PKG_MANYBODY)
     set_tests_properties(EIMPotentialFileReader PROPERTIES ENVIRONMENT "LAMMPS_POTENTIALS=${LAMMPS_POTENTIALS_DIR}")
 endif()
 
+add_executable(test_vtk_writer test_vtk_writer.cpp)
+target_link_libraries(test_vtk_writer PRIVATE lammps GTest::GMock)
+if(WITH_ZLIB)
+    # so that the test can inflate the compressed payloads it checks
+    target_compile_definitions(test_vtk_writer PRIVATE -DLAMMPS_ZLIB)
+    target_link_libraries(test_vtk_writer PRIVATE ZLIB::ZLIB)
+endif()
+add_test(NAME VTKWriter COMMAND test_vtk_writer)
+
 add_executable(test_text_file_reader test_text_file_reader.cpp)
 target_link_libraries(test_text_file_reader PRIVATE lammps GTest::GMock)
 add_test(NAME TextFileReader COMMAND test_text_file_reader)
@@ -40,6 +50,8 @@ set_tests_properties(TextFileReader PROPERTIES ENVIRONMENT "LAMMPS_POTENTIALS=${
 add_executable(test_file_operations test_file_operations.cpp)
 target_link_libraries(test_file_operations PRIVATE lammps GTest::GMock)
 add_test(NAME FileOperations COMMAND test_file_operations)
+# try to mitigate possible OpenMPI bug
+set_tests_properties(TextFileReader PROPERTIES ENVIRONMENT "OMPI_MCA_sharedfp=\"^sm\"")
 
 add_executable(test_dump_atom test_dump_atom.cpp)
 target_link_libraries(test_dump_atom PRIVATE lammps GTest::GMock)
@@ -114,6 +126,20 @@ add_executable(test_dump_local test_dump_local.cpp)
 target_link_libraries(test_dump_local PRIVATE lammps GTest::GMock)
 add_test(NAME DumpLocal COMMAND test_dump_local)
 set_tests_properties(DumpLocal PROPERTIES ENVIRONMENT "LAMMPS_POTENTIALS=${LAMMPS_POTENTIALS_DIR}")
+
+add_executable(test_dump_grid test_dump_grid.cpp)
+target_link_libraries(test_dump_grid PRIVATE lammps GTest::GMock)
+add_test(NAME DumpGrid COMMAND test_dump_grid)
+
+if(PKG_EXTRA-DUMP)
+  add_executable(test_dump_vtk test_dump_vtk.cpp)
+  target_link_libraries(test_dump_vtk PRIVATE lammps GTest::GMock)
+  add_test(NAME DumpVTK COMMAND test_dump_vtk)
+
+  add_executable(test_dump_vtk_mpi test_dump_vtk_mpi.cpp)
+  target_link_libraries(test_dump_vtk_mpi PRIVATE lammps GTest::GMock)
+  add_mpi_test(NAME DumpVTKMPI NUM_PROCS 4 COMMAND $<TARGET_FILE:test_dump_vtk_mpi>)
+endif()
 
 if(PKG_NETCDF)
   find_program(NCDUMP NAMES ncdump ncdump.exe)

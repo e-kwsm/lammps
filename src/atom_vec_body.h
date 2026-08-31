@@ -22,11 +22,21 @@ AtomStyle(body,AtomVecBody);
 
 #include "atom_vec.h"
 
+#include "creator_registry.h"
+
 namespace LAMMPS_NS {
 
+class Body;
+
 class AtomVecBody : public AtomVec {
+ friend class CreateAtoms;
  public:
   class Body *bptr;
+
+  using BodyCreator = Body *(*)(LAMMPS *, int, char **);
+
+  // global registry of body style factory functions
+  static CreatorRegistry<BodyCreator> &body_styles();
 
   struct Bonus {
     double quat[4];
@@ -66,6 +76,10 @@ class AtomVecBody : public AtomVec {
   int pack_data_bonus(double *, int) override;
   void write_data_bonus(FILE *, int, double *, int) override;
 
+  void read_data_general_to_restricted(int, int) override;
+  void write_data_restricted_to_general() override;
+  void write_data_restore_restricted() override;
+
   // methods used by other classes to query/set body info
 
   double radius_body(int, int, int *, double *);
@@ -73,10 +87,11 @@ class AtomVecBody : public AtomVec {
 
   int nlocal_bonus;
 
- private:
+ protected:
   int *body;
   double *rmass, *radius;
   double **angmom;
+  double **quat_hold;
 
   int nghost_bonus, nmax_bonus;
   int intdoubleratio;    // sizeof(double) / sizeof(int)
@@ -87,7 +102,6 @@ class AtomVecBody : public AtomVec {
 
   void grow_bonus();
   void copy_bonus_all(int, int);
-  // check(int);
 };
 
 }    // namespace LAMMPS_NS

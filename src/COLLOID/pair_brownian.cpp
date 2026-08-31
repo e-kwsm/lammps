@@ -36,19 +36,15 @@
 #include "variable.h"
 
 #include <cmath>
-#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-// same as fix_wall.cpp
-
-enum { EDGE, CONSTANT, VARIABLE };
-
 /* ---------------------------------------------------------------------- */
 
-PairBrownian::PairBrownian(LAMMPS *lmp) : Pair(lmp)
+PairBrownian::PairBrownian(LAMMPS *lmp) :
+    Pair(lmp), wallfix(nullptr), cut_inner(nullptr), cut(nullptr)
 {
   single_enable = 0;
   random = nullptr;
@@ -58,6 +54,8 @@ PairBrownian::PairBrownian(LAMMPS *lmp) : Pair(lmp)
 
 PairBrownian::~PairBrownian()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -92,7 +90,6 @@ void PairBrownian::compute(int eflag, int vflag)
   double prethermostat;
   double xl[3], a_sq, a_sh, a_pu, Fbmag;
   double p1[3], p2[3], p3[3];
-  int overlaps = 0;
 
   // This section of code adjusts R0/RT0/RS0 if necessary due to changes
   // in the volume fraction as a result of fix deform or moving walls
@@ -111,7 +108,7 @@ void PairBrownian::compute(int eflag, int vflag)
         for (int m = 0; m < wallfix->nwall; m++) {
           int dim = wallfix->wallwhich[m] / 2;
           int side = wallfix->wallwhich[m] % 2;
-          if (wallfix->xstyle[m] == VARIABLE) {
+          if (wallfix->xstyle[m] == FixWall::VARIABLE) {
             wallcoord = input->variable->compute_equal(wallfix->xindex[m]);
           } else
             wallcoord = wallfix->coord0[m];
@@ -186,10 +183,6 @@ void PairBrownian::compute(int eflag, int vflag)
         // scalar resistances a_sq and a_sh
 
         h_sep = r - 2.0 * radi;
-
-        // check for overlaps
-
-        if (h_sep < 0.0) overlaps++;
 
         // if less than minimum gap, use minimum gap instead
 
@@ -336,9 +329,6 @@ void PairBrownian::compute(int eflag, int vflag)
     }
   }
 
-  int print_overlaps = 0;
-  if (print_overlaps && overlaps) printf("Number of overlaps=%d\n", overlaps);
-
   if (vflag_fdotr) virial_fdotr_compute();
 }
 
@@ -413,7 +403,7 @@ void PairBrownian::settings(int narg, char **arg)
 
 void PairBrownian::coeff(int narg, char **arg)
 {
-  if (narg != 2 && narg != 4) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg != 2 && narg != 4) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 
   if (!allocated) allocate();
 
@@ -438,7 +428,7 @@ void PairBrownian::coeff(int narg, char **arg)
       count++;
     }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -447,7 +437,7 @@ void PairBrownian::coeff(int narg, char **arg)
 
 void PairBrownian::init_style()
 {
-  if (!atom->sphere_flag) error->all(FLERR, "Pair brownian requires atom style sphere");
+  if (!atom->radius_flag) error->all(FLERR, "Pair brownian requires atom attribute radius");
 
   // if newton off, forces between atoms ij will be double computed
   // using different random numbers
@@ -457,7 +447,7 @@ void PairBrownian::init_style()
 
   neighbor->add_request(this);
 
-  // insure all particles are finite-size
+  // ensure all particles are finite-size
   // for pair hybrid, should limit test to types using the pair style
 
   double *radius = atom->radius;
@@ -488,15 +478,18 @@ void PairBrownian::init_style()
   // are re-calculated at every step.
 
   flagdeform = flagwall = 0;
-  for (int i = 0; i < modify->nfix; i++) {
-    if (strcmp(modify->fix[i]->style, "deform") == 0)
-      flagdeform = 1;
-    else if (strstr(modify->fix[i]->style, "wall") != nullptr) {
-      if (flagwall) error->all(FLERR, "Cannot use multiple fix wall commands with pair brownian");
-      flagwall = 1;    // Walls exist
-      wallfix = dynamic_cast<FixWall *>(modify->fix[i]);
-      if (wallfix->xflag) flagwall = 2;    // Moving walls exist
-    }
+  wallfix = nullptr;
+
+  if (!modify->get_fix_by_style("^deform").empty()) flagdeform = 1;
+  auto fixes = modify->get_fix_by_style("^wall");
+  if (fixes.size() > 1)
+    error->all(FLERR, "Cannot use multiple fix wall commands with pair brownian");
+  else if (fixes.size() == 1) {
+    wallfix = dynamic_cast<FixWall *>(fixes[0]);
+    if (!wallfix)
+      error->all(FLERR, "Fix {} is not compatible with pair brownian", fixes[0]->style);
+    flagwall = 1;
+    if (wallfix->xflag) flagwall = 2; // Moving walls exist
   }
 
   // set the isotropic constants depending on the volume fraction
@@ -514,7 +507,7 @@ void PairBrownian::init_style()
     for (int m = 0; m < wallfix->nwall; m++) {
       int dim = wallfix->wallwhich[m] / 2;
       int side = wallfix->wallwhich[m] % 2;
-      if (wallfix->xstyle[m] == VARIABLE) {
+      if (wallfix->xstyle[m] == FixWall::VARIABLE) {
         wallfix->xindex[m] = input->variable->find(wallfix->xstr[m]);
         // Since fix->wall->init happens after pair->init_style
         wallcoord = input->variable->compute_equal(wallfix->xindex[m]);

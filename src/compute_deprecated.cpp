@@ -28,6 +28,12 @@ ComputeDeprecated::ComputeDeprecated(LAMMPS *lmp, int narg, char **arg) : Comput
     if (lmp->comm->me == 0)
       utils::logmesg(lmp, "\nCompute style 'DEPRECATED' is a dummy style\n\n");
     return;
+  } else if (my_style == "mesont") {
+    if (lmp->comm->me == 0)
+      utils::logmesg(lmp,
+                     "\nCompute style 'mesont' and the associated pair style have been "
+                     "removed. Please use pair style 'mesocnt' instead.\n\n");
   }
-  error->all(FLERR, "This compute style is no longer available");
+  error->all(FLERR, Error::ARGZERO, "Compute style {} is no longer available. {}", my_style,
+             utils::errorurl(38));
 }

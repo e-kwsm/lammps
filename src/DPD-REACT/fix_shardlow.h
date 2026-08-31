@@ -21,7 +21,10 @@ FixStyle(shardlow,FixShardlow);
 #define LMP_FIX_SHARDLOW_H
 
 #include "fix.h"
-#include "random_external_state.h"
+
+namespace random_external_state {
+using es_RNG_t = uint64_t;
+}
 
 namespace LAMMPS_NS {
 
@@ -44,12 +47,12 @@ class FixShardlow : public Fix {
   int hist[32];
 #endif
 
- protected:
   int pack_reverse_comm(int, int, double *) override;
   void unpack_reverse_comm(int, int *, double *) override;
   int pack_forward_comm(int, int *, double *, int, int *) override;
   void unpack_forward_comm(int, int, double *) override;
 
+ protected:
   class PairDPDfdt *pairDPD;
   class PairDPDfdtEnergy *pairDPDE;
   double (*v_t0)[3];

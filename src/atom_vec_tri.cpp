@@ -24,15 +24,20 @@
 #include "modify.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
-using MathConst::MY_PI;
 
 static constexpr double EPSILON = 0.001;
 
+// non-tri particles are point-particles or finite-size spheroids
+
+enum { POINT, SPHERE };
+
 /* ---------------------------------------------------------------------- */
 
-AtomVecTri::AtomVecTri(LAMMPS *lmp) : AtomVec(lmp)
+AtomVecTri::AtomVecTri(LAMMPS *lmp) :
+    AtomVec(lmp), tri(nullptr), radius(nullptr), rmass(nullptr), omega(nullptr), angmom(nullptr)
 {
   molecular = Atom::ATOMIC;
   bonus_flag = 1;
@@ -46,10 +51,11 @@ AtomVecTri::AtomVecTri(LAMMPS *lmp) : AtomVec(lmp)
   atom->molecule_flag = atom->rmass_flag = 1;
   atom->radius_flag = atom->omega_flag = atom->angmom_flag = 1;
   atom->torque_flag = 1;
-  atom->sphere_flag = 1;
 
   nlocal_bonus = nghost_bonus = nmax_bonus = 0;
   bonus = nullptr;
+
+  particle_style = POINT;
 
   // strings with peratom variables to include in each AtomVec method
   // strings cannot contain fields in corresponding AtomVec default strings
@@ -61,7 +67,7 @@ AtomVecTri::AtomVecTri(LAMMPS *lmp) : AtomVec(lmp)
   fields_comm_vel = {"omega", "angmom"};
   fields_reverse = {"torque"};
   fields_border = {"molecule", "radius", "rmass"};
-  fields_border_vel = {"molecule", "radius", "rmass", "omega"};
+  fields_border_vel = {"molecule", "radius", "rmass", "omega", "angmom"};
   fields_exchange = {"molecule", "radius", "rmass", "omega", "angmom"};
   fields_restart = {"molecule", "radius", "rmass", "omega", "angmom"};
   fields_create = {"molecule", "radius", "rmass", "omega", "angmom", "tri"};
@@ -76,6 +82,15 @@ AtomVecTri::AtomVecTri(LAMMPS *lmp) : AtomVec(lmp)
 AtomVecTri::~AtomVecTri()
 {
   memory->sfree(bonus);
+}
+
+/* ----------------------------------------------------------------------
+   called by AtomVecHybrid if another sub-style defines finite-size particlces
+------------------------------------------------------------------------- */
+
+void AtomVecTri::set_sphere()
+{
+  particle_style = SPHERE;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -494,11 +509,14 @@ void AtomVecTri::data_atom_bonus(int m, const std::vector<std::string> &values)
   // check for duplicate points
 
   if (c1[0] == c2[0] && c1[1] == c2[1] && c1[2] == c2[2])
-    error->one(FLERR, "Invalid shape in Triangles section of data file");
+    error->one(FLERR, "Invalid shape for triangle atom {} in Triangles section of data file",
+               atom->tag[m]);
   if (c1[0] == c3[0] && c1[1] == c3[1] && c1[2] == c3[2])
-    error->one(FLERR, "Invalid shape in Triangles section of data file");
+    error->one(FLERR, "Invalid shape for triangle atom {} in Triangles section of data file",
+               atom->tag[m]);
   if (c2[0] == c3[0] && c2[1] == c3[1] && c2[2] == c3[2])
-    error->one(FLERR, "Invalid shape in Triangles section of data file");
+    error->one(FLERR, "Invalid shape for triangle atom {} in Triangles section of data file",
+               atom->tag[m]);
 
   // size = length of one edge
 
@@ -507,7 +525,25 @@ void AtomVecTri::data_atom_bonus(int m, const std::vector<std::string> &values)
   MathExtra::sub3(c3, c1, c3mc1);
   double size = MAX(MathExtra::len3(c2mc1), MathExtra::len3(c3mc1));
 
+  // convert c1,c2,c3 from general to restricted triclniic
+  // x is already restricted triclinic
+
+  if (domain->triclinic_general) {
+    domain->general_to_restricted_coords(c1);
+    domain->general_to_restricted_coords(c2);
+    domain->general_to_restricted_coords(c3);
+  }
+
+  // remap corner points to be near x
+  // necessary if atom x was remapped into periodic box
+
+  domain->remap_near(c1,x[m]);
+  domain->remap_near(c2,x[m]);
+  domain->remap_near(c3,x[m]);
+
   // centroid = 1/3 of sum of vertices
+  // error if centroid is not within EPSILON of atom x
+  // reset atom x to centroid
 
   double centroid[3];
   centroid[0] = (c1[0] + c2[0] + c3[0]) / 3.0;
@@ -617,10 +653,18 @@ double AtomVecTri::memory_usage_bonus()
 
 void AtomVecTri::create_atom_post(int ilocal)
 {
-  double radius_one = 0.5;
-  radius[ilocal] = radius_one;
-  rmass[ilocal] = 4.0 * MY_PI / 3.0 * radius_one * radius_one * radius_one;
   tri[ilocal] = -1;
+
+  // if POINT particle
+  //   set radius = 0.0
+  //   set rmass = 1.0 (default, can reset via set mass command)
+  // if SPHERE particle
+  //   radius/rmass are set by another hybrid atom_style, e.g. sphere
+
+  if (particle_style == POINT) {
+    radius[ilocal] = 0.0;
+    rmass[ilocal] = 1.0;
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -641,12 +685,15 @@ void AtomVecTri::data_atom_post(int ilocal)
 
   if (rmass[ilocal] <= 0.0) error->one(FLERR, "Invalid density in Atoms section of data file");
 
-  if (tri_flag < 0) {
-    double radius_one = 0.5;
-    radius[ilocal] = radius_one;
-    rmass[ilocal] *= 4.0 * MY_PI / 3.0 * radius_one * radius_one * radius_one;
-  } else
-    radius[ilocal] = 0.0;
+  // if POINT particle
+  //   set radius = 0.0
+  //   leave rmass as-is, since data file defines it as per-particle mass
+  // if SPHERE particle
+  //   radius/rmass are set by another hybrid atom_style, e.g. sphere
+  // if TRI particle
+  //   radius/rmass will be set by data_atom_bonus()
+
+  if (tri_flag < 0 && particle_style == POINT) radius[ilocal] = 0.0;
 
   omega[ilocal][0] = 0.0;
   omega[ilocal][1] = 0.0;
@@ -670,10 +717,14 @@ void AtomVecTri::pack_data_pre(int ilocal)
   else
     tri[ilocal] = 1;
 
-  if (tri_flag < 0) {
-    double radius_one = radius[ilocal];
-    rmass[ilocal] /= 4.0 * MY_PI / 3.0 * radius_one * radius_one * radius_one;
-  } else {
+  // if POINT particle
+  //   leave rmass as-is, since data file defines it as per-particle mass
+  // if SPHERE particle
+  //   rmass is reset to density by another hybrid atom_style, e.g. sphere
+  // if TRI particle
+  //   convert rmass to per-area density
+
+  if (tri_flag >= 0) {
     double c2mc1[3], c3mc1[3], norm[3];
     MathExtra::sub3(bonus[tri_flag].c2, bonus[tri_flag].c1, c2mc1);
     MathExtra::sub3(bonus[tri_flag].c3, bonus[tri_flag].c1, c3mc1);
@@ -690,6 +741,12 @@ void AtomVecTri::pack_data_pre(int ilocal)
 void AtomVecTri::pack_data_post(int ilocal)
 {
   tri[ilocal] = tri_flag;
+
+  // if SPHERE particle, just return
+  //   rmass is reset to pre-pack value by another hybrid atom_style, e.g. sphere
+  // else reset rmass for TRI and POINT particles
+
+  if (tri_flag < 0 && particle_style == SPHERE) return;
   rmass[ilocal] = rmass_one;
 }
 
@@ -705,8 +762,12 @@ int AtomVecTri::pack_data_bonus(double *buf, int /*flag*/)
   double dc1[3], dc2[3], dc3[3];
   double p[3][3];
 
-  double **x = atom->x;
-  tagint *tag = atom->tag;
+  int triclinic_general = domain->triclinic_general;
+
+  double **x_bonus;
+  if (triclinic_general) x_bonus = x_hold;
+  else x_bonus = x;
+
   int nlocal = atom->nlocal;
 
   int m = 0;
@@ -719,9 +780,10 @@ int AtomVecTri::pack_data_bonus(double *buf, int /*flag*/)
       MathExtra::matvec(p, bonus[j].c1, dc1);
       MathExtra::matvec(p, bonus[j].c2, dc2);
       MathExtra::matvec(p, bonus[j].c3, dc3);
-      xc = x[i][0];
-      yc = x[i][1];
-      zc = x[i][2];
+
+      xc = x_bonus[i][0];
+      yc = x_bonus[i][1];
+      zc = x_bonus[i][2];
       buf[m++] = xc + dc1[0];
       buf[m++] = yc + dc1[1];
       buf[m++] = zc + dc1[2];
@@ -731,6 +793,17 @@ int AtomVecTri::pack_data_bonus(double *buf, int /*flag*/)
       buf[m++] = xc + dc3[0];
       buf[m++] = yc + dc3[1];
       buf[m++] = zc + dc3[2];
+
+      // if triclinic_general:
+      // rotate 9 buf values from restricted to general triclinic
+      // output by write_data_bonus() as c1,c2,c3
+
+      if (triclinic_general) {
+        domain->restricted_to_general_coords(&buf[m-9]);
+        domain->restricted_to_general_coords(&buf[m-6]);
+        domain->restricted_to_general_coords(&buf[m-3]);
+      }
+
     } else
       m += size_data_bonus;
   }
@@ -745,7 +818,7 @@ void AtomVecTri::write_data_bonus(FILE *fp, int n, double *buf, int /*flag*/)
 {
   int i = 0;
   while (i < n) {
-    fmt::print(fp, "{} {} {} {} {} {} {} {} {} {}\n", ubuf(buf[i]).i, buf[i + 1], buf[i + 2],
+    utils::print(fp, "{} {} {} {} {} {} {} {} {} {}\n", ubuf(buf[i]).i, buf[i + 1], buf[i + 2],
                buf[i + 3], buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7], buf[i + 8], buf[i + 9]);
     i += size_data_bonus;
   }

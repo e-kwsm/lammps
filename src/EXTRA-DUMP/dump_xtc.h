@@ -21,8 +21,8 @@ DumpStyle(xtc,DumpXTC);
 #define LMP_DUMP_XTC_H
 
 #include "dump.h"
-#include "xdr_compat.h"
 
+struct XDR;
 namespace LAMMPS_NS {
 
 class DumpXTC : public Dump {
@@ -30,14 +30,16 @@ class DumpXTC : public Dump {
   DumpXTC(class LAMMPS *, int, char **);
   ~DumpXTC() override;
 
- private:
+  double memory_usage() override;
+
+ protected:
   int natoms, ntotal;
   int nevery_save;
   int unwrap_flag;    // 1 if atom coords are unwrapped, 0 if no
   float precision;    // user-adjustable precision setting
   float *coords;
   double sfactor, tfactor;    // scaling factors for positions and time unit
-  XDR xd;
+  XDR *xd;
 
   void init_style() override;
   int modify_param(int, char **) override;
@@ -45,8 +47,6 @@ class DumpXTC : public Dump {
   void write_header(bigint) override;
   void pack(tagint *) override;
   void write_data(int, double *) override;
-  double memory_usage() override;
-
   void write_frame();
 };
 

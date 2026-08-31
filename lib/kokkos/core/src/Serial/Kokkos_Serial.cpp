@@ -1,58 +1,23 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_IMPL_PUBLIC_INCLUDE
 #define KOKKOS_IMPL_PUBLIC_INCLUDE
 #endif
 
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_EXPERIMENTAL_CXX20_MODULES
+import kokkos.core;
+#else
 #include <Kokkos_Core.hpp>
+#endif
 
-#include <Kokkos_Serial.hpp>
-#include <impl/Kokkos_Traits.hpp>
+#include <Serial/Kokkos_Serial.hpp>
+#include <impl/Kokkos_CheckUsage.hpp>
 #include <impl/Kokkos_Error.hpp>
 #include <impl/Kokkos_ExecSpaceManager.hpp>
 #include <impl/Kokkos_SharedAlloc.hpp>
+#include <impl/Kokkos_Traits.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -63,20 +28,42 @@
 namespace Kokkos {
 namespace Impl {
 
-bool SerialInternal::is_initialized() { return m_is_initialized; }
+std::vector<SerialInternal*> SerialInternal::all_instances;
+std::mutex SerialInternal::all_instances_mutex;
 
-void SerialInternal::initialize() {
-  if (is_initialized()) return;
+HostSharedPtr<SerialInternal> SerialInternal::default_instance;
 
+SerialInternal::SerialInternal() {
   Impl::SharedAllocationRecord<void, void>::tracking_enable();
 
-  // Init the array of locks used for arbitrarily sized atomics
-  Impl::init_lock_array_host_space();
-
-  m_is_initialized = true;
+  // guard pushing to all_instances
+  {
+    std::scoped_lock lock(all_instances_mutex);
+    all_instances.push_back(this);
+  }
 }
 
-void SerialInternal::finalize() {
+void SerialInternal::fence(const std::string& name) {
+#ifdef KOKKOS_ENABLE_ATOMICS_BYPASS
+  auto fence = []() {};
+#else
+  auto fence = [this]() { std::lock_guard<std::mutex> lock(m_instance_mutex); };
+#endif
+  if (Kokkos::Tools::profileLibraryLoaded()) {
+    Kokkos::Tools::Experimental::Impl::profile_fence_event<Kokkos::Serial>(
+        name, Kokkos::Tools::Experimental::Impl::DirectFenceIDHandle{1},
+        fence);  // TODO: correct device ID
+  } else {
+    fence();
+  }
+#ifndef KOKKOS_ENABLE_ATOMICS_BYPASS
+  Kokkos::memory_fence();
+#endif
+}
+
+SerialInternal::~SerialInternal() {
+  fence("Kokkos::SerialInternal: fence on destruction");
+
   if (m_thread_team_data.scratch_buffer()) {
     m_thread_team_data.disband_team();
     m_thread_team_data.disband_pool();
@@ -89,17 +76,16 @@ void SerialInternal::finalize() {
     m_thread_team_data.scratch_assign(nullptr, 0, 0, 0, 0, 0);
   }
 
-  Kokkos::Profiling::finalize();
-
-  m_is_initialized = false;
-}
-
-SerialInternal& SerialInternal::singleton() {
-  static SerialInternal* self = nullptr;
-  if (!self) {
-    self = new SerialInternal();
+  // guard erasing from all_instances
+  {
+    std::scoped_lock lock(all_instances_mutex);
+    auto it = std::find(all_instances.begin(), all_instances.end(), this);
+    if (it == all_instances.end())
+      Kokkos::abort(
+          "Execution space instance to be removed couldn't be found!");
+    std::swap(*it, all_instances.back());
+    all_instances.pop_back();
   }
-  return *self;
 }
 
 // Resize thread team data scratch memory
@@ -130,9 +116,12 @@ void SerialInternal::resize_thread_team_data(size_t pool_reduce_bytes,
       m_thread_team_data.disband_team();
       m_thread_team_data.disband_pool();
 
-      space.deallocate("Kokkos::Serial::scratch_mem",
-                       m_thread_team_data.scratch_buffer(),
-                       m_thread_team_data.scratch_bytes());
+      // impl_deallocate doesn't fence which we try to avoid here since that
+      // interferes with the using the m_instance_mutex for ensuring proper
+      // kernel enqueuing
+      space.impl_deallocate("Kokkos::Serial::scratch_mem",
+                            m_thread_team_data.scratch_buffer(),
+                            m_thread_team_data.scratch_bytes());
     }
 
     if (pool_reduce_bytes < old_pool_reduce) {
@@ -152,13 +141,7 @@ void SerialInternal::resize_thread_team_data(size_t pool_reduce_bytes,
         HostThreadTeamData::scratch_size(pool_reduce_bytes, team_reduce_bytes,
                                          team_shared_bytes, thread_local_bytes);
 
-    void* ptr = nullptr;
-    try {
-      ptr = space.allocate("Kokkos::Serial::scratch_mem", alloc_bytes);
-    } catch (Kokkos::Experimental::RawMemoryAllocationFailure const& failure) {
-      // For now, just rethrow the error message the existing way
-      Kokkos::Impl::throw_runtime_exception(failure.get_error_message());
-    }
+    void* ptr = space.allocate("Kokkos::Serial::scratch_mem", alloc_bytes);
 
     m_thread_team_data.scratch_assign(static_cast<char*>(ptr), alloc_bytes,
                                       pool_reduce_bytes, team_reduce_bytes,
@@ -172,40 +155,39 @@ void SerialInternal::resize_thread_team_data(size_t pool_reduce_bytes,
 }
 }  // namespace Impl
 
+Serial::~Serial() {
+  Impl::check_execution_space_destructor_precondition(name());
+}
+
 Serial::Serial()
-#ifdef KOKKOS_IMPL_WORKAROUND_ICE_IN_TRILINOS_WITH_OLD_INTEL_COMPILERS
-    : m_space_instance(&Impl::SerialInternal::singleton()) {
-}
-#else
-    : m_space_instance(&Impl::SerialInternal::singleton(),
-                       [](Impl::SerialInternal*) {}) {
-}
-#endif
+    : m_space_instance(
+          (Impl::check_execution_space_constructor_precondition(name()),
+           Impl::SerialInternal::default_instance)) {}
+
+Serial::Serial(NewInstance)
+    : m_space_instance(
+          (Impl::check_execution_space_constructor_precondition(name()),
+           new Impl::SerialInternal)) {}
 
 void Serial::print_configuration(std::ostream& os, bool /*verbose*/) const {
   os << "Host Serial Execution Space:\n";
   os << "  KOKKOS_ENABLE_SERIAL: yes\n";
 
-  os << "Serial Atomics:\n";
-  os << "  KOKKOS_ENABLE_SERIAL_ATOMICS: ";
-#ifdef KOKKOS_ENABLE_SERIAL_ATOMICS
-  os << "yes\n";
-#else
-  os << "no\n";
+#ifdef KOKKOS_ENABLE_ATOMICS_BYPASS
+  os << "Kokkos atomics disabled\n";
 #endif
 
   os << "\nSerial Runtime Configuration:\n";
 }
 
-bool Serial::impl_is_initialized() {
-  return Impl::SerialInternal::singleton().is_initialized();
-}
-
 void Serial::impl_initialize(InitializationSettings const&) {
-  Impl::SerialInternal::singleton().initialize();
+  Impl::SerialInternal::default_instance =
+      Impl::HostSharedPtr(new Impl::SerialInternal);
 }
 
-void Serial::impl_finalize() { Impl::SerialInternal::singleton().finalize(); }
+void Serial::impl_finalize() {
+  Impl::SerialInternal::default_instance = nullptr;
+}
 
 const char* Serial::name() { return "Serial"; }
 
@@ -215,13 +197,5 @@ int g_serial_space_factory_initialized =
     initialize_space_factory<Serial>("100_Serial");
 
 }  // namespace Impl
-
-#ifdef KOKKOS_ENABLE_CXX14
-namespace Tools {
-namespace Experimental {
-constexpr DeviceType DeviceTypeTraits<Serial>::id;
-}
-}  // namespace Tools
-#endif
 
 }  // namespace Kokkos

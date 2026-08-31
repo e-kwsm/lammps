@@ -24,7 +24,6 @@
 #include "force.h"
 #include "gpu_extra.h"
 #include "memory.h"
-#include "modify.h"
 #include "neighbor.h"
 #include "update.h"
 
@@ -33,12 +32,12 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define TILTMAX 1.5
+static constexpr double TILTMAX = 1.5;
 
 enum{NOBIAS,BIAS};
 enum{ISO,ANISO,TRICLINIC};
 
-typedef struct { double x,y,z; } dbl3_t;
+using dbl3_t = struct { double x,y,z; };
 
 /* ----------------------------------------------------------------------
    NVT,NPH,NPT integrators for improved Nose-Hoover equations of motion
@@ -77,7 +76,7 @@ void FixNHGPU::remap()
   double oldlo,oldhi;
   double expfac;
 
-  dbl3_t * _noalias const x = (dbl3_t *) atom->x[0];
+  auto * _noalias const x = (dbl3_t *) atom->x[0];
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
   double *h = domain->h;
@@ -129,9 +128,7 @@ void FixNHGPU::remap()
     }
   }
 
-  if (nrigid)
-    for (int i = 0; i < nrigid; i++)
-      modify->fix[rfix[i]]->deform(0);
+  for (auto &ifix : rfix) ifix->deform(0);
 
   // reset global and local box to new size/shape
 
@@ -304,9 +301,7 @@ void FixNHGPU::remap()
     }
   }
 
-  if (nrigid)
-    for (int i = 0; i < nrigid; i++)
-      modify->fix[rfix[i]]->deform(1);
+  for (auto &ifix : rfix) ifix->deform(1);
 }
 
 /* ----------------------------------------------------------------------
@@ -414,7 +409,7 @@ void FixNHGPU::nh_v_press()
     return;
   }
 
-  dbl3_t * _noalias const v = (dbl3_t *)atom->v[0];
+  auto * _noalias const v = (dbl3_t *)atom->v[0];
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;

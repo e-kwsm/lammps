@@ -21,20 +21,20 @@
 
 using namespace LAMMPS_NS;
 
-#define MYHUGE 1.0e30
-#define TINY 1.0e-6
-#define DELTA 16384
+static constexpr double MYHUGE = 1.0e30;
+static constexpr double TINY = 1.0e-6;
+static constexpr int DELTA = 16384;
 
 // prototypes for non-class functions
 
-void box_merge(void *, void *, int *, MPI_Datatype *);
-void median_merge(void *, void *, int *, MPI_Datatype *);
+static void box_merge(void *, void *, int *, MPI_Datatype *);
+static void median_merge(void *, void *, int *, MPI_Datatype *);
 
 // NOTE: if want to have reuse flag, need to sum Tree across procs
 
 /* ---------------------------------------------------------------------- */
 
-RCB::RCB(LAMMPS *lmp) : Pointers(lmp)
+RCB::RCB(LAMMPS *lmp) : Pointers(lmp), lo(nullptr), hi(nullptr)
 {
   MPI_Comm_rank(world,&me);
   MPI_Comm_size(world,&nprocs);
@@ -242,7 +242,7 @@ void RCB::compute(int dimension, int n, double **x, double *wt,
     // dim_select = selected cut dimension
     // valuehalf_select = valuehalf in that dimension
     // dotmark_select = dot markings in that dimension
-    // initialize largest = -1.0 to insure a cut in some dim is accepted
+    // initialize largest = -1.0 to ensure a cut in some dim is accepted
     //   e.g. if current recursed box is size 0 in all dims
 
     int dim_select = -1;
@@ -571,7 +571,7 @@ void RCB::compute(int dimension, int n, double **x, double *wt,
       }
     }
 
-    // handshake before sending dots to insure recvs have been posted
+    // handshake before sending dots to ensure recvs have been posted
 
     if (readnumber > 0) {
       MPI_Send(nullptr,0,MPI_INT,procpartner,0,world);
@@ -1063,7 +1063,7 @@ void RCB::compute_old(int dimension, int n, double **x, double *wt,
       }
     }
 
-    // handshake before sending dots to insure recvs have been posted
+    // handshake before sending dots to ensure recvs have been posted
 
     if (readnumber > 0) {
       MPI_Send(nullptr,0,MPI_INT,procpartner,0,world);
@@ -1130,8 +1130,8 @@ void RCB::compute_old(int dimension, int n, double **x, double *wt,
 void box_merge(void *in, void *inout, int * /*len*/, MPI_Datatype * /*dptr*/)
 
 {
-  auto box1 = (RCB::BBox *) in;
-  auto box2 = (RCB::BBox *) inout;
+  auto *box1 = (RCB::BBox *) in;
+  auto *box2 = (RCB::BBox *) inout;
 
   for (int i = 0; i < 3; i++) {
     if (box1->lo[i] < box2->lo[i]) box2->lo[i] = box1->lo[i];
@@ -1160,8 +1160,8 @@ void box_merge(void *in, void *inout, int * /*len*/, MPI_Datatype * /*dptr*/)
 void median_merge(void *in, void *inout, int * /*len*/, MPI_Datatype * /*dptr*/)
 
 {
-  auto med1 = (RCB::Median *) in;
-  auto med2 = (RCB::Median *) inout;
+  auto *med1 = (RCB::Median *) in;
+  auto *med2 = (RCB::Median *) inout;
 
   med2->totallo += med1->totallo;
   if (med1->valuelo > med2->valuelo) {
@@ -1209,7 +1209,7 @@ void RCB::invert(int sortflag)
   int *proclist;
   memory->create(proclist,nsend,"RCB:proclist");
 
-  auto sinvert = (Invert *) memory->smalloc(nsend*sizeof(Invert),"RCB:sinvert");
+  auto *sinvert = (Invert *) memory->smalloc(nsend*sizeof(Invert),"RCB:sinvert");
 
   int m = 0;
   for (int i = nkeep; i < nfinal; i++) {
@@ -1224,7 +1224,7 @@ void RCB::invert(int sortflag)
   // nrecv = # of my dots to send to other procs
 
   int nrecv = irregular->create_data(nsend,proclist,sortflag);
-  auto rinvert = (Invert *) memory->smalloc(nrecv*sizeof(Invert),"RCB:rinvert");
+  auto *rinvert = (Invert *) memory->smalloc(nrecv*sizeof(Invert),"RCB:rinvert");
   irregular->exchange_data((char *) sinvert,sizeof(Invert),(char *) rinvert);
   irregular->destroy_data();
 

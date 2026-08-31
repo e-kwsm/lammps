@@ -15,7 +15,7 @@
    e-mail: w.g.ouyang at gmail dot com
 
    This is a full version of the potential described in
-   [Ouyang et al, J. Chem. Theory Comput. 17, 7215-7223 (2021)]
+   [Ouyang et al., J. Chem. Theory Comput. 17, 7215-7223 (2021)]
 ------------------------------------------------------------------------- */
 
 #include "pair_saip_metal.h"
@@ -26,8 +26,6 @@
 #include "force.h"
 #include "interlayer_taper.h"
 #include "neigh_list.h"
-#include "neigh_request.h"
-#include "neighbor.h"
 
 #include <cmath>
 #include <cstring>
@@ -35,12 +33,8 @@
 using namespace LAMMPS_NS;
 using namespace InterLayer;
 
-#define MAXLINE 1024
-#define DELTA 4
-#define PGDELTA 1
-
 static const char cite_saip[] =
-    "saip/metal potential: doi:10.1021/acs.jctc.1c00622\n\n"
+    "saip/metal potential: https://doi.org/10.1021/acs.jctc.1c00622\n\n"
     "@Article{Ouyang2021\n"
     " author = {W. Ouyang and O. Hod and R. Guerra},\n"
     " title = {Registry-Dependent Potential for Interfaces of Gold with Graphitic Systems},\n"
@@ -70,7 +64,7 @@ void PairSAIPMETAL::settings(int narg, char **arg)
     error->all(FLERR, "Pair style saip/metal must be used as sub-style with hybrid/overlay");
 
   cut_global = utils::numeric(FLERR, arg[0], false, lmp);
-  if (narg == 2) tap_flag = utils::numeric(FLERR, arg[1], false, lmp);
+  if (narg == 2) tap_flag = utils::inumeric(FLERR, arg[1], false, lmp);
 }
 
 /* ----------------------------------------------------------------------
@@ -231,7 +225,7 @@ void PairSAIPMETAL::calc_FRep(int eflag, int /* vflag */)
             delki[1] = x[k][1] - x[i][1];
             delki[2] = x[k][2] - x[i][2];
             if (evflag)
-              ev_tally_xyz(k, j, nlocal, newton_pair, 0.0, 0.0, fk[0], fk[1], fk[2], delki[0],
+              ev_tally_xyz(k, i, nlocal, newton_pair, 0.0, 0.0, fk[0], fk[1], fk[2], delki[0],
                            delki[1], delki[2]);
           }
 

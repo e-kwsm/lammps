@@ -6,13 +6,21 @@ fix nvt/sllod/eff command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID nvt/sllod/eff keyword value ...
 
 * ID, group-ID are documented in :doc:`fix <fix>` command
 * nvt/sllod/eff = style name of this fix command
-* additional thermostat related keyword/value pairs from the :doc:`fix nvt/eff <fix_nh_eff>` command can be appended
+* zero or more keyword/value pairs may be appended
+
+  .. parsed-literal::
+
+     keyword = *psllod*
+       *psllod* value = *no* or *yes* = use SLLOD or p-SLLOD variant, respectively
+
+* additional thermostat related keyword/value pairs from the :doc:`fix
+  nvt/eff <fix_nh_eff>` command may be appended, too.
 
 Examples
 """"""""
@@ -25,18 +33,22 @@ Examples
 Description
 """""""""""
 
-Perform constant NVT integration to update positions and velocities
-each timestep for nuclei and electrons in the group for the :doc:`electron force field <pair_eff>` model, using a Nose/Hoover temperature
+Perform constant NVT integration to update positions and velocities each
+timestep for nuclei and electrons in the group for the :doc:`electron
+force field <pair_eff>` model, using a Nose/Hoover temperature
 thermostat.  V is volume; T is temperature.  This creates a system
 trajectory consistent with the canonical ensemble.
 
-The operation of this fix is exactly like that described by the :doc:`fix nvt/sllod <fix_nvt_sllod>` command, except that the radius and
+The operation of this fix is exactly like that described by the
+:doc:`fix nvt/sllod <fix_nvt_sllod>` command, except that the radius and
 radial velocity of electrons are also updated and thermostatted.
 Likewise the temperature calculated by the fix, using the compute it
 creates (as discussed in the :doc:`fix nvt, npt, and nph <fix_nh>` doc
-page), is performed with a :doc:`compute temp/deform/eff <compute_temp_deform_eff>` command that includes
-the eFF contribution to the temperature from the electron radial
-velocity.
+page), is performed with a :doc:`compute temp/deform/eff
+<compute_temp_deform_eff>` command (if *peculiar* = *no*) or a
+:doc:`compute temp/eff <compute_temp_eff>` command
+(if *peculiar* = *yes*) that includes the eFF contribution to
+the temperature from the electron radial velocity.
 
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -50,12 +62,15 @@ fix continues in an uninterrupted fashion.
 The :doc:`fix_modify <fix_modify>` *temp* option is supported by this
 fix.  You can use it to assign a :doc:`compute <compute>` you have
 defined to this fix which will be used in its thermostatting
-procedure.
+procedure.  The *kick* option is also supported as described by
+:doc:`fix nvt/sllod <fix_nvt_sllod>`.
 
 The cumulative energy change in the system imposed by this fix is
 included in the :doc:`thermodynamic output <thermo_style>` keywords
 *ecouple* and *econserve*.  See the :doc:`thermo_style <thermo_style>`
-doc page for details.
+doc page for details.  Note, as for :doc:`fix nvt/sllod <fix_nvt_sllod>`
+this does NOT include the work done to drive the flow, so those values
+are expected to change with time.
 
 This fix computes the same global scalar and global vector of
 quantities as does the :doc:`fix nvt/eff <fix_nh_eff>` command.
@@ -84,11 +99,12 @@ Related commands
 Default
 """""""
 
-Same as :doc:`fix nvt/eff <fix_nh_eff>`, except tchain = 1.
+Same as :doc:`fix nvt/eff <fix_nh_eff>`, except *tchain* = 1, *psllod* = *no*,
+*peculiar* = *no*, *kick* = *yes*, *integrator* = *reversible*.
 
 ----------
 
 .. _Tuckerman2:
 
-**(Tuckerman)** Tuckerman, Mundy, Balasubramanian, Klein, J Chem Phys,
+**(Tuckerman2)** Tuckerman, Mundy, Balasubramanian, Klein, J Chem Phys,
 106, 5615 (1997).

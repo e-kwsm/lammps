@@ -26,7 +26,11 @@ class NeighRequest : protected Pointers {
   friend class NStencil;
   friend class NeighborKokkos;
   friend class NPairSkipIntel;
+  friend class NPairSkipTrimIntel;
   friend class FixIntel;
+
+ public:
+  enum { REGULAR, INTRA, INTER };
 
  protected:
   void *requestor;           // class that made request
@@ -35,7 +39,7 @@ class NeighRequest : protected Pointers {
                              // used to track multiple requests from one class
 
   // -----------------------------
-  // flags set by requesting class for attributes of neighor list they need
+  // flags set by requesting class for attributes of neighbor list they need
   // all must be set appropriately, all have defaults
   // -----------------------------
 
@@ -78,15 +82,24 @@ class NeighRequest : protected Pointers {
   int intel;           // set by INTEL package
   int kokkos_host;     // set by KOKKOS package
   int kokkos_device;
-  int ssa;          // set by DPD-REACT package, for Shardlow lists
-  int cut;          // 1 if use a non-standard cutoff length
-  double cutoff;    // special cutoff distance for this list
+  int ssa;              // set by DPD-REACT package, for Shardlow lists
+
+  // non-standard cutoffs
+  //   By default, the cutoff corresponds to the maximum cutoff across all types,
+  //     does not imply all types have the same cutoff.
+  //     This is typical of requests for pair styles
+  //   If set, cut_fixed  implies the cutoff is uniform across all atom types.
+  //     This is typical of fixes/computes with a fixed range of analysis (e.g. an RDF)
+  int cut_fixed;        // toggles cutoff interpretation, whether fixed across types
+  int cut;              // 1 if use a non-standard cutoff length
+  double cutoff;        // special cutoff distance for this list
 
   // flags set by pair hybrid
 
   int skip;        // 1 if this list skips atom types from another list
   int *iskip;      // iskip[i] if atoms of type I are not in list
   int **ijskip;    // ijskip[i][j] if pairs of type I,J are not in list
+  int molskip;     // 0 reqular list, 1 keep only intra-molecular entries, 2 keep inter-molecular
 
   // command_style only set if command = 1
   // allows print_pair_info() to access command name
@@ -131,17 +144,22 @@ class NeighRequest : protected Pointers {
   void copy_request(NeighRequest *, int);
 
   void apply_flags(int);
-  void set_cutoff(double);
+  // a non-standard cutoff requires stating its interpretation, exactly one of:
+  //   max   - cutoff is the maximum across types (typical of pair styles)
+  //   fixed - cutoff applies uniformly to all types (typical of analysis)
+  void set_cutoff_max(double);
+  void set_cutoff_fixed(double);
   void set_id(int);
   void set_kokkos_device(int);
   void set_kokkos_host(int);
   void set_skip(int *, int **);
+  void set_molskip(int);
   void enable_full();
   void enable_ghost();
   void enable_intel();
 
-  int get_size() const { return size; }
-  void *get_requestor() const { return requestor; }
+  [[nodiscard]] int get_size() const { return size; }
+  [[nodiscard]] void *get_requestor() const { return requestor; }
 };
 
 }    // namespace LAMMPS_NS

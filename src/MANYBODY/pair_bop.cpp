@@ -40,9 +40,9 @@
 
 #include "atom.h"
 #include "comm.h"
-#include "domain.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "math_special.h"
 #include "memory.h"
 #include "neigh_list.h"
@@ -417,7 +417,7 @@ void PairBOP::init_style()
   if (utils::strmatch(force->pair_style,"^hybrid"))
     error->all(FLERR,"Pair style BOP is not compatible with hybrid pair styles");
 
-  if ((neighbor->style == Neighbor::MULTI) || (neighbor->style == Neighbor::MULTI_OLD))
+  if (neighbor->style == Neighbor::MULTI)
     error->all(FLERR,"Pair style BOP is not compatible with multi-cutoff neighbor lists");
 
   if (comm->mode != Comm::SINGLE)
@@ -438,7 +438,9 @@ void PairBOP::init_style()
 
 double PairBOP::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   int itype = map[i];
   int jtype = map[j];
@@ -722,6 +724,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
   memory_sg(nb_t);
   initial_sg(nb_t);
 
+  n_ji = -1;
   for (loop = 0; loop < nlistj; loop++) {
     temp_loop = BOP_index[j] + loop;
     nei_loop = neigh_index[temp_loop];
@@ -731,6 +734,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
       break;
     }
   }
+  if (n_ji < 0) error->one(FLERR,"BOP neighbor list is inconsistent");
 
   dis_ij[0] = pl_ij.dis[0];
   dis_ij[1] = pl_ij.dis[1];
@@ -752,7 +756,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
   // FF is the Beta_sigma^2 term
 
   FF = betaS_ij * betaS_ij;
-  if (FF <= 0.000001) return(sigB);
+  if (FF <= 0.000001) return sigB;
 
   // agpdpr1 is derivative of FF w.r.t. r_ij
 
@@ -791,6 +795,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
 
     nfound = 0;
     pass_jk = 0;
+    n_ki = -1;
     for (loop = 0; loop < nlistk; loop++) {
       temp_loop = BOP_index[k] + loop;
       nei_loop = neigh_index[temp_loop];
@@ -807,6 +812,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
         if (nfound == 2) break;
       }
     }
+    if (n_ki < 0) error->one(FLERR,"BOP neighbor list is inconsistent");
 
     nb_ik = nb_t;
     bt_sg[nb_ik].i = i;
@@ -816,6 +822,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
     memory_sg(nb_t);
     initial_sg(nb_t);
     if (pass_jk) {
+      temp_jk = n_jk = -1;
       for (loop = 0; loop < nlistj; loop++) {
         temp_loop = BOP_index[j] + loop;
         nei_loop = neigh_index[temp_loop];
@@ -826,6 +833,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
           break;
         }
       }
+      if ((temp_jk < 0) || (n_jk < 0)) error->one(FLERR,"BOP neighbor list is inconsistent");
       nb_jk = nb_t;
       bt_sg[nb_jk].i = j;
       bt_sg[nb_jk].j = k;
@@ -894,7 +902,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
     // k' is loop over neighbors all neighbors of j with k a neighbor
     // of i and j a neighbor of i and determine which k' is k
 
-    if (sigma_f[param_ij] == 0.5 || !sigma_k[param_ij] || !pass_jk) continue;
+    if ((sigma_f[param_ij] == 0.5) || (sigma_k[param_ij] == 0.0) || !pass_jk) continue;
     PairList1 & pl_jk = pairlist1[temp_jk];
     dis_jk[0] = pl_jk.dis[0];
     dis_jk[1] = pl_jk.dis[1];
@@ -1164,7 +1172,7 @@ double PairBOP::SigmaBo(int itmp, int jtmp)
                                -ftmp[0],-ftmp[1],-ftmp[2],xtmp[0],xtmp[1],xtmp[2]);
     }
   }
-  return(sigB);
+  return sigB;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1244,6 +1252,7 @@ double PairBOP::PiBo(int itmp, int jtmp)
   memory_pi(nb_t);
   initial_pi(nb_t);
 
+  n_ji = -1;
   for (loop = 0; loop < nlistj; loop++) {
     temp_loop = BOP_index[j] + loop;
     nei_loop = neigh_index[temp_loop];
@@ -1253,6 +1262,7 @@ double PairBOP::PiBo(int itmp, int jtmp)
       break;
     }
   }
+  if (n_ji < 0) error->one(FLERR,"BOP neighbor list is inconsistent");
 
   dis_ij[0] = pl_ij.dis[0];
   dis_ij[1] = pl_ij.dis[1];
@@ -1267,8 +1277,6 @@ double PairBOP::PiBo(int itmp, int jtmp)
 
   AA = 0.0;
   BB = 0.0;
-
-  // if (betaP_ij * betaP_ij <= 0.000001) return(piB);
 
   for (ktmp = 0; ktmp < nlisti; ktmp++) {
     if (ktmp == jtmp) continue;
@@ -1845,7 +1853,7 @@ double PairBOP::PiBo(int itmp, int jtmp)
     if (evflag) ev_tally_xyz(bt_i,bt_j,nlocal,newton_pair,0.0,0.0,
                              -ftmp[0],-ftmp[1],-ftmp[2],xtmp[0],xtmp[1],xtmp[2]);
   }
-  return(piB);
+  return piB;
 }
 
 /* ----------------------------------------------------------------------
@@ -1874,8 +1882,7 @@ void PairBOP::read_table(char *filename)
       reader = new PotentialFileReader(lmp, filename, "BOP");
       bop_types = reader->next_int();
       if (bop_types <= 0)
-        error->one(FLERR,fmt::format("BOP potential file with {} "
-                                     "elements",bop_types));
+        error->one(FLERR,"BOP potential file with {} elements",bop_types);
 
       bop_elements = new char*[bop_types];
       bop_masses = new double[bop_types];
@@ -2151,7 +2158,7 @@ void PairBOP::read_table(char *filename)
 
 double PairBOP::memory_usage()
 {
-  return(bytes);
+  return bytes;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2223,8 +2230,7 @@ void PairBOP::write_tables(int npts)
       int param = elem2param[i][j];
       PairParameters & pair = pairParameters[param];
 
-      filename = fmt::format("{}{}_Pair_SPR_{}",bop_elements[i],
-                             bop_elements[j],comm->me);
+      filename = fmt::format("{}{}_Pair_SPR_{}",bop_elements[i],bop_elements[j],comm->me);
 
       fp = fopen(filename.c_str(), "w");
       xmin = (pair.betaS)->get_xmin();
@@ -2242,8 +2248,7 @@ void PairBOP::write_tables(int npts)
       fclose(fp);
 
       if (pair.cutL != 0) {
-        filename = fmt::format("{}{}_Pair_L_{}",bop_elements[i],
-                               bop_elements[j],comm->me);
+        filename = fmt::format("{}{}_Pair_L_{}",bop_elements[i],bop_elements[j],comm->me);
         fp = fopen(filename.c_str(), "w");
         xmin = (pair.cphi)->get_xmin();
         xmax = (pair.cphi)->get_xmax();
@@ -2256,8 +2261,7 @@ void PairBOP::write_tables(int npts)
         }
         fclose(fp);
       }
-      filename = fmt::format("{}{}_Pair_BO_{}", bop_elements[i],
-                             bop_elements[j], comm->me);
+      filename = fmt::format("{}{}_Pair_BO_{}", bop_elements[i],bop_elements[j], comm->me);
       fp = fopen(filename.c_str(), "w");
       xmin = (pair.bo)->get_xmin();
       xmax = (pair.bo)->get_xmax();

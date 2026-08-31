@@ -28,16 +28,18 @@
 #include "neighbor.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define SMALL 0.0001
+static constexpr double SMALL = 0.0001;
 
 /* ---------------------------------------------------------------------- */
 
 AngleFourierSimple::AngleFourierSimple(LAMMPS *lmp) : Angle(lmp)
 {
+  born_matrix_enable = 1;
   k = nullptr;
   C = nullptr;
   N = nullptr;
@@ -47,6 +49,8 @@ AngleFourierSimple::AngleFourierSimple(LAMMPS *lmp) : Angle(lmp)
 
 AngleFourierSimple::~AngleFourierSimple()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(k);
@@ -190,7 +194,7 @@ void AngleFourierSimple::allocate()
 
 void AngleFourierSimple::coeff(int narg, char **arg)
 {
-  if (narg != 4) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (narg != 4) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -209,7 +213,7 @@ void AngleFourierSimple::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -268,13 +272,13 @@ double AngleFourierSimple::single(int type, int i1, int i2, int i3)
   double delx1 = x[i1][0] - x[i2][0];
   double dely1 = x[i1][1] - x[i2][1];
   double delz1 = x[i1][2] - x[i2][2];
-  domain->minimum_image(delx1, dely1, delz1);
+  domain->minimum_image(FLERR, delx1, dely1, delz1);
   double r1 = sqrt(delx1 * delx1 + dely1 * dely1 + delz1 * delz1);
 
   double delx2 = x[i3][0] - x[i2][0];
   double dely2 = x[i3][1] - x[i2][1];
   double delz2 = x[i3][2] - x[i2][2];
-  domain->minimum_image(delx2, dely2, delz2);
+  domain->minimum_image(FLERR, delx2, dely2, delz2);
   double r2 = sqrt(delx2 * delx2 + dely2 * dely2 + delz2 * delz2);
 
   double c = delx1 * delx2 + dely1 * dely2 + delz1 * delz2;
@@ -285,4 +289,46 @@ double AngleFourierSimple::single(int type, int i1, int i2, int i3)
 
   double eng = k[type] * (1.0 + C[type] * cn);
   return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void AngleFourierSimple::born_matrix(int type, int i1, int i2, int i3, double &du, double &du2)
+{
+  double **x = atom->x;
+
+  double delx1 = x[i1][0] - x[i2][0];
+  double dely1 = x[i1][1] - x[i2][1];
+  double delz1 = x[i1][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx1,dely1,delz1);
+  double r1 = sqrt(delx1*delx1 + dely1*dely1 + delz1*delz1);
+
+  double delx2 = x[i3][0] - x[i2][0];
+  double dely2 = x[i3][1] - x[i2][1];
+  double delz2 = x[i3][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx2,dely2,delz2);
+  double r2 = sqrt(delx2*delx2 + dely2*dely2 + delz2*delz2);
+
+  double c = delx1*delx2 + dely1*dely2 + delz1*delz2;
+  c /= r1*r2;
+  if (c > 1.0) c = 1.0;
+  if (c < -1.0) c = -1.0;
+  double theta = acos(c);
+
+  du = k[type] * C[type] * N[type] * sin(N[type] * theta) / sin(theta);
+  du2 = k[type] * C[type] * N[type] * (cos(theta) * sin(N[type] * theta)
+                  - N[type] * sin(theta) * cos(N[type] * theta)) / pow(sin(theta),3);
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *AngleFourierSimple::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k;
+  if (strcmp(str, "C") == 0) return (void *) C;
+  if (strcmp(str, "N") == 0) return (void *) N;
+  return nullptr;
 }

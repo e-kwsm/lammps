@@ -13,20 +13,16 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_lj_cut_coul_long_opt.h"
-#include <cmath>
+
 #include "atom.h"
+#include "ewald_const.h"
 #include "force.h"
 #include "neigh_list.h"
 
-using namespace LAMMPS_NS;
+#include <cmath>
 
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define A1        0.254829592
-#define A2       -0.284496736
-#define A3        1.421413741
-#define A4       -1.453152027
-#define A5        1.061405429
+using namespace LAMMPS_NS;
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -143,7 +139,7 @@ void PairLJCutCoulLongOpt::eval()
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {

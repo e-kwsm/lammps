@@ -1,1 +1,2 @@
-#define LAMMPS_VERSION "3 Nov 2022"
+#define LAMMPS_VERSION "4 Jul 2026"
+#define LAMMPS_UPDATE "Development"

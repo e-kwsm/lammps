@@ -6,7 +6,7 @@ fix heat command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID heat N eflux
 
@@ -126,7 +126,7 @@ the :doc:`run <run>` command.  This fix is not invoked during :doc:`energy minim
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

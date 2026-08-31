@@ -103,9 +103,9 @@ TEST_F(ComputeGlobalTest, Energy)
     EXPECT_NEAR(get_scalar("pr1"), 1956948.4735454607, 0.000000005);
     EXPECT_NEAR(get_scalar("pr2"), 1956916.7725807722, 0.000000005);
     EXPECT_DOUBLE_EQ(get_scalar("pr3"), 0.0);
-    auto pr1 = get_vector("pr1");
-    auto pr2 = get_vector("pr2");
-    auto pr3 = get_vector("pr3");
+    auto *pr1 = get_vector("pr1");
+    auto *pr2 = get_vector("pr2");
+    auto *pr3 = get_vector("pr3");
     EXPECT_NEAR(pr1[0], 2150600.9207200543, 0.000000005);
     EXPECT_NEAR(pr1[1], 1466949.7512112649, 0.000000005);
     EXPECT_NEAR(pr1[2], 2253294.7487050635, 0.000000005);
@@ -127,7 +127,7 @@ TEST_F(ComputeGlobalTest, Energy)
 
     if (has_tally) {
         EXPECT_NEAR(get_scalar("pe4"), 15425.840923850392, 0.000000005);
-        auto pe5 = get_vector("pe5");
+        auto *pe5 = get_vector("pe5");
         EXPECT_NEAR(pe5[0], 23803.966677151559, 0.000000005);
         EXPECT_NEAR(pe5[1], -94.210004432380643, 0.000000005);
         EXPECT_NEAR(pe5[2], 115.58040355478101, 0.000000005);
@@ -169,7 +169,7 @@ TEST_F(ComputeGlobalTest, Geometry)
         command("compute mom1 all momentum");
         command("compute mom2 allwater momentum");
         command("compute mop1 all stress/mop x 0.0 total");
-        command("compute mop2 all stress/mop/profile z lower 0.5 kin conf");
+        command("compute mop2 all stress/mop/profile z lower 0.5 kin pair");
         thermo_style += " c_mu1 c_mu2 c_mop1[*] c_mop2[1][1]";
     }
 
@@ -177,12 +177,12 @@ TEST_F(ComputeGlobalTest, Geometry)
     command("run 0 post no");
     END_HIDE_OUTPUT();
 
-    auto com1 = get_vector("com1");
-    auto com2 = get_vector("com2");
-    auto mu1  = get_vector("mu1");
-    auto mu2  = get_vector("mu2");
-    auto rg1  = get_vector("rg1");
-    auto rg2  = get_vector("rg2");
+    auto *com1 = get_vector("com1");
+    auto *com2 = get_vector("com2");
+    auto *mu1  = get_vector("mu1");
+    auto *mu2  = get_vector("mu2");
+    auto *rg1  = get_vector("rg1");
+    auto *rg2  = get_vector("rg2");
 
     EXPECT_NEAR(com1[0], 1.4300952724948282, 0.0000000005);
     EXPECT_NEAR(com1[1], -0.29759806705328351, 0.0000000005);
@@ -215,19 +215,19 @@ TEST_F(ComputeGlobalTest, Geometry)
     EXPECT_NEAR(rg2[4], -5.0315240817290841, 0.0000000005);
     EXPECT_NEAR(rg2[5], 1.1103378503822141, 0.0000000005);
     if (has_extra) {
-        auto mom1 = get_vector("mom1");
-        auto mom2 = get_vector("mom2");
-        auto mop1 = get_vector("mop1");
-        auto mop2 = get_array("mop2");
+        auto *mom1 = get_vector("mom1");
+        auto *mom2 = get_vector("mom2");
+        auto *mop1 = get_vector("mop1");
+        auto *mop2 = get_array("mop2");
         EXPECT_DOUBLE_EQ(mom1[0], 0.0054219056685341164);
         EXPECT_DOUBLE_EQ(mom1[1], -0.054897225112275558);
         EXPECT_DOUBLE_EQ(mom1[2], 0.059097392692385661);
         EXPECT_DOUBLE_EQ(mom2[0], -0.022332069630161717);
         EXPECT_DOUBLE_EQ(mom2[1], -0.056896553865696115);
         EXPECT_DOUBLE_EQ(mom2[2], 0.069179891052881484);
-        EXPECT_DOUBLE_EQ(mop1[0], 3522311.3572200728);
-        EXPECT_DOUBLE_EQ(mop1[1], 2871104.9055934539);
-        EXPECT_DOUBLE_EQ(mop1[2], -4136077.5224247416);
+        EXPECT_DOUBLE_EQ(mop1[0], 3536584.0880458541);
+        EXPECT_DOUBLE_EQ(mop1[1], 2887485.033995091);
+        EXPECT_DOUBLE_EQ(mop1[2], -4154145.8952306858);
         EXPECT_DOUBLE_EQ(mop2[0][0], -8.0869239999999998);
         EXPECT_DOUBLE_EQ(mop2[0][1], 0.0);
         EXPECT_DOUBLE_EQ(mop2[0][2], 0.0);
@@ -263,11 +263,11 @@ TEST_F(ComputeGlobalTest, Reduction)
     command("run 0 post no");
     END_HIDE_OUTPUT();
 
-    auto min = get_vector("min");
-    auto max = get_vector("max");
-    auto sum = get_vector("sum");
-    auto ave = get_vector("ave");
-    auto rep = get_vector("rep");
+    auto *min = get_vector("min");
+    auto *max = get_vector("max");
+    auto *sum = get_vector("sum");
+    auto *ave = get_vector("ave");
+    auto *rep = get_vector("rep");
 
     EXPECT_DOUBLE_EQ(get_scalar("chg"), 0.51000000000000001);
 
@@ -294,15 +294,314 @@ TEST_F(ComputeGlobalTest, Reduction)
     EXPECT_DOUBLE_EQ(rep[2], 26);
     EXPECT_DOUBLE_EQ(rep[3], max[0]);
 }
+
+TEST_F(ComputeGlobalTest, Counts)
+{
+    if (lammps_get_natoms(lmp) == 0.0) GTEST_SKIP();
+
+    BEGIN_HIDE_OUTPUT();
+    command("pair_style zero 10.0");
+    command("pair_coeff * *");
+
+    command("variable t1 atom type==1");
+    command("variable t2 atom type==2");
+    command("variable t3 atom type==3");
+    command("variable t4 atom type==4");
+    command("variable t5 atom type==5");
+    command("compute tsum all reduce sum v_t1 v_t2 v_t3 v_t4 v_t5");
+    command("compute tcnt all count/type atom");
+    command("compute bcnt all count/type bond");
+    command("compute acnt all count/type angle");
+    command("compute dcnt all count/type dihedral");
+    command("compute icnt all count/type improper");
+    command("thermo_style custom c_tsum[*] c_tcnt[*] c_bcnt[*] c_acnt[*] c_dcnt[*] c_icnt[*]");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    auto *tsum = get_vector("tsum");
+    auto *tcnt = get_vector("tcnt");
+    auto *bcnt = get_vector("bcnt");
+    auto bbrk  = get_scalar("bcnt");
+    auto *acnt = get_vector("acnt");
+    auto *dcnt = get_vector("dcnt");
+    auto *icnt = get_vector("icnt");
+
+    EXPECT_DOUBLE_EQ(tsum[0], tcnt[0]);
+    EXPECT_DOUBLE_EQ(tsum[1], tcnt[1]);
+    EXPECT_DOUBLE_EQ(tsum[2], tcnt[2]);
+    EXPECT_DOUBLE_EQ(tsum[3], tcnt[3]);
+    EXPECT_DOUBLE_EQ(tsum[4], tcnt[4]);
+
+    EXPECT_DOUBLE_EQ(bbrk, 0.0);
+
+    EXPECT_DOUBLE_EQ(bcnt[0], 3.0);
+    EXPECT_DOUBLE_EQ(bcnt[1], 6.0);
+    EXPECT_DOUBLE_EQ(bcnt[2], 3.0);
+    EXPECT_DOUBLE_EQ(bcnt[3], 2.0);
+    EXPECT_DOUBLE_EQ(bcnt[4], 10.0);
+
+    EXPECT_DOUBLE_EQ(acnt[0], 6.0);
+    EXPECT_DOUBLE_EQ(acnt[1], 10.0);
+    EXPECT_DOUBLE_EQ(acnt[2], 5.0);
+    EXPECT_DOUBLE_EQ(acnt[3], 9.0);
+
+    EXPECT_DOUBLE_EQ(dcnt[0], 3.0);
+    EXPECT_DOUBLE_EQ(dcnt[1], 8.0);
+    EXPECT_DOUBLE_EQ(dcnt[2], 3.0);
+    EXPECT_DOUBLE_EQ(dcnt[3], 4.0);
+    EXPECT_DOUBLE_EQ(dcnt[4], 13.0);
+
+    EXPECT_DOUBLE_EQ(icnt[0], 1.0);
+    EXPECT_DOUBLE_EQ(icnt[1], 1.0);
+
+    BEGIN_HIDE_OUTPUT();
+    command("delete_bonds all bond 3 remove");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    bcnt = get_vector("bcnt");
+    bbrk = get_scalar("bcnt");
+    acnt = get_vector("acnt");
+    dcnt = get_vector("dcnt");
+    icnt = get_vector("icnt");
+
+    EXPECT_DOUBLE_EQ(bbrk, 0.0);
+    EXPECT_DOUBLE_EQ(bcnt[0], 3.0);
+    EXPECT_DOUBLE_EQ(bcnt[1], 6.0);
+    EXPECT_DOUBLE_EQ(bcnt[2], 0.0);
+    EXPECT_DOUBLE_EQ(bcnt[3], 2.0);
+    EXPECT_DOUBLE_EQ(bcnt[4], 10.0);
+
+    EXPECT_DOUBLE_EQ(acnt[0], 6.0);
+    EXPECT_DOUBLE_EQ(acnt[1], 10.0);
+    EXPECT_DOUBLE_EQ(acnt[2], 5.0);
+    EXPECT_DOUBLE_EQ(acnt[3], 9.0);
+
+    EXPECT_DOUBLE_EQ(dcnt[0], 3.0);
+    EXPECT_DOUBLE_EQ(dcnt[1], 8.0);
+    EXPECT_DOUBLE_EQ(dcnt[2], 3.0);
+    EXPECT_DOUBLE_EQ(dcnt[3], 4.0);
+    EXPECT_DOUBLE_EQ(dcnt[4], 13.0);
+
+    EXPECT_DOUBLE_EQ(icnt[0], 1.0);
+    EXPECT_DOUBLE_EQ(icnt[1], 1.0);
+}
+
+// finite-size particles must contribute their own moment of inertia
+// (issue #3710). Build small standalone systems so the expected inertia
+// tensor can be computed analytically.
+
+class ComputeInertiaTest : public ComputeGlobalTest {
+protected:
+    void SetUp() override
+    {
+        testbinary = "ComputeInertiaTest";
+        LAMMPSTest::SetUp();
+    }
+};
+
+TEST_F(ComputeInertiaTest, Ellipsoid)
+{
+    if (!info->has_style("atom", "ellipsoid")) GTEST_SKIP();
+
+    // two axis-aligned ellipsoids, semi-axes a=1,b=2,c=3 (set shape uses diameters)
+    // m1=1 at (0,0,0), m2=3 at (5,0,0); COM at x=3.75
+    // orbital: Ixx=0, Iyy=Izz=18.75; spin: Ixx=10.4, Iyy=8.0, Izz=4.0
+
+    BEGIN_HIDE_OUTPUT();
+    command("units lj");
+    command("atom_style ellipsoid");
+    command("boundary f f f");
+    command("region box block -20 20 -20 20 -20 20");
+    command("create_box 1 box");
+    command("create_atoms 1 single 0.0 0.0 0.0 units box");
+    command("create_atoms 1 single 5.0 0.0 0.0 units box");
+    command("set group all shape 2.0 4.0 6.0");
+    command("set atom 1 mass 1.0");
+    command("set atom 2 mass 3.0");
+    command("pair_style zero 5.0");
+    command("pair_coeff * *");
+    command("compute iner all inertia");
+    command("variable ixx equal inertia(all,xx)");
+    command("variable iyy equal inertia(all,yy)");
+    command("variable izz equal inertia(all,zz)");
+    command("variable ixy equal inertia(all,xy)");
+    command("variable iyz equal inertia(all,yz)");
+    command("variable ixz equal inertia(all,xz)");
+    command("thermo_style custom c_iner[*]");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    auto *iner = get_vector("iner");
+    EXPECT_NEAR(iner[0], 10.4, 1.0e-12);
+    EXPECT_NEAR(iner[1], 26.75, 1.0e-12);
+    EXPECT_NEAR(iner[2], 22.75, 1.0e-12);
+    EXPECT_NEAR(iner[3], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[4], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[5], 0.0, 1.0e-12);
+
+    // the inertia() variable function shares the same code path (Group::inertia)
+    EXPECT_NEAR(get_variable_value("ixx"), 10.4, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("iyy"), 26.75, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("izz"), 22.75, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("ixy"), 0.0, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("iyz"), 0.0, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("ixz"), 0.0, 1.0e-12);
+}
+
+TEST_F(ComputeInertiaTest, Sphere)
+{
+    if (!info->has_style("atom", "sphere")) GTEST_SKIP();
+
+    // two finite spheres of radius 1, mass 1, at (0,0,0) and (4,0,0); COM at x=2
+    // orbital: Ixx=0, Iyy=Izz=8.0; spin: 0.4*m*r^2 = 0.4 each, 0.8 per diagonal
+
+    BEGIN_HIDE_OUTPUT();
+    command("units lj");
+    command("atom_style sphere");
+    command("boundary f f f");
+    command("region box block -20 20 -20 20 -20 20");
+    command("create_box 1 box");
+    command("create_atoms 1 single 0.0 0.0 0.0 units box");
+    command("create_atoms 1 single 4.0 0.0 0.0 units box");
+    command("set group all diameter 2.0");
+    command("set group all mass 1.0");
+    command("pair_style zero 5.0");
+    command("pair_coeff * *");
+    command("compute iner all inertia");
+    command("thermo_style custom c_iner[*]");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    auto *iner = get_vector("iner");
+    EXPECT_NEAR(iner[0], 0.8, 1.0e-12);
+    EXPECT_NEAR(iner[1], 8.8, 1.0e-12);
+    EXPECT_NEAR(iner[2], 8.8, 1.0e-12);
+    EXPECT_NEAR(iner[3], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[4], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[5], 0.0, 1.0e-12);
+}
+
+TEST_F(ComputeInertiaTest, Body)
+{
+    if (!lammps_config_has_package("BODY")) GTEST_SKIP();
+
+    // single body/nparticle at the origin with a known diagonal inertia
+    // tensor (2,3,4); compute inertia must return it unchanged (the orbital
+    // term is zero at the COM). Exercises the body-particle branch, which
+    // rotates the stored per-particle principal moments to the space frame.
+
+    const char *datafile = "compute_inertia_body.data";
+    FILE *fp = fopen(datafile, "w");
+    ASSERT_NE(fp, nullptr);
+    fputs("LAMMPS body nparticle test\n\n"
+          "1 atoms\n1 bodies\n1 atom types\n"
+          "-10 10 xlo xhi\n-10 10 ylo yhi\n-10 10 zlo zhi\n\n"
+          "Atoms\n\n"
+          "1 1 1 1.0 0.0 0.0 0.0 0 0 0\n\n"
+          "Bodies\n\n"
+          "1 1 9\n1\n2.0 3.0 4.0 0.0 0.0 0.0\n0.0 0.0 0.0\n",
+          fp);
+    fclose(fp);
+
+    BEGIN_HIDE_OUTPUT();
+    command("units lj");
+    command("atom_style body nparticle 1 1");
+    command("read_data " + std::string(datafile));
+    command("pair_style zero 5.0");
+    command("pair_coeff * *");
+    command("compute iner all inertia");
+    command("thermo_style custom c_iner[*]");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    auto *iner = get_vector("iner");
+    EXPECT_NEAR(iner[0], 2.0, 1.0e-12);
+    EXPECT_NEAR(iner[1], 3.0, 1.0e-12);
+    EXPECT_NEAR(iner[2], 4.0, 1.0e-12);
+    EXPECT_NEAR(iner[3], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[4], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[5], 0.0, 1.0e-12);
+
+    remove(datafile);
+}
+
+TEST_F(ComputeInertiaTest, Superellipsoid)
+{
+    if (!info->has_style("atom", "ellipsoid")) GTEST_SKIP();
+
+    // same configuration as the Ellipsoid test, but with atom_style
+    // "ellipsoid superellipsoid".  With the default blockiness (2,2) a
+    // superellipsoid reduces to a regular ellipsoid, so the analytic result
+    // is identical: tensor (10.4, 26.75, 22.75, 0, 0, 0).  This exercises
+    // the superellipsoid branch, which reads the per-particle principal
+    // moments stored in bonus_super.  Note the mass must be set before the
+    // shape, since the stored inertia is computed when the shape is set.
+
+    BEGIN_HIDE_OUTPUT();
+    command("units lj");
+    command("atom_style ellipsoid superellipsoid");
+    command("boundary f f f");
+    command("region box block -20 20 -20 20 -20 20");
+    command("create_box 1 box");
+    command("create_atoms 1 single 0.0 0.0 0.0 units box");
+    command("create_atoms 1 single 5.0 0.0 0.0 units box");
+    command("set atom 1 mass 1.0");
+    command("set atom 2 mass 3.0");
+    command("set group all shape 2.0 4.0 6.0");
+    command("pair_style zero 5.0");
+    command("pair_coeff * *");
+    command("compute iner all inertia");
+    command("thermo_style custom c_iner[*]");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    auto *iner = get_vector("iner");
+    EXPECT_NEAR(iner[0], 10.4, 1.0e-12);
+    EXPECT_NEAR(iner[1], 26.75, 1.0e-12);
+    EXPECT_NEAR(iner[2], 22.75, 1.0e-12);
+    EXPECT_NEAR(iner[3], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[4], 0.0, 1.0e-12);
+    EXPECT_NEAR(iner[5], 0.0, 1.0e-12);
+}
+
+TEST_F(ComputeInertiaTest, Angmom)
+{
+    if (!info->has_style("atom", "sphere")) GTEST_SKIP();
+
+    // two finite spheres (r=1, m=1) spinning at omega=(0,0,5), otherwise at
+    // rest -> total angular momentum is pure spin (0,0,4). exercises the
+    // angmom() variable function (Group::angmom + Group::angmom_extended).
+
+    BEGIN_HIDE_OUTPUT();
+    command("units lj");
+    command("atom_style sphere");
+    command("boundary f f f");
+    command("region box block -20 20 -20 20 -20 20");
+    command("create_box 1 box");
+    command("create_atoms 1 single 0.0 0.0 0.0 units box");
+    command("create_atoms 1 single 2.0 0.0 0.0 units box");
+    command("set group all diameter 2.0");
+    command("set group all mass 1.0");
+    command("set group all omega 0.0 0.0 5.0");
+    command("pair_style zero 5.0");
+    command("pair_coeff * *");
+    command("variable lx equal angmom(all,x)");
+    command("variable ly equal angmom(all,y)");
+    command("variable lz equal angmom(all,z)");
+    command("run 0 post no");
+    END_HIDE_OUTPUT();
+
+    EXPECT_NEAR(get_variable_value("lx"), 0.0, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("ly"), 0.0, 1.0e-12);
+    EXPECT_NEAR(get_variable_value("lz"), 4.0, 1.0e-12);
+}
 } // namespace LAMMPS_NS
 
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
-
-    if (LAMMPS_NS::platform::mpi_vendor() == "Open MPI" && !Info::has_exceptions())
-        std::cout << "Warning: using OpenMPI without exceptions. Death tests will be skipped\n";
 
     // handle arguments passed via environment variable
     if (const char *var = getenv("TEST_ARGS")) {

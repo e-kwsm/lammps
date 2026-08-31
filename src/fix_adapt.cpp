@@ -15,13 +15,19 @@
 #include "fix_adapt.h"
 
 #include "angle.h"
+#include "angle_hybrid.h"
 #include "atom.h"
 #include "bond.h"
+#include "bond_hybrid.h"
+#include "dihedral.h"
+#include "dihedral_hybrid.h"
 #include "domain.h"
 #include "error.h"
-#include "fix_store_peratom.h"
+#include "fix_store_atom.h"
 #include "force.h"
 #include "group.h"
+#include "improper.h"
+#include "improper_hybrid.h"
 #include "input.h"
 #include "kspace.h"
 #include "math_const.h"
@@ -39,18 +45,18 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathConst;
 
-enum{PAIR,KSPACE,ATOM,BOND,ANGLE};
-enum{DIAMETER,CHARGE};
+enum{PAIR, KSPACE, ATOM, BOND, ANGLE, DIHEDRAL, IMPROPER};
+enum{DIAMETER, CHARGE};
 
 /* ---------------------------------------------------------------------- */
 
 FixAdapt::FixAdapt(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg), nadapt(0), anypair(0), anybond(0), anyangle(0),
-  id_fix_diam(nullptr), id_fix_chg(nullptr), adapt(nullptr)
+  anydihedral(0), anyimproper(0), id_fix_diam(nullptr), id_fix_chg(nullptr), adapt(nullptr)
 {
-  if (narg < 5) error->all(FLERR,"Illegal fix adapt command");
+  if (narg < 5) utils::missing_cmd_args(FLERR,"fix adapt", error);
   nevery = utils::inumeric(FLERR,arg[3],false,lmp);
-  if (nevery < 0) error->all(FLERR,"Illegal fix adapt command");
+  if (nevery < 0) error->all(FLERR, 3, "Illegal fix adapt every value {}", nevery);
 
   dynamic_group_allow = 1;
   create_attribute = 1;
@@ -62,108 +68,149 @@ FixAdapt::FixAdapt(LAMMPS *lmp, int narg, char **arg) :
   int iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
-      if (iarg+6 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+6 > narg) utils::missing_cmd_args(FLERR,"fix adapt pair", error);
       nadapt++;
       iarg += 6;
     } else if (strcmp(arg[iarg],"kspace") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"fix adapt kspace", error);
       nadapt++;
       iarg += 2;
     } else if (strcmp(arg[iarg],"atom") == 0) {
-      if (iarg+3 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+3 > narg) utils::missing_cmd_args(FLERR,"fix adapt atom", error);
       nadapt++;
       iarg += 3;
     } else if (strcmp(arg[iarg],"bond") == 0) {
-      if (iarg+5 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+5 > narg) utils::missing_cmd_args(FLERR,"fix adapt bond", error);
       nadapt++;
       iarg += 5;
     } else if (strcmp(arg[iarg],"angle") == 0) {
-      if (iarg+5 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+5 > narg) utils::missing_cmd_args(FLERR,"fix adapt angle", error);
+      nadapt++;
+      iarg += 5;
+    } else if (strcmp(arg[iarg],"dihedral") == 0) {
+      if (iarg+5 > narg) utils::missing_cmd_args(FLERR,"fix adapt dihedral", error);
+      nadapt++;
+      iarg += 5;
+    } else if (strcmp(arg[iarg],"improper") == 0) {
+      if (iarg+5 > narg) utils::missing_cmd_args(FLERR,"fix adapt improper", error);
       nadapt++;
       iarg += 5;
     } else break;
   }
 
-  if (nadapt == 0) error->all(FLERR,"Illegal fix adapt command");
+  if (nadapt == 0) error->all(FLERR, 3, "Nothing to adapt in fix adapt command");
   adapt = new Adapt[nadapt];
 
   // parse keywords
 
   nadapt = 0;
-  diamflag = 0;
   chgflag = 0;
 
   iarg = 4;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"pair") == 0) {
-      if (iarg+6 > narg) error->all(FLERR,"Illegal fix adapt command");
       adapt[nadapt].which = PAIR;
       adapt[nadapt].pair = nullptr;
       adapt[nadapt].pstyle = utils::strdup(arg[iarg+1]);
       adapt[nadapt].pparam = utils::strdup(arg[iarg+2]);
-      utils::bounds(FLERR,arg[iarg+3],1,atom->ntypes,
-                    adapt[nadapt].ilo,adapt[nadapt].ihi,error);
-      utils::bounds(FLERR,arg[iarg+4],1,atom->ntypes,
-                    adapt[nadapt].jlo,adapt[nadapt].jhi,error);
+      utils::bounds_typelabel(FLERR, arg[iarg+3], 1, atom->ntypes,
+                              adapt[nadapt].ilo, adapt[nadapt].ihi, lmp, Atom::ATOM);
+      utils::bounds_typelabel(FLERR, arg[iarg+4], 1, atom->ntypes,
+                              adapt[nadapt].jlo, adapt[nadapt].jhi, lmp, Atom::ATOM);
+
+      // switch i,j if i > j, if wildcards were not used
+
+      if ( (adapt[nadapt].ilo == adapt[nadapt].ihi) &&
+           (adapt[nadapt].jlo == adapt[nadapt].jhi) &&
+           (adapt[nadapt].ilo > adapt[nadapt].jlo) ) {
+        adapt[nadapt].jlo = adapt[nadapt].ihi;
+        adapt[nadapt].ilo = adapt[nadapt].jhi;
+        adapt[nadapt].ihi = adapt[nadapt].ilo;
+        adapt[nadapt].jhi = adapt[nadapt].jlo;
+      }
+
       if (utils::strmatch(arg[iarg+5],"^v_")) {
         adapt[nadapt].var = utils::strdup(arg[iarg+5]+2);
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR, iarg+5, "Argument must be variable not {}", arg[iarg+5]);
       nadapt++;
       iarg += 6;
 
     } else if (strcmp(arg[iarg],"bond") == 0) {
-      if (iarg+5 > narg) error->all(FLERR, "Illegal fix adapt command");
       adapt[nadapt].which = BOND;
       adapt[nadapt].bond = nullptr;
       adapt[nadapt].bstyle = utils::strdup(arg[iarg+1]);
       adapt[nadapt].bparam = utils::strdup(arg[iarg+2]);
-      utils::bounds(FLERR,arg[iarg+3],1,atom->nbondtypes,
-                    adapt[nadapt].ilo,adapt[nadapt].ihi,error);
+      utils::bounds_typelabel(FLERR, arg[iarg+3], 1, atom->nbondtypes,
+                              adapt[nadapt].ilo, adapt[nadapt].ihi, lmp, Atom::BOND);
       if (utils::strmatch(arg[iarg+4],"^v_")) {
         adapt[nadapt].var = utils::strdup(arg[iarg+4]+2);
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR, iarg+4, "Argument must be variable not {}", arg[iarg+4]);
       nadapt++;
       iarg += 5;
 
     } else if (strcmp(arg[iarg],"angle") == 0) {
-      if (iarg+5 > narg) error->all(FLERR, "Illegal fix adapt command");
       adapt[nadapt].which = ANGLE;
       adapt[nadapt].angle = nullptr;
       adapt[nadapt].astyle = utils::strdup(arg[iarg+1]);
       adapt[nadapt].aparam = utils::strdup(arg[iarg+2]);
-      utils::bounds(FLERR,arg[iarg+3],1,atom->nangletypes,
-                    adapt[nadapt].ilo,adapt[nadapt].ihi,error);
+      utils::bounds_typelabel(FLERR, arg[iarg+3], 1, atom->nangletypes,
+                              adapt[nadapt].ilo, adapt[nadapt].ihi, lmp, Atom::ANGLE);
       if (utils::strmatch(arg[iarg+4],"^v_")) {
         adapt[nadapt].var = utils::strdup(arg[iarg+4]+2);
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR,iarg+4, "Argument must be variable not {}", arg[iarg+4]);
+      nadapt++;
+      iarg += 5;
+
+    } else if (strcmp(arg[iarg],"dihedral") == 0) {
+      adapt[nadapt].which = DIHEDRAL;
+      adapt[nadapt].dihedral = nullptr;
+      adapt[nadapt].dstyle = utils::strdup(arg[iarg+1]);
+      adapt[nadapt].dparam = utils::strdup(arg[iarg+2]);
+      utils::bounds_typelabel(FLERR, arg[iarg+3], 1, atom->ndihedraltypes,
+                              adapt[nadapt].ilo, adapt[nadapt].ihi, lmp, Atom::DIHEDRAL);
+      if (utils::strmatch(arg[iarg+4],"^v_")) {
+        adapt[nadapt].var = utils::strdup(arg[iarg+4]+2);
+      } else error->all(FLERR,"Argument #{} must be variable not {}", iarg+5, arg[iarg+4]);
+      nadapt++;
+      iarg += 5;
+
+    } else if (strcmp(arg[iarg],"improper") == 0) {
+      adapt[nadapt].which = IMPROPER;
+      adapt[nadapt].improper = nullptr;
+      adapt[nadapt].istyle = utils::strdup(arg[iarg+1]);
+      adapt[nadapt].iparam = utils::strdup(arg[iarg+2]);
+      utils::bounds_typelabel(FLERR, arg[iarg+3], 1, atom->nimpropertypes,
+                              adapt[nadapt].ilo, adapt[nadapt].ihi, lmp, Atom::IMPROPER);
+      if (utils::strmatch(arg[iarg+4],"^v_")) {
+        adapt[nadapt].var = utils::strdup(arg[iarg+4]+2);
+      } else error->all(FLERR,"Argument #{} must be variable not {}", iarg+5, arg[iarg+4]);
       nadapt++;
       iarg += 5;
 
     } else if (strcmp(arg[iarg],"kspace") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix adapt command");
       adapt[nadapt].which = KSPACE;
       if (utils::strmatch(arg[iarg+1],"^v_")) {
         adapt[nadapt].var = utils::strdup(arg[iarg+1]+2);
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR, iarg+1, "Argument must be variable not {}", arg[iarg+1]);
       nadapt++;
       iarg += 2;
 
     } else if (strcmp(arg[iarg],"atom") == 0) {
-      if (iarg+3 > narg) error->all(FLERR,"Illegal fix adapt command");
       adapt[nadapt].which = ATOM;
       if (strcmp(arg[iarg+1],"diameter") == 0 ||
           strcmp(arg[iarg+1],"diameter/disc") == 0) {
         adapt[nadapt].atomparam = DIAMETER;
-        diamflag = 1;
+        diam_flag = 1;
         discflag = 0;
         if (strcmp(arg[iarg+1],"diameter/disc") == 0) discflag = 1;
       } else if (strcmp(arg[iarg+1],"charge") == 0) {
         adapt[nadapt].atomparam = CHARGE;
         chgflag = 1;
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR, iarg+1, "Unsupported per-atom property {} for fix adapt",
+                        arg[iarg+1]);
       if (utils::strmatch(arg[iarg+2],"^v_")) {
         adapt[nadapt].var = utils::strdup(arg[iarg+2]+2);
-      } else error->all(FLERR,"Illegal fix adapt command");
+      } else error->all(FLERR, iarg+2, "Argument must be variable not {}", arg[iarg+2]);
       nadapt++;
       iarg += 3;
     } else break;
@@ -177,47 +224,57 @@ FixAdapt::FixAdapt(LAMMPS *lmp, int narg, char **arg) :
 
   while (iarg < narg) {
     if (strcmp(arg[iarg],"reset") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"fix adapt reset", error);
       resetflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg],"scale") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"fix adapt scale", error);
       scaleflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg],"mass") == 0) {
-      if (iarg+2 > narg)error->all(FLERR,"Illegal fix adapt command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"fix adapt mass", error);
       massflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
-    } else error->all(FLERR,"Illegal fix adapt command");
+    } else error->all(FLERR,"Unknown fix adapt keyword {}", arg[iarg]);
   }
 
   // if scaleflag set with diameter or charge adaptation,
   // then previous step scale factors are written to restart file
   // initialize them here in case one is used and other is never defined
 
-  if (scaleflag && (diamflag || chgflag)) restart_global = 1;
+  if (scaleflag && (diam_flag || chgflag)) restart_global = 1;
   previous_diam_scale = previous_chg_scale = 1.0;
 
   // allocate pair style arrays
 
   int n = atom->ntypes;
   for (int m = 0; m < nadapt; m++)
-    if (adapt[m].which == PAIR)
-      memory->create(adapt[m].array_orig,n+1,n+1,"adapt:array_orig");
+    if (adapt[m].which == PAIR) memory->create(adapt[m].array_orig,n+1,n+1,"adapt:array_orig");
 
   // allocate bond style arrays:
 
   n = atom->nbondtypes;
   for (int m = 0; m < nadapt; ++m)
-    if (adapt[m].which == BOND)
-      memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
+    if (adapt[m].which == BOND) memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
 
   // allocate angle style arrays:
 
-  n = atom->nbondtypes;
+  n = atom->nangletypes;
   for (int m = 0; m < nadapt; ++m)
-    if (adapt[m].which == ANGLE)
-      memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
+    if (adapt[m].which == ANGLE) memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
+
+  // allocate improper style arrays:
+
+  n = atom->ndihedraltypes;
+  for (int m = 0; m < nadapt; ++m)
+    if (adapt[m].which == DIHEDRAL) memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
+
+  // allocate improper style arrays:
+
+  n = atom->nimpropertypes;
+  for (int m = 0; m < nadapt; ++m)
+    if (adapt[m].which == IMPROPER) memory->create(adapt[m].vector_orig,n+1,"adapt:vector_orig");
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -225,29 +282,35 @@ FixAdapt::FixAdapt(LAMMPS *lmp, int narg, char **arg) :
 FixAdapt::~FixAdapt()
 {
   for (int m = 0; m < nadapt; m++) {
-    delete [] adapt[m].var;
+    delete[] adapt[m].var;
     if (adapt[m].which == PAIR) {
-      delete [] adapt[m].pstyle;
-      delete [] adapt[m].pparam;
+      delete[] adapt[m].pstyle;
+      delete[] adapt[m].pparam;
       memory->destroy(adapt[m].array_orig);
     } else if (adapt[m].which == BOND) {
-      delete [] adapt[m].bstyle;
-      delete [] adapt[m].bparam;
+      delete[] adapt[m].bstyle;
+      delete[] adapt[m].bparam;
       memory->destroy(adapt[m].vector_orig);
     } else if (adapt[m].which == ANGLE) {
-      delete [] adapt[m].astyle;
-      delete [] adapt[m].aparam;
+      delete[] adapt[m].astyle;
+      delete[] adapt[m].aparam;
+      memory->destroy(adapt[m].vector_orig);
+    } else if (adapt[m].which == DIHEDRAL) {
+      delete[] adapt[m].dstyle;
+      delete[] adapt[m].dparam;
+      memory->destroy(adapt[m].vector_orig);
+    } else if (adapt[m].which == IMPROPER) {
+      delete[] adapt[m].istyle;
+      delete[] adapt[m].iparam;
       memory->destroy(adapt[m].vector_orig);
     }
   }
-  delete [] adapt;
+  delete[] adapt;
 
-  // check nfix in case all fixes have already been deleted
-
-  if (id_fix_diam && modify->nfix) modify->delete_fix(id_fix_diam);
-  if (id_fix_chg && modify->nfix) modify->delete_fix(id_fix_chg);
-  delete [] id_fix_diam;
-  delete [] id_fix_chg;
+  if (id_fix_diam) modify->delete_fix(id_fix_diam);
+  if (id_fix_chg) modify->delete_fix(id_fix_chg);
+  delete[] id_fix_diam;
+  delete[] id_fix_chg;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -268,7 +331,7 @@ int FixAdapt::setmask()
 void FixAdapt::post_constructor()
 {
   if (!resetflag) return;
-  if (!diamflag && !chgflag) return;
+  if (!diam_flag && !chgflag) return;
 
   // new id = fix-ID + FIX_STORE_ATTRIBUTE
   // new fix group = group for this fix
@@ -276,10 +339,10 @@ void FixAdapt::post_constructor()
   id_fix_diam = nullptr;
   id_fix_chg = nullptr;
 
-  if (diamflag && atom->radius_flag) {
+  if (diam_flag && atom->radius_flag) {
     id_fix_diam = utils::strdup(id + std::string("_FIX_STORE_DIAM"));
-    fix_diam = dynamic_cast<FixStorePeratom *>(
-      modify->add_fix(fmt::format("{} {} STORE/PERATOM 1 1", id_fix_diam,group->names[igroup])));
+    fix_diam = dynamic_cast<FixStoreAtom *>(
+      modify->add_fix(fmt::format("{} {} STORE/ATOM 1 0 0 1", id_fix_diam, group->names[igroup])));
     if (fix_diam->restart_reset) fix_diam->restart_reset = 0;
     else {
       double *vec = fix_diam->vstore;
@@ -296,8 +359,8 @@ void FixAdapt::post_constructor()
 
   if (chgflag && atom->q_flag) {
     id_fix_chg = utils::strdup(id + std::string("_FIX_STORE_CHG"));
-    fix_chg = dynamic_cast<FixStorePeratom *>(
-      modify->add_fix(fmt::format("{} {} STORE/PERATOM 1 1",id_fix_chg,group->names[igroup])));
+    fix_chg = dynamic_cast<FixStoreAtom *>(
+      modify->add_fix(fmt::format("{} {} STORE/ATOM 1 0 0 1", id_fix_chg, group->names[igroup])));
     if (fix_chg->restart_reset) fix_chg->restart_reset = 0;
     else {
       double *vec = fix_chg->vstore;
@@ -324,22 +387,27 @@ void FixAdapt::init()
   if (group->dynamic[igroup])
     for (i = 0; i < nadapt; i++)
       if (adapt[i].which == ATOM)
-        error->all(FLERR,"Cannot use dynamic group with fix adapt atom");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Cannot use dynamic group {} with fix adapt atom", group->names[igroup]);
 
   // setup and error checks
 
   anypair = 0;
   anybond = 0;
   anyangle = 0;
+  anydihedral = 0;
+  anyimproper = 0;
 
   for (int m = 0; m < nadapt; m++) {
     Adapt *ad = &adapt[m];
 
     ad->ivar = input->variable->find(ad->var);
     if (ad->ivar < 0)
-      error->all(FLERR,"Variable name for fix adapt does not exist");
+      error->all(FLERR, Error::NOLASTLINE,
+                 "Variable name {} for fix adapt does not exist", ad->var);
     if (!input->variable->equalstyle(ad->ivar))
-      error->all(FLERR,"Variable for fix adapt is invalid style");
+      error->all(FLERR, Error::NOLASTLINE,
+                 "Variable {} for fix adapt is invalid style", ad->var);
 
     if (ad->which == PAIR) {
       anypair = 1;
@@ -357,22 +425,27 @@ void FixAdapt::init()
         nsub = utils::inumeric(FLERR,cptr+1,false,lmp);
       }
 
-      if (lmp->suffix_enable)
-        ad->pair = force->pair_match(fmt::format("{}/{}",pstyle,lmp->suffix),1,nsub);
-
+      if (lmp->suffix_enable) {
+        if (lmp->suffix)
+          ad->pair = force->pair_match(fmt::format("{}/{}",pstyle,lmp->suffix),1,nsub);
+        if ((ad->pair == nullptr) && lmp->suffix2)
+          ad->pair = force->pair_match(fmt::format("{}/{}",pstyle,lmp->suffix2),1,nsub);
+      }
       if (ad->pair == nullptr) ad->pair = force->pair_match(pstyle,1,nsub);
       if (ad->pair == nullptr)
-        error->all(FLERR,"Fix adapt pair style does not exist");
+        error->all(FLERR, Error::NOLASTLINE, "Fix adapt pair style {} not found", pstyle);
 
       void *ptr = ad->pair->extract(ad->pparam,ad->pdim);
       if (ptr == nullptr)
-        error->all(FLERR,"Fix adapt pair style param not supported");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Fix adapt pair style {} param {} not supported", ad->pstyle, ad->pparam);
 
       // for pair styles only parameters that are 2-d arrays in atom types or
       // scalars are supported
 
       if (ad->pdim != 2 && ad->pdim != 0)
-        error->all(FLERR,"Fix adapt pair style param is not compatible");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Pair style parameter {} is not compatible with fix adapt", ad->pparam);
 
       if (ad->pdim == 2) ad->array = (double **) ptr;
       if (ad->pdim == 0) ad->scalar = (double *) ptr;
@@ -380,15 +453,19 @@ void FixAdapt::init()
       // if pair hybrid, test that ilo,ihi,jlo,jhi are valid for sub-style
 
       if (utils::strmatch(force->pair_style,"^hybrid")) {
-        auto pair = dynamic_cast<PairHybrid *>(force->pair);
-        for (i = ad->ilo; i <= ad->ihi; i++)
-          for (j = MAX(ad->jlo,i); j <= ad->jhi; j++)
-            if (!pair->check_ijtype(i,j,pstyle))
-              error->all(FLERR,"Fix adapt type pair range is not valid for "
-                         "pair hybrid sub-style");
+        auto *pair = dynamic_cast<PairHybrid *>(force->pair);
+        if (pair) {
+          for (i = ad->ilo; i <= ad->ihi; i++) {
+            for (j = MAX(ad->jlo,i); j <= ad->jhi; j++) {
+              if (!pair->check_ijtype(i,j,pstyle))
+                error->all(FLERR, Error::NOLASTLINE, "Fix adapt type pair range is not valid "
+                           "for pair hybrid sub-style {}", pstyle);
+            }
+          }
+        }
       }
 
-      delete [] pstyle;
+      delete[] pstyle;
 
     } else if (ad->which == BOND) {
       ad->bond = nullptr;
@@ -400,21 +477,30 @@ void FixAdapt::init()
 
       if (ad->bond == nullptr) ad->bond = force->bond_match(bstyle);
       if (ad->bond == nullptr )
-        error->all(FLERR,"Fix adapt bond style does not exist");
+        error->all(FLERR, Error::NOLASTLINE,"Fix adapt bond style {} does not exist", bstyle);
 
       void *ptr = ad->bond->extract(ad->bparam,ad->bdim);
 
       if (ptr == nullptr)
-        error->all(FLERR,"Fix adapt bond style param not supported");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Fix adapt bond style parameter {} not supported", ad->bparam);
 
       // for bond styles, use a vector
 
       if (ad->bdim == 1) ad->vector = (double *) ptr;
 
-      if (utils::strmatch(force->bond_style,"^hybrid"))
-        error->all(FLERR,"Fix adapt does not support bond_style hybrid");
+      if (utils::strmatch(force->bond_style,"^hybrid")) {
+        auto *bond = dynamic_cast<BondHybrid *>(force->bond);
+        if (bond) {
+          for (i = ad->ilo; i <= ad->ihi; i++) {
+            if (!bond->check_itype(i,bstyle))
+              error->all(FLERR, Error::NOLASTLINE, "Fix adapt type bond range is not valid "
+                         "for bond hybrid sub-style {}", bstyle);
+          }
+        }
+      }
 
-      delete [] bstyle;
+      delete[] bstyle;
 
     } else if (ad->which == ANGLE) {
       ad->angle = nullptr;
@@ -426,40 +512,118 @@ void FixAdapt::init()
 
       if (ad->angle == nullptr) ad->angle = force->angle_match(astyle);
       if (ad->angle == nullptr )
-        error->all(FLERR,"Fix adapt angle style does not exist");
+        error->all(FLERR, Error::NOLASTLINE, "Fix adapt angle style {} does not exist", astyle);
 
       void *ptr = ad->angle->extract(ad->aparam,ad->adim);
 
       if (ptr == nullptr)
-        error->all(FLERR,"Fix adapt angle style param not supported");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Fix adapt angle style parameter {} not supported", ad->aparam);
 
       // for angle styles, use a vector
 
       if (ad->adim == 1) ad->vector = (double *) ptr;
 
-      if (utils::strmatch(force->angle_style,"^hybrid"))
-        error->all(FLERR,"Fix adapt does not support angle_style hybrid");
+      if (utils::strmatch(force->angle_style,"^hybrid")) {
+        auto *angle = dynamic_cast<AngleHybrid *>(force->angle);
+        if (angle) {
+          for (i = ad->ilo; i <= ad->ihi; i++) {
+            if (!angle->check_itype(i,astyle))
+              error->all(FLERR, Error::NOLASTLINE, "Fix adapt type angle range is not valid "
+                         "for angle hybrid sub-style {}", astyle);
+          }
+        }
+      }
 
-      delete [] astyle;
+      delete[] astyle;
+
+    } else if (ad->which == DIHEDRAL) {
+      ad->dihedral = nullptr;
+      anydihedral = 1;
+
+      char *dstyle = utils::strdup(ad->dstyle);
+      if (lmp->suffix_enable)
+        ad->dihedral = force->dihedral_match(fmt::format("{}/{}",dstyle,lmp->suffix));
+
+      if (ad->dihedral == nullptr) ad->dihedral = force->dihedral_match(dstyle);
+      if (ad->dihedral == nullptr )
+        error->all(FLERR,"Fix adapt dihedral style {} does not exist", dstyle);
+
+      void *ptr = ad->dihedral->extract(ad->dparam,ad->ddim);
+
+      if (ptr == nullptr)
+        error->all(FLERR,"Fix adapt dihedral style parameter {} not supported", ad->dparam);
+
+      // for dihedral styles, use a vector
+
+      if (ad->ddim == 1) ad->vector = (double *) ptr;
+
+      if (utils::strmatch(force->dihedral_style,"^hybrid")) {
+        auto *dihedral = dynamic_cast<DihedralHybrid *>(force->dihedral);
+        if (dihedral) {
+          for (i = ad->ilo; i <= ad->ihi; i++) {
+            if (!dihedral->check_itype(i,dstyle))
+              error->all(FLERR,"Fix adapt type dihedral range is not valid "
+                         "for dihedral hybrid sub-style {}", dstyle);
+          }
+        }
+      }
+
+      delete[] dstyle;
+
+    } else if (ad->which == IMPROPER) {
+      ad->improper = nullptr;
+      anyimproper = 1;
+
+      char *istyle = utils::strdup(ad->istyle);
+      if (lmp->suffix_enable)
+        ad->improper = force->improper_match(fmt::format("{}/{}",istyle,lmp->suffix));
+
+      if (ad->improper == nullptr) ad->improper = force->improper_match(istyle);
+      if (ad->improper == nullptr )
+        error->all(FLERR,"Fix adapt improper style {} does not exist", istyle);
+
+      void *ptr = ad->improper->extract(ad->iparam,ad->idim);
+
+      if (ptr == nullptr)
+        error->all(FLERR,"Fix adapt improper style parameter {} not supported", ad->iparam);
+
+      // for improper styles, use a vector
+
+      if (ad->idim == 1) ad->vector = (double *) ptr;
+
+      if (utils::strmatch(force->improper_style,"^hybrid")) {
+        auto *improper = dynamic_cast<ImproperHybrid *>(force->improper);
+        if (improper) {
+          for (i = ad->ilo; i <= ad->ihi; i++) {
+            if (!improper->check_itype(i,istyle))
+              error->all(FLERR,"Fix adapt type improper range is not valid "
+                         "for improper hybrid sub-style {}", istyle);
+          }
+        }
+      }
+
+      delete[] istyle;
 
     } else if (ad->which == KSPACE) {
       if (force->kspace == nullptr)
-        error->all(FLERR,"Fix adapt kspace style does not exist");
+        error->all(FLERR, Error::NOLASTLINE,
+                   "Fix adapt expected a kspace style but none was defined");
       kspace_scale = (double *) force->kspace->extract("scale");
 
     } else if (ad->which == ATOM) {
       if (ad->atomparam == DIAMETER) {
         if (!atom->radius_flag)
-          error->all(FLERR,"Fix adapt requires atom attribute diameter");
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt requires atom attribute diameter");
         if (!atom->rmass_flag)
-          error->all(FLERR,"Fix adapt requires atom attribute mass");
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt requires atom attribute mass");
         if (discflag && domain->dimension != 2)
-          error->all(FLERR,"Fix adapt requires 2d simulation");
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt requires 2d simulation");
         if (!restart_reset) previous_diam_scale = 1.0;
       }
       if (ad->atomparam == CHARGE) {
         if (!atom->q_flag)
-          error->all(FLERR,"Fix adapt requires atom attribute charge");
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt requires atom attribute charge");
         if (!restart_reset) previous_chg_scale = 1.0;
       }
     }
@@ -467,7 +631,7 @@ void FixAdapt::init()
 
   if (restart_reset) restart_reset = 0;
 
-  // make copy of original pair/bond/angle array values
+  // make copy of original pair/bond/angle/dihedral/improper array values
 
   for (int m = 0; m < nadapt; m++) {
     Adapt *ad = &adapt[m];
@@ -485,6 +649,14 @@ void FixAdapt::init()
     } else if (ad->which == ANGLE && ad->adim == 1) {
       for (i = ad->ilo; i <= ad->ihi; ++i )
         ad->vector_orig[i] = ad->vector[i];
+
+    } else if (ad->which == DIHEDRAL && ad->ddim == 1) {
+      for (i = ad->ilo; i <= ad->ihi; ++i )
+        ad->vector_orig[i] = ad->vector[i];
+
+    } else if (ad->which == IMPROPER && ad->idim == 1) {
+      for (i = ad->ilo; i <= ad->ihi; ++i )
+        ad->vector_orig[i] = ad->vector[i];
     }
 
   }
@@ -492,12 +664,16 @@ void FixAdapt::init()
   // fixes that store initial per-atom values
 
   if (id_fix_diam) {
-    fix_diam = dynamic_cast<FixStorePeratom *>(modify->get_fix_by_id(id_fix_diam));
-    if (!fix_diam) error->all(FLERR,"Could not find fix adapt storage fix ID {}", id_fix_diam);
+    fix_diam = dynamic_cast<FixStoreAtom *>(modify->get_fix_by_id(id_fix_diam));
+    if (!fix_diam)
+      error->all(FLERR, Error::NOLASTLINE,
+                 "Could not find fix adapt storage fix ID {}", id_fix_diam);
   }
   if (id_fix_chg) {
-    fix_chg = dynamic_cast<FixStorePeratom *>(modify->get_fix_by_id(id_fix_chg));
-    if (!fix_chg) error->all(FLERR,"Could not find fix adapt storage fix ID {}", id_fix_chg);
+    fix_chg = dynamic_cast<FixStoreAtom *>(modify->get_fix_by_id(id_fix_chg));
+    if (!fix_chg)
+      error->all(FLERR, Error::NOLASTLINE,
+                 "Could not find fix adapt storage fix ID {}", id_fix_chg);
   }
 
   if (utils::strmatch(update->integrate_style,"^respa"))
@@ -600,6 +776,30 @@ void FixAdapt::change_settings()
             ad->vector[i] = value;
       }
 
+    // set dihedral type array values:
+
+  } else if (ad->which == DIHEDRAL) {
+    if (ad->ddim == 1) {
+      if (scaleflag)
+        for (i = ad->ilo; i <= ad->ihi; ++i )
+          ad->vector[i] = value*ad->vector_orig[i];
+      else
+        for (i = ad->ilo; i <= ad->ihi; ++i )
+          ad->vector[i] = value;
+    }
+
+    // set improper type array values:
+
+    } else if (ad->which == IMPROPER) {
+      if (ad->idim == 1) {
+        if (scaleflag)
+          for (i = ad->ilo; i <= ad->ihi; ++i )
+            ad->vector[i] = value*ad->vector_orig[i];
+        else
+          for (i = ad->ilo; i <= ad->ihi; ++i )
+            ad->vector[i] = value;
+      }
+
     // set kspace scale factor
 
     } else if (ad->which == KSPACE) {
@@ -614,14 +814,28 @@ void FixAdapt::change_settings()
       // for scaleflag, previous_diam_scale is the scale factor on previous step
 
       if (ad->atomparam == DIAMETER) {
-        double scale;
+        double scale = 1.0;
         double *radius = atom->radius;
         double *rmass = atom->rmass;
         int *mask = atom->mask;
         int nlocal = atom->nlocal;
         int nall = nlocal + atom->nghost;
 
-        if (scaleflag) scale = value / previous_diam_scale;
+        // a scale factor of 0.0 would zero all diameters permanently and cannot
+        // be undone on later steps, so it must be rejected before the division
+
+        if (scaleflag) {
+          if ((value == 0.0) || (previous_diam_scale == 0.0))
+            error->all(FLERR, Error::NOLASTLINE,
+                       "Fix adapt diameter scale factor of 0.0 is not supported");
+          scale = value / previous_diam_scale;
+        }
+
+        // mass must not become zero and radius must not be negative
+        if (massflag && ((scale == 0.0) || (value == 0.0)))
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt particle mass has become 0.0");
+        if (!massflag && ((scale < 0.0) || (value < 0.0)))
+          error->all(FLERR, Error::NOLASTLINE, "Fix adapt particle diameter has become negative");
 
         for (i = 0; i < nall; i++) {
           if (mask[i] & groupbit) {
@@ -647,7 +861,15 @@ void FixAdapt::change_settings()
         int nlocal = atom->nlocal;
         int nall = nlocal + atom->nghost;
 
-        if (scaleflag) scale = value / previous_chg_scale;
+        // a scale factor of 0.0 would zero all charges permanently and cannot
+        // be undone on later steps, so it must be rejected before the division
+
+        if (scaleflag) {
+          if ((value == 0.0) || (previous_chg_scale == 0.0))
+            error->all(FLERR, Error::NOLASTLINE,
+                       "Fix adapt charge scale factor of 0.0 is not supported");
+          scale = value / previous_chg_scale;
+        }
 
         for (i = 0; i < nall; i++) {
           if (mask[i] & groupbit) {
@@ -675,6 +897,8 @@ void FixAdapt::change_settings()
   if (anypair) force->pair->reinit();
   if (anybond) force->bond->reinit();
   if (anyangle) force->angle->reinit();
+  if (anydihedral) force->dihedral->reinit();
+  if (anyimproper) force->improper->reinit();
 
   // reset KSpace charges if charges have changed
 
@@ -709,11 +933,23 @@ void FixAdapt::restore_settings()
           ad->vector[i] = ad->vector_orig[i];
       }
 
+    } else if (ad->which == DIHEDRAL) {
+      if (ad->ddim == 1) {
+        for (int i = ad->ilo; i <= ad->ihi; i++)
+          ad->vector[i] = ad->vector_orig[i];
+      }
+
+    } else if (ad->which == IMPROPER) {
+      if (ad->idim == 1) {
+        for (int i = ad->ilo; i <= ad->ihi; i++)
+          ad->vector[i] = ad->vector_orig[i];
+      }
+
     } else if (ad->which == KSPACE) {
       *kspace_scale = 1.0;
 
     } else if (ad->which == ATOM) {
-      if (diamflag) {
+      if (diam_flag) {
         double scale;
 
         double *vec = fix_diam->vstore;
@@ -749,6 +985,8 @@ void FixAdapt::restore_settings()
   if (anypair) force->pair->reinit();
   if (anybond) force->bond->reinit();
   if (anyangle) force->angle->reinit();
+  if (anydihedral) force->dihedral->reinit();
+  if (anyimproper) force->improper->reinit();
   if (chgflag && force->kspace) force->kspace->qsum_qsq();
 }
 
@@ -781,7 +1019,7 @@ void FixAdapt::write_restart(FILE *fp)
 
 void FixAdapt::restart(char *buf)
 {
-  auto dbuf = (double *) buf;
+  auto *dbuf = (double *) buf;
 
   previous_diam_scale = dbuf[0];
   previous_chg_scale = dbuf[1];

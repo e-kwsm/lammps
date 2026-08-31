@@ -201,31 +201,25 @@ void ComputeFEP::init()
       pairflag = 1;
       Pair *pair = nullptr;
       if (lmp->suffix_enable) {
-        if (lmp->suffix) {
-          auto pstyle = fmt::format("{}/{}", pert->pstyle, lmp->suffix);
-          pair = force->pair_match(pstyle, 1);
-        }
-        if ((pair == nullptr) && lmp->suffix2) {
-          auto pstyle = fmt::format("{}/{}", pert->pstyle, lmp->suffix2);
-          pair = force->pair_match(pstyle, 1);
-        }
+        if (lmp->suffix)
+          pair = force->pair_match(fmt::format("{}/{}", pert->pstyle, lmp->suffix), 1);
+        if ((pair == nullptr) && lmp->suffix2)
+          pair = force->pair_match(fmt::format("{}/{}", pert->pstyle, lmp->suffix2), 1);
       }
 
       if (pair == nullptr) pair = force->pair_match(pert->pstyle, 1);
-      if (pair == nullptr)
-        error->all(FLERR, "compute fep pair style {} does not exist", pert->pstyle);
+      if (pair == nullptr) error->all(FLERR, "Compute fep pair style {} not found", pert->pstyle);
 
       void *ptr = pair->extract(pert->pparam, pert->pdim);
       if (ptr == nullptr)
-        error->all(FLERR, "compute fep pair style param {} not supported", pert->pparam);
+        error->all(FLERR, "Compute fep pair style {} param {} not supported", pert->pstyle, pert->pparam);
 
       pert->array = (double **) ptr;
 
       // if pair hybrid, test that ilo,ihi,jlo,jhi are valid for sub-style
 
-      if ((strcmp(force->pair_style, "hybrid") == 0 ||
-           strcmp(force->pair_style, "hybrid/overlay") == 0)) {
-        auto pair = dynamic_cast<PairHybrid *>(force->pair);
+      if (utils::strmatch(force->pair_style, "^hybrid")) {
+        auto *pair = dynamic_cast<PairHybrid *>(force->pair);
         for (i = pert->ilo; i <= pert->ihi; i++)
           for (j = MAX(pert->jlo, i); j <= pert->jhi; j++)
             if (!pair->check_ijtype(i, j, pert->pstyle))
@@ -273,8 +267,9 @@ void ComputeFEP::compute_vector()
 {
   double pe0, pe1;
 
-  eflag = 1;
-  vflag = 0;
+  // flag that we only need to compute the global energy
+  int eflag = ENERGY_GLOBAL | ENERGY_ONLY;
+  int vflag = VIRIAL_NONE;
 
   invoked_vector = update->ntimestep;
 
@@ -621,4 +616,19 @@ void ComputeFEP::restore_qfev()
       }
     }
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double ComputeFEP::memory_usage()
+{
+  double bytes = (double) nmax * 3 * sizeof(double);    // f_orig[nmax][3]
+  bytes += (double) nmax * sizeof(double);              // peatom_orig[nmax]
+  bytes += (double) nmax * 6 * sizeof(double);          // pvatom_orig[nmax][6]
+  if (q_orig) bytes += (double) nmax * sizeof(double);  // q_orig[nmax] (when chgflag)
+  if (keatom_orig) {
+    bytes += (double) nmax * sizeof(double);            // keatom_orig[nmax]
+    bytes += (double) nmax * 6 * sizeof(double);        // kvatom_orig[nmax][6]
+  }
+  return bytes;
 }

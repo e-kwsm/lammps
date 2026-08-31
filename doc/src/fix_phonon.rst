@@ -6,7 +6,7 @@ fix phonon command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID phonon N Noutput Nwait map_file prefix keyword values ...
 
@@ -134,7 +134,7 @@ for other systems, *nasr* = 10 is typically sufficient.
 The *map_file* contains the mapping information between the lattice
 indices and the atom IDs, which tells the code which atom sits at
 which lattice point; the lattice indices start from 0. An auxiliary
-code, `latgen <https://code.google.com/p/latgen>`_, can be employed to
+code, `latgen <https://code.google.com/archive/p/latgen>`_, can be employed to
 generate the compatible map file for various crystals.
 
 In case one simulates a non-periodic system, where the whole simulation
@@ -181,10 +181,10 @@ This fix assumes a crystalline system with periodical lattice. The
 temperature of the system should not exceed the melting temperature to
 keep the system in its solid state.
 
-This fix is part of the PHONON package.  It is only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
-
-This fix requires LAMMPS be built with an FFT library.  See the :doc:`Build settings <Build_settings>` page for details.
+This fix is part of the PHONON package.  It is only enabled if LAMMPS
+was built with that package.  This fix also requires LAMMPS to be built
+with 3d-FFT support which is included in the KSPACE package.  See the
+:doc:`Build package <Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

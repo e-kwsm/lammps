@@ -35,7 +35,7 @@
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define SMALL 0.00001
+static constexpr double SMALL = 0.00001;
 
 /* ---------------------------------------------------------------------- */
 
@@ -66,11 +66,16 @@ Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
   kcount = 0;
 }
 
+/* ---------------------------------------------------------------------- */
+
 void Ewald::settings(int narg, char **arg)
 {
-  if (narg != 1) error->all(FLERR,"Illegal kspace_style ewald command");
+  if (narg != 1) error->all(FLERR,"Illegal kspace_style {} command", force->kspace_style);
 
   accuracy_relative = fabs(utils::numeric(FLERR,arg[0],false,lmp));
+  if (accuracy_relative > 1.0)
+    error->all(FLERR, "Invalid relative accuracy {:g} for kspace_style {}",
+               accuracy_relative, force->kspace_style);
 }
 
 /* ----------------------------------------------------------------------
@@ -79,7 +84,7 @@ void Ewald::settings(int narg, char **arg)
 
 Ewald::~Ewald()
 {
-  deallocate();
+  Ewald::deallocate();
   if (group_allocate_flag) deallocate_groups();
   memory->destroy(ek);
   memory->destroy3d_offset(cs,-kmax_created);
@@ -106,9 +111,12 @@ void Ewald::init()
     if (domain->xperiodic != 1 || domain->yperiodic != 1 ||
         domain->boundary[2][0] != 1 || domain->boundary[2][1] != 1)
       error->all(FLERR,"Incorrect boundaries with slab Ewald");
-    if (domain->triclinic)
-      error->all(FLERR,"Cannot (yet) use Ewald with triclinic box "
-                 "and slab correction");
+    if (domain->triclinic && slabflag != 1)
+      error->all(FLERR,"Triclinic boxes only support the 'kspace_modify slab "
+                 "<volfactor>' correction, not 'slab nozforce' or 'slab ew2d'");
+    if (domain->triclinic && slabflag == 1 && (domain->yz != 0.0 || domain->xz != 0.0))
+      error->all(FLERR,"Triclinic slab (EW3DC) correction requires xz = yz = 0 "
+                 "(the slab normal must be the z axis); xy tilt is allowed");
   }
 
   // compute two charge force
@@ -121,7 +129,7 @@ void Ewald::init()
   pair_check();
 
   int itmp;
-  auto p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   if (p_cutoff == nullptr)
     error->all(FLERR,"KSpace style is incompatible with Pair style");
   double cutoff = *p_cutoff;
@@ -141,6 +149,7 @@ void Ewald::init()
   // setup K-space resolution
 
   bigint natoms = atom->natoms;
+  if (natoms == 0) natoms = 1;
 
   // use xprd,yprd,zprd even if triclinic so grid size is the same
   // adjust z dimension for 2d slab Ewald
@@ -149,7 +158,6 @@ void Ewald::init()
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
-  double zprd_slab = zprd*slab_volfactor;
 
   // make initial g_ewald estimate
   // based on desired accuracy and real space cutoff
@@ -165,6 +173,21 @@ void Ewald::init()
     if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
     else g_ewald = sqrt(-log(g_ewald)) / cutoff;
   }
+  if (slabflag == 1 && slab_auto) {
+    if (g_ewald <= 0.0)
+      error->all(FLERR,"kspace_modify slab auto requires a positive gewald");
+
+    const double force_tolerance = accuracy / two_charge_force;
+    if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
+      error->all(FLERR,
+                 "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
+
+    const double logeps = log(1.0 / force_tolerance);
+    const double lateral = MAX(xprd,yprd) * logeps / MY_2PI;
+    const double reciprocal = sqrt(logeps) / g_ewald;
+    slab_volfactor = MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
+  }
+  double zprd_slab = zprd*slab_volfactor;
 
   // setup Ewald coefficients so can print stats
 
@@ -185,6 +208,10 @@ void Ewald::init()
 
   if (comm->me == 0) {
     std::string mesg = fmt::format("  G vector (1/distance) = {:.8g}\n",g_ewald);
+    if (slabflag == 1 && slab_auto) {
+      mesg += fmt::format("  auto slab volfactor = {:.8g}\n", slab_volfactor);
+      mesg += fmt::format("  auto slab extended z = {:.8g}\n", zprd_slab);
+    }
     mesg += fmt::format("  estimated absolute RMS force accuracy = {:.8g}\n",
                        estimated_accuracy);
     mesg += fmt::format("  estimated relative force accuracy = {:.8g}\n",
@@ -852,7 +879,7 @@ void Ewald::coeffs()
         vg[kcount][3] = -vterm*unitk[0]*k*unitk[1]*l;
         vg[kcount][4] = 0.0;
         vg[kcount][5] = 0.0;
-        kcount++;;
+        kcount++;
       }
     }
   }
@@ -1246,9 +1273,9 @@ double Ewald::memory_usage()
 
 void Ewald::compute_group_group(int groupbit_A, int groupbit_B, int AA_flag)
 {
-  if (slabflag && triclinic)
-    error->all(FLERR,"Cannot (yet) use K-space slab "
-               "correction with compute group/group for triclinic systems");
+  if (triclinic && (slabflag == 2 || slabflag == 3))
+    error->all(FLERR,"Triclinic boxes only support the 'kspace_modify slab "
+               "<volfactor>' correction, not 'slab nozforce' or 'slab ew2d'");
 
   int i,k;
 

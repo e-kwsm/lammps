@@ -26,12 +26,12 @@ using namespace LAMMPS_NS;
 using namespace FixConst;
 using namespace MathExtra;
 
-#define INERTIA 0.2          // moment of inertia prefactor for ellipsoid
+static constexpr double INERTIA = 0.2;          // moment of inertia prefactor for ellipsoid
 
 /* ---------------------------------------------------------------------- */
 
-FixNVEDot::FixNVEDot(LAMMPS *lmp, int narg, char **arg) :
-  FixNVE(lmp, narg, arg) {}
+FixNVEDot::FixNVEDot(LAMMPS *lmp, int narg, char **arg) : FixNVE(lmp, narg, arg), avec(nullptr)
+{}
 
 /* ---------------------------------------------------------------------- */
 

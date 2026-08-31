@@ -17,7 +17,7 @@ Syntax
      *engine* args = zero or more keyword/args pairs
        keywords = *elements*
          *elements* args = N_1 N_2 ... N_ntypes
-           N_1,N_2,...N_ntypes = atomic number for each of ntypes LAMMPS atom types
+           N_1,N_2,...N_ntypes = chemical symbol for each of ntypes LAMMPS atom types
      *plugin* args = name keyword value keyword value ...
        name = name of plugin library (e.g., *lammps* means a liblammps.so library will be loaded)
        keyword/value pairs in any order, some are required, some are optional
@@ -35,7 +35,7 @@ Examples
 .. code-block:: LAMMPS
 
    mdi engine
-   mdi engine elements 13 29
+   mdi engine elements Al Cu
    mdi plugin lammps mdi "-role ENGINE -name lammps -method LINK" &
               infile in.aimd.engine extra "-log log.aimd.engine.plugin" &
               command "run 5"
@@ -46,7 +46,7 @@ Description
 """""""""""
 
 This command implements operations within LAMMPS to use the `MDI
-Library <https://molssi-mdi.github.io/MDI_Library/html/index.html>`
+Library <https://molssi-mdi.github.io/MDI_Library/>`_
 for coupling to other codes in a client/server protocol.
 
 See the Howto MDI doc page for a discussion of all the different ways
@@ -84,14 +84,13 @@ code expects.  Depending on when the driver code tells the LAMMPS
 engine to exit, other commands can be executed after this command, but
 typically it is used at the end of a LAMMPS input script.
 
-To act as an MDI engine operating as an MD code (or surrogate QM
-code), this is the list of standard MDI commands issued by a driver
-code which LAMMPS currently recognizes.  Using standard commands
-defined by the MDI library means that a driver code can work
-interchangeably with LAMMPS or other MD codes or with QM codes which
-support the MDI standard.  See more details about these commands in
-the `MDI library documentation
-<https://molssi-mdi.github.io/MDI_Library/html/mdi_standard.html>`_
+To act as an MDI engine operating as an MD code (or surrogate QM code),
+this is the list of standard MDI commands issued by a driver code which
+LAMMPS currently recognizes.  Using standard commands defined by the MDI
+library means that a driver code can work interchangeably with LAMMPS or
+other MD codes or with QM codes which support the MDI standard.  See
+more details about these commands in the `MDI library documentation
+<https://molssi-mdi.github.io/MDI_Library/api/mdi_standard/index.html>`_
 
 These commands are valid at the @DEFAULT node defined by MDI.
 Commands that start with ">" mean the driver is sending information to
@@ -101,7 +100,7 @@ letter perform actions.  Commands that start with "@" are MDI "node"
 commands, which are described further below.
 
 .. list-table::
-   :widths: 20 80
+   :widths: 33 67
    :header-rows: 1
 
    * - Command name
@@ -173,13 +172,16 @@ commands, which are described further below.
    atom type values are consistent in both codes, then the >TYPES
    command can be used.  If not, the optional *elements* keyword can
    be used to specify what element each LAMMPS atom type corresponds
-   to.  This is specified by the atomic number of the element (e.g., 13
-   for Al).  An atomic number must be specified for each of the ntypes
-   LAMMPS atom types.  Ntypes is typically specified via the
-   create_box command or in the data file read by the read_data
-   command.  In this has been done, the MDI driver can send an
-   >ELEMENTS command to the LAMMPS driver with the atomic number of
-   each atom.
+   to.  This is specified by the chemical symbol of the element,
+   e.g. C or Al or Si.  A symbol must be specified for each of the
+   ntypes LAMMPS atom types.  Each LAMMPS type must map to a unique
+   element; two or more types cannot map to the same element.  Ntypes
+   is typically specified via the :doc:`create_box <create_box>`
+   command or in the data file read by the :doc:`read_data
+   <read_data>` command.  Once this has been done, the MDI driver can
+   send an >ELEMENTS command to the LAMMPS driver with the atomic
+   number of each atom and the LAMMPS engine will be able to map it to
+   a LAMMPS atom type.
 
 The MD and OPTG commands perform an entire MD simulation or energy
 minimization (to convergence) with no communication from the driver

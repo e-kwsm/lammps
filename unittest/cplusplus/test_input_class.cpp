@@ -11,7 +11,7 @@
 #include "gtest/gtest.h"
 
 const char *demo_input[] = {"region       box block 0 $x 0 2 0 2", "create_box 1 box",
-                            "create_atoms 1 single 1.0 1.0 ${zpos}"};
+                            "create_atoms 1 single 1.0 1.0 ${zpos}", "print \\${zpos}"};
 const char *cont_input[] = {"create_atoms 1 single &", "0.2 0.1 0.1"};
 
 namespace LAMMPS_NS {
@@ -21,9 +21,9 @@ protected:
     LAMMPS *lmp;
     Input_commands()
     {
-        const char *args[] = {"LAMMPS_test"};
+        const char *args[] = {"LAMMPS_test", nullptr};
         char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        int argc           = 1;
 
         int flag;
         MPI_Initialized(&flag);
@@ -33,13 +33,11 @@ protected:
 
     void SetUp() override
     {
-        const char *args[] = {"LAMMPS_test", "-log", "none", "-echo", "screen", "-nocite",
-                              "-var",        "zpos", "1.5",  "-var",  "x",      "2"};
-        char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        LAMMPS::argv args = {"LAMMPS_test", "-log", "none", "-echo", "screen", "-nocite",
+                             "-var",        "zpos", "1.5",  "-var",  "x",      "2"};
 
         ::testing::internal::CaptureStdout();
-        lmp                = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+        lmp                = new LAMMPS(args, MPI_COMM_WORLD);
         std::string output = ::testing::internal::GetCapturedStdout();
         EXPECT_STREQ(output.substr(0, 8).c_str(), "LAMMPS (");
     }
@@ -104,6 +102,11 @@ TEST_F(Input_commands, substitute)
     strcpy(string, demo_input[2]);
     lmp->input->substitute(string, scratch, nstring, nscratch, 0);
     EXPECT_STREQ(string, "create_atoms 1 single 1.0 1.0 1.5");
+
+    strcpy(string, demo_input[3]);
+    lmp->input->substitute(string, scratch, nstring, nscratch, 0);
+    EXPECT_STREQ(string, "print ${zpos}");
+
     lmp->memory->destroy(string);
     lmp->memory->destroy(scratch);
 };

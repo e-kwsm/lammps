@@ -20,7 +20,7 @@
 
 #include "error.h"
 #include "input.h"
-#include "modify.h"
+#include "memory.h"
 
 #include <cstring>
 
@@ -57,14 +57,41 @@ MDIPlugin::MDIPlugin(LAMMPS *_lmp, int narg, char **arg) : Pointers(_lmp)
     } else if (strcmp(arg[iarg], "infile") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal mdi plugin command");
       infile_arg = arg[iarg + 1];
+
       iarg += 2;
     } else if (strcmp(arg[iarg], "extra") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal mdi plugin command");
+      memory->sfree(extra_arg);
       extra_arg = arg[iarg + 1];
+
+      // do variable substitution in multiple word extra_arg
+
+      int ncopy = strlen(extra_arg) + 1;
+      char *copy = (char *) memory->smalloc(ncopy,"mdi_plugin:copy");
+      strncpy(copy, extra_arg, ncopy);
+      char *work = (char *) memory->smalloc(ncopy,"mdi_plugin:work");
+      int nwork = ncopy;
+      input->substitute(copy, work, ncopy, nwork, 0);
+      memory->sfree(work);
+      extra_arg = copy;
+
       iarg += 2;
     } else if (strcmp(arg[iarg], "command") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal mdi plugin command");
-      lammps_command = utils::strdup(arg[iarg + 1]);
+      memory->sfree(lammps_command);
+      lammps_command = arg[iarg + 1];
+
+      // do variable substitution in multiple word lammps_command
+
+      int ncopy = strlen(lammps_command) + 1;
+      char *copy = (char *) memory->smalloc(ncopy,"mdi_plugin:copy");
+      strncpy(copy, lammps_command, ncopy);
+      char *work = (char *) memory->smalloc(ncopy,"mdi_plugin:work");
+      int nwork = ncopy;
+      input->substitute(copy, work, ncopy, nwork, 0);
+      memory->sfree(work);
+      lammps_command = copy;
+
       iarg += 2;
     } else
       error->all(FLERR, "Illegal mdi plugin command");
@@ -80,7 +107,7 @@ MDIPlugin::MDIPlugin(LAMMPS *_lmp, int narg, char **arg) : Pointers(_lmp)
   int n = strlen(mdi_arg) + 16;
   if (infile_arg) n += strlen(infile_arg);
   if (extra_arg) n += strlen(extra_arg);
-  auto plugin_args = new char[n];
+  auto *plugin_args = new char[n];
   plugin_args[0] = 0;
   strcat(plugin_args, "-mdi \"");
   strcat(plugin_args, mdi_arg);
@@ -102,6 +129,8 @@ MDIPlugin::MDIPlugin(LAMMPS *_lmp, int narg, char **arg) : Pointers(_lmp)
   MDI_Launch_plugin(plugin_name, plugin_args, &world, plugin_wrapper, (void *) this);
 
   delete[] plugin_args;
+  memory->sfree(extra_arg);
+  memory->sfree(lammps_command);
 }
 
 /* ----------------------------------------------------------------------
@@ -112,7 +141,7 @@ MDIPlugin::MDIPlugin(LAMMPS *_lmp, int narg, char **arg) : Pointers(_lmp)
 
 int MDIPlugin::plugin_wrapper(void * /*pmpicomm*/, MDI_Comm mdicomm, void *vptr)
 {
-  auto ptr = (MDIPlugin *) vptr;
+  auto *ptr = (MDIPlugin *) vptr;
   LAMMPS *lammps = ptr->lmp;
   char *lammps_command = ptr->lammps_command;
 
@@ -120,7 +149,6 @@ int MDIPlugin::plugin_wrapper(void * /*pmpicomm*/, MDI_Comm mdicomm, void *vptr)
   // that operation will issue MDI commands to the plugin engine
 
   lammps->input->one(lammps_command);
-  delete[] lammps_command;
 
   // send MDI exit to plugin, which unloads the plugin
 

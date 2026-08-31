@@ -2,11 +2,8 @@
 // Fortran wrapper
 #include <cstdio>
 
-#include "lammps.h"
 #include "library.h"
-#include <cstdint>
-#include <cstdlib>
-#include <mpi.h>
+
 #include <string>
 
 #include "gtest/gtest.h"
@@ -23,6 +20,11 @@ double f_lammps_extract_fix_peratom_vector(int);
 double f_lammps_extract_fix_peratom_array(int, int);
 double f_lammps_extract_fix_local_vector(int);
 double f_lammps_extract_fix_local_array(int, int);
+}
+
+// forward decl
+namespace LAMMPS_NS {
+class LAMMPS;
 }
 
 class LAMMPS_extract_fix : public ::testing::Test {
@@ -51,7 +53,7 @@ protected:
 TEST_F(LAMMPS_extract_fix, global_scalar)
 {
     f_lammps_setup_extract_fix();
-    double *scalar =
+    auto *scalar =
         (double *)lammps_extract_fix(lmp, "recenter", LMP_STYLE_GLOBAL, LMP_TYPE_SCALAR, -1, -1);
     EXPECT_DOUBLE_EQ(f_lammps_extract_fix_global_scalar(), *scalar);
     lammps_free(scalar);
@@ -60,11 +62,11 @@ TEST_F(LAMMPS_extract_fix, global_scalar)
 TEST_F(LAMMPS_extract_fix, global_vector)
 {
     f_lammps_setup_extract_fix();
-    double *x =
+    auto *x =
         (double *)lammps_extract_fix(lmp, "recenter", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR, 0, -1);
-    double *y =
+    auto *y =
         (double *)lammps_extract_fix(lmp, "recenter", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR, 1, -1);
-    double *z =
+    auto *z =
         (double *)lammps_extract_fix(lmp, "recenter", LMP_STYLE_GLOBAL, LMP_TYPE_VECTOR, 2, -1);
     EXPECT_DOUBLE_EQ(f_lammps_extract_fix_global_vector(1), *x);
     EXPECT_DOUBLE_EQ(f_lammps_extract_fix_global_vector(2), *y);

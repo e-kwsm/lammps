@@ -21,7 +21,6 @@
 #include "comm.h"
 #include "error.h"
 #include "memory.h"
-#include "neigh_list.h"
 #include "neighbor.h"
 
 #include <cstring>
@@ -30,7 +29,7 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-PairZero::PairZero(LAMMPS *lmp) : Pair(lmp)
+PairZero::PairZero(LAMMPS *lmp) : Pair(lmp), cut(nullptr)
 {
   coeffflag = 1;
   writedata = 1;
@@ -124,7 +123,7 @@ void PairZero::settings(int narg, char **arg)
 void PairZero::coeff(int narg, char **arg)
 {
   if ((narg < 2) || (coeffflag && narg > 3))
-    error->all(FLERR, "Incorrect args for pair coefficients");
+    error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 
   if (!allocated) allocate();
 
@@ -144,7 +143,7 @@ void PairZero::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------

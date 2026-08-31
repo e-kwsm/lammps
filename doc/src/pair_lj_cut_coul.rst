@@ -10,6 +10,7 @@
 .. index:: pair_style lj/cut/coul/dsf/gpu
 .. index:: pair_style lj/cut/coul/dsf/kk
 .. index:: pair_style lj/cut/coul/dsf/omp
+.. index:: pair_style lj/cut/coul/esp
 .. index:: pair_style lj/cut/coul/long
 .. index:: pair_style lj/cut/coul/long/gpu
 .. index:: pair_style lj/cut/coul/long/kk
@@ -20,6 +21,7 @@
 .. index:: pair_style lj/cut/coul/msm/gpu
 .. index:: pair_style lj/cut/coul/msm/omp
 .. index:: pair_style lj/cut/coul/wolf
+.. index:: pair_style lj/cut/coul/wolf/kk
 .. index:: pair_style lj/cut/coul/wolf/omp
 
 pair_style lj/cut/coul/cut command
@@ -50,7 +52,7 @@ Accelerator Variants: *lj/cut/coul/msm/gpu*, *lj/cut/coul/msm/omp*
 pair_style lj/cut/coul/wolf command
 ===================================
 
-Accelerator Variants: *lj/cut/coul/wolf/omp*
+Accelerator Variants: *lj/cut/coul/wolf/kk*, *lj/cut/coul/wolf/omp*
 
 Syntax
 """"""
@@ -59,7 +61,7 @@ Syntax
 
    pair_style style args
 
-* style = *lj/cut/coul/cut* or *lj/cut/coul/debye* or *lj/cut/coul/dsf* or *lj/cut/coul/long* *lj/cut/coul/msm* or *lj/cut/coul/wolf*
+* style = *lj/cut/coul/cut* or *lj/cut/coul/debye* or *lj/cut/coul/dsf* or *lj/cut/coul/esp* or *lj/cut/coul/long* *lj/cut/coul/msm* or *lj/cut/coul/wolf*
 * args = list of arguments for a particular style
 
 .. parsed-literal::
@@ -75,6 +77,11 @@ Syntax
        alpha = damping parameter (inverse distance units)
        cutoff = global cutoff for LJ (and Coulombic if only 1 arg) (distance units)
        cutoff2 = global cutoff for Coulombic (distance units)
+
+.. versionadded:: 4Jul2026
+     *lj/cut/coul/esp* args = cutoff (cutoff2)
+       cutoff = global cutoff for LJ (and Coulombic if only 1 arg) (distance units)
+       cutoff2 = global cutoff for Coulombic (optional) (distance units)
      *lj/cut/coul/long* args = cutoff (cutoff2)
        cutoff = global cutoff for LJ (and Coulombic if only 1 arg) (distance units)
        cutoff2 = global cutoff for Coulombic (optional) (distance units)
@@ -106,6 +113,11 @@ Examples
    pair_style lj/cut/coul/dsf 0.05 2.5 10.0
    pair_coeff * * 1.0 1.0
    pair_coeff 1 1 1.0 1.0 2.5
+
+   pair_style lj/cut/coul/esp 10.0
+   pair_style lj/cut/coul/esp 10.0 8.0
+   pair_coeff * * 100.0 3.0
+   pair_coeff 1 1 100.0 3.5 9.0
 
    pair_style lj/cut/coul/long 10.0
    pair_style lj/cut/coul/long 10.0 8.0
@@ -142,7 +154,7 @@ Style *lj/cut/coul/cut* adds a Coulombic pairwise interaction given by
    E = \frac{C q_i q_j}{\epsilon  r} \qquad r < r_c
 
 where :math:`C` is an energy-conversion constant, :math:`q_i` and :math:`q_j`
-are the charges on the 2 atoms, and :math:`\epsilon` is the dielectric
+are the charges on the two atoms, and :math:`\epsilon` is the dielectric
 constant which can be set by the :doc:`dielectric <dielectric>` command.
 If one cutoff is specified in the pair_style command, it is used for
 both the LJ and Coulombic terms.  If two cutoffs are specified, they are
@@ -179,7 +191,7 @@ is enforced by shifting the potential through placement of image
 charges on the cutoff sphere. Convergence can often be improved by
 setting :math:`\alpha` to a small non-zero value.
 
-Styles *lj/cut/coul/long* and *lj/cut/coul/msm* compute the same
+Styles *lj/cut/coul/esp*, *lj/cut/coul/long* and *lj/cut/coul/msm* compute the same
 Coulombic interactions as style *lj/cut/coul/cut* except that an
 additional damping factor is applied to the Coulombic term so it can
 be used in conjunction with the :doc:`kspace_style <kspace_style>`
@@ -188,15 +200,15 @@ specified for this style means that pairwise interactions within this
 distance are computed directly; interactions outside that distance are
 computed in reciprocal space.
 
-Style *coul/wolf* adds a Coulombic pairwise interaction via the Wolf
+Style *lj/cut/coul/wolf* adds a Coulombic pairwise interaction via the Wolf
 summation method, described in :ref:`Wolf <Wolf3>`, given by:
 
 .. math::
 
    E_i = \frac{1}{2} \sum_{j \neq i}
-   \frac{q_i q_j {\rm erfc}(\alpha r_{ij})}{r_{ij}} +
+   \frac{q_i q_j \mathrm{erfc}(\alpha r_{ij})}{r_{ij}} +
    \frac{1}{2} \sum_{j \neq i}
-   \frac{q_i q_j {\rm erf}(\alpha r_{ij})}{r_{ij}} \qquad r < r_c
+   \frac{q_i q_j \mathrm{erf}(\alpha r_{ij})}{r_{ij}} \qquad r < r_c
 
 where :math:`\alpha` is the damping parameter, and erfc() is the
 complementary error-function terms.  This potential is essentially a
@@ -236,7 +248,7 @@ and Coulombic interactions for this type pair.  If both coefficients
 are specified, they are used as the LJ and Coulombic cutoffs for this
 type pair.
 
-For *lj/cut/coul/long* and *lj/cut/coul/msm* only the LJ cutoff can be
+For *lj/cut/coul/esp*, *lj/cut/coul/long* and *lj/cut/coul/msm* only the LJ cutoff can be
 specified since a Coulombic cutoff cannot be specified for an individual I,J
 type pair.  All type pairs use the same global Coulombic cutoff specified in
 the pair_style command.
@@ -265,7 +277,7 @@ All of the *lj/cut* pair styles support the
 :doc:`pair_modify <pair_modify>` shift option for the energy of the
 Lennard-Jones portion of the pair interaction.
 
-The *lj/cut/coul/long* pair styles support the
+The *lj/cut/coul/esp* and *lj/cut/coul/long* pair styles support the
 :doc:`pair_modify <pair_modify>` table option since they can tabulate
 the short-range portion of the long-range Coulombic interaction.
 
@@ -277,7 +289,7 @@ portion of the pair interaction.
 All of the *lj/cut* pair styles write their information to :doc:`binary restart files <restart>`, so pair_style and pair_coeff commands do
 not need to be specified in an input script that reads a restart file.
 
-The *lj/cut/coul/long* pair styles support the use of the
+The *lj/cut/coul/esp* and *lj/cut/coul/long* pair styles support the use of the
 *inner*, *middle*, and *outer* keywords of the :doc:`run_style respa <run_style>` command, meaning the pairwise forces can be
 partitioned by distance at different levels of the rRESPA hierarchy.
 The other styles only support the *pair* keyword of run_style respa.
@@ -288,7 +300,7 @@ See the :doc:`run_style <run_style>` command for details.
 Restrictions
 """"""""""""
 
-The *lj/cut/coul/long* and *lj/cut/coul/msm* styles are part of the KSPACE package.
+The *lj/cut/coul/esp*, *lj/cut/coul/long* and *lj/cut/coul/msm* styles are part of the KSPACE package.
 
 The *lj/cut/coul/debye*, *lj/cut/coul/dsf*, and *lj/cut/coul/wolf* styles are part
 of the EXTRA-PAIR package.

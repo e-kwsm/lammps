@@ -16,11 +16,13 @@
 ------------------------------------------------------------------------- */
 
 #include "dump_atom_adios.h"
+
 #include "atom.h"
 #include "domain.h"
 #include "error.h"
 #include "group.h"
 #include "memory.h"
+#include "safe_pointers.h"
 #include "universe.h"
 #include "update.h"
 
@@ -30,6 +32,28 @@
 #include "adios_common.h"
 
 using namespace LAMMPS_NS;
+using namespace LAMMPS_ADIOS;
+
+// common definition for all ADIOS package classes
+
+const char *LAMMPS_ADIOS::default_config =
+    (const char *) "<?xml version=\"1.0\"?>\n"
+                   "<adios-config>\n"
+                   "    <io name=\"atom\">\n"
+                   "        <engine type=\"BP4\">\n"
+                   "            <parameter key=\"substreams\" value=\"1\"/>\n"
+                   "        </engine>\n"
+                   "    </io>\n"
+                   "    <io name=\"custom\">\n"
+                   "        <engine type=\"BP4\">\n"
+                   "            <parameter key=\"substreams\" value=\"1\"/>\n"
+                   "        </engine>\n"
+                   "    </io>\n"
+                   "    <io name=\"read_dump\">\n"
+                   "        <engine type=\"BP4\">\n"
+                   "        </engine>\n"
+                   "    </io>\n"
+                   "</adios-config>\n";
 
 namespace LAMMPS_NS {
 class DumpAtomADIOSInternal {
@@ -53,19 +77,18 @@ class DumpAtomADIOSInternal {
 DumpAtomADIOS::DumpAtomADIOS(LAMMPS *lmp, int narg, char **arg) : DumpAtom(lmp, narg, arg)
 {
   // create a default adios2_config.xml if it doesn't exist yet.
-  FILE *cfgfp = fopen("adios2_config.xml", "r");
+  SafeFilePtr cfgfp = fopen("adios2_config.xml", "r");
   if (!cfgfp) {
     cfgfp = fopen("adios2_config.xml", "w");
     if (cfgfp) fputs(default_config, cfgfp);
   }
-  if (cfgfp) fclose(cfgfp);
 
   internal = new DumpAtomADIOSInternal();
   try {
 #if defined(MPI_STUBS)
-    internal->ad = new adios2::ADIOS("adios2_config.xml", adios2::DebugON);
+    internal->ad = new adios2::ADIOS("adios2_config.xml");
 #else
-    internal->ad = new adios2::ADIOS("adios2_config.xml", world, adios2::DebugON);
+    internal->ad = new adios2::ADIOS("adios2_config.xml", world);
 #endif
   } catch (std::ios_base::failure &e) {
     error->all(FLERR, "ADIOS initialization failed with error: {}", e.what());
@@ -153,7 +176,7 @@ void DumpAtomADIOS::write()
   internal->varAtoms.SetShape({nAtomsGlobal, nColumns});
   internal->varAtoms.SetSelection({{startRow, 0}, {nAtomsLocal, nColumns}});
 
-  // insure buf is sized for packing
+  // ensure buf is sized for packing
   // adios does not limit per-process data size so nme*size_one is not
   // constrained to int
   // if sorting on IDs also request ID list from pack()
@@ -234,24 +257,29 @@ void DumpAtomADIOS::init_style()
 
   // setup column string
 
-  std::vector<std::string> columnNames;
+  std::string default_columns;
 
-  if (scale_flag == 0 && image_flag == 0) {
-    columns = (char *) "id type x y z";
-    columnNames = {"id", "type", "x", "y", "z"};
-  } else if (scale_flag == 0 && image_flag == 1) {
-    columns = (char *) "id type x y z ix iy iz";
-    columnNames = {"id", "type", "x", "y", "z", "ix", "iy", "iz"};
-  } else if (scale_flag == 1 && image_flag == 0) {
-    columns = (char *) "id type xs ys zs";
-    columnNames = {"id", "type", "xs", "ys", "zs"};
-  } else if (scale_flag == 1 && image_flag == 1) {
-    columns = (char *) "id type xs ys zs ix iy iz";
-    columnNames = {"id", "type", "xs", "ys", "zs", "ix", "iy", "iz"};
+  if (scale_flag == 0 && image_flag == 0)
+    default_columns = "id type x y z";
+  else if (scale_flag == 0 && image_flag == 1)
+    default_columns = "id type x y z ix iy iz";
+  else if (scale_flag == 1 && image_flag == 0)
+    default_columns = "id type xs ys zs";
+  else if (scale_flag == 1 && image_flag == 1)
+    default_columns = "id type xs ys zs ix iy iz";
+
+  std::vector<std::string> columnNames = utils::split_words(default_columns);
+
+  int icol = 0;
+  columns.clear();
+  for (const auto &item : columnNames) {
+    if (columns.size()) columns += " ";
+    if (keyword_user[icol].size())
+      columns += keyword_user[icol];
+    else
+      columns += item;
+    ++icol;
   }
-
-  for (int icol = 0; icol < (int) columnNames.size(); ++icol)
-    if (keyword_user[icol].size()) columnNames[icol] = keyword_user[icol];
 
   // setup function ptrs
 
@@ -281,8 +309,8 @@ void DumpAtomADIOS::init_style()
       auto nstreams = std::to_string(num_aggregators);
       internal->io.SetParameters({{"substreams", nstreams}});
       if (me == 0)
-        utils::logmesg(lmp, "ADIOS method for {} is n-to-m (aggregation with {} writers)\n", filename,
-                       nstreams);
+        utils::logmesg(lmp, "ADIOS method for {} is n-to-m (aggregation with {} writers)\n",
+                       filename, nstreams);
     }
 
     internal->io.DefineVariable<uint64_t>("ntimestep");
@@ -325,6 +353,6 @@ void DumpAtomADIOS::init_style()
     // it will be correctly defined at the moment of write
     size_t UnknownSizeYet = 1;
     internal->varAtoms = internal->io.DefineVariable<double>(
-      "atoms", {UnknownSizeYet, nColumns}, {UnknownSizeYet, 0}, {UnknownSizeYet, nColumns});
+        "atoms", {UnknownSizeYet, nColumns}, {UnknownSizeYet, 0}, {UnknownSizeYet, nColumns});
   }
 }

@@ -36,6 +36,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -52,9 +53,9 @@ static constexpr double QEPSILON = 1.0e-6;
 /* ---------------------------------------------------------------------- */
 
 ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg) :
-    Compute(lmp, narg, arg), qlist(nullptr), qnormfac(nullptr), qnormfac2(nullptr), distsq(nullptr),
-    nearest(nullptr), rlist(nullptr), qnarray(nullptr), qnm_r(nullptr), qnm_i(nullptr),
-    w3jlist(nullptr)
+    Compute(lmp, narg, arg), qlist(nullptr), qnormfac(nullptr), qnormfac2(nullptr), list(nullptr),
+    distsq(nullptr), nearest(nullptr), rlist(nullptr), qnarray(nullptr), qnm_r(nullptr),
+    qnm_i(nullptr), w3jlist(nullptr)
 {
   if (narg < 3) error->all(FLERR, "Illegal compute orientorder/atom command");
 
@@ -87,13 +88,13 @@ ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg
       if (strcmp(arg[iarg + 1], "NULL") == 0) {
         nnn = 0;
       } else {
-        nnn = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+        nnn = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
         if (nnn <= 0) error->all(FLERR, "Illegal compute orientorder/atom command");
       }
       iarg += 2;
     } else if (strcmp(arg[iarg], "degrees") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal compute orientorder/atom command");
-      nqlist = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      nqlist = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
       if (nqlist <= 0) error->all(FLERR, "Illegal compute orientorder/atom command");
       memory->destroy(qlist);
       memory->create(qlist, nqlist, "orientorder/atom:qlist");
@@ -101,7 +102,7 @@ ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg
       if (iarg + nqlist > narg) error->all(FLERR, "Illegal compute orientorder/atom command");
       qmax = 0;
       for (int il = 0; il < nqlist; il++) {
-        qlist[il] = utils::numeric(FLERR, arg[iarg + il], false, lmp);
+        qlist[il] = utils::inumeric(FLERR, arg[iarg + il], false, lmp);
         if (qlist[il] < 0) error->all(FLERR, "Illegal compute orientorder/atom command");
         if (qlist[il] > qmax) qmax = qlist[il];
       }
@@ -117,7 +118,7 @@ ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg
     } else if (strcmp(arg[iarg], "components") == 0) {
       qlcompflag = 1;
       if (iarg + 2 > narg) error->all(FLERR, "Illegal compute orientorder/atom command");
-      qlcomp = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      qlcomp = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
       iqlcomp = -1;
       for (int il = 0; il < nqlist; il++)
         if (qlcomp == qlist[il]) {
@@ -134,7 +135,7 @@ ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg
       iarg += 2;
     } else if (strcmp(arg[iarg], "chunksize") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal compute orientorder/atom command");
-      chunksize = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      chunksize = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
       if (chunksize <= 0) error->all(FLERR, "Illegal compute orientorder/atom command");
       iarg += 2;
     } else
@@ -156,8 +157,8 @@ ComputeOrientOrderAtom::ComputeOrientOrderAtom(LAMMPS *lmp, int narg, char **arg
   memory->create(qnormfac2, nqlist, "orientorder/atom:qnormfac2");
   for (int il = 0; il < nqlist; il++) {
     int l = qlist[il];
-    qnormfac[il] = sqrt(MY_4PI / (2 * l + 1));
-    qnormfac2[il] = sqrt(2 * l + 1);
+    qnormfac[il] = sqrt(MY_4PI / (2.0 * l + 1.0));
+    qnormfac2[il] = sqrt(2.0 * l + 1.0);
   }
 }
 
@@ -257,7 +258,7 @@ void ComputeOrientOrderAtom::compute_peratom()
       jlist = firstneigh[i];
       jnum = numneigh[i];
 
-      // insure distsq and nearest arrays are long enough
+      // ensure distsq and nearest arrays are long enough
 
       if (jnum > maxneigh) {
         memory->destroy(distsq);
@@ -306,7 +307,7 @@ void ComputeOrientOrderAtom::compute_peratom()
         ncount = nnn;
       }
 
-      calc_boop(rlist, ncount, qn, qlist, nqlist);
+      calc_boop(rlist, ncount, qn, qlist, nqlist, qnm_r, qnm_i);
     }
   }
 }
@@ -331,71 +332,51 @@ double ComputeOrientOrderAtom::memory_usage()
 
 // Use no-op do while to create single statement
 
-#define SWAP(a, b) \
-  do {             \
-    tmp = a;       \
-    (a) = b;       \
-    (b) = tmp;     \
-  } while (0)
-
-#define ISWAP(a, b) \
-  do {              \
-    itmp = a;       \
-    (a) = b;        \
-    (b) = itmp;     \
-  } while (0)
-
-#define SWAP3(a, b)  \
-  do {               \
-    tmp = (a)[0];    \
-    (a)[0] = (b)[0]; \
-    (b)[0] = tmp;    \
-    tmp = (a)[1];    \
-    (a)[1] = (b)[1]; \
-    (b)[1] = tmp;    \
-    tmp = (a)[2];    \
-    (a)[2] = (b)[2]; \
-    (b)[2] = tmp;    \
+#define SWAP3(a, b)            \
+  do {                         \
+    std::swap((a)[0], (b)[0]); \
+    std::swap((a)[1], (b)[1]); \
+    std::swap((a)[2], (b)[2]); \
   } while (0)
 
 /* ---------------------------------------------------------------------- */
 
 void ComputeOrientOrderAtom::select3(int k, int n, double *arr, int *iarr, double **arr3)
 {
-  int i, ir, j, l, mid, ia, itmp;
-  double a, tmp, a3[3];
+  int i, ir, j, l, mid, ia;
+  double a, a3[3];
 
   arr--;
   iarr--;
   arr3--;
   l = 1;
   ir = n;
-  for (;;) {
+  while (true) {
     if (ir <= l + 1) {
       if (ir == l + 1 && arr[ir] < arr[l]) {
-        SWAP(arr[l], arr[ir]);
-        ISWAP(iarr[l], iarr[ir]);
+        std::swap(arr[l], arr[ir]);
+        std::swap(iarr[l], iarr[ir]);
         SWAP3(arr3[l], arr3[ir]);
       }
       return;
     } else {
       mid = (l + ir) >> 1;
-      SWAP(arr[mid], arr[l + 1]);
-      ISWAP(iarr[mid], iarr[l + 1]);
+      std::swap(arr[mid], arr[l + 1]);
+      std::swap(iarr[mid], iarr[l + 1]);
       SWAP3(arr3[mid], arr3[l + 1]);
       if (arr[l] > arr[ir]) {
-        SWAP(arr[l], arr[ir]);
-        ISWAP(iarr[l], iarr[ir]);
+        std::swap(arr[l], arr[ir]);
+        std::swap(iarr[l], iarr[ir]);
         SWAP3(arr3[l], arr3[ir]);
       }
       if (arr[l + 1] > arr[ir]) {
-        SWAP(arr[l + 1], arr[ir]);
-        ISWAP(iarr[l + 1], iarr[ir]);
+        std::swap(arr[l + 1], arr[ir]);
+        std::swap(iarr[l + 1], iarr[ir]);
         SWAP3(arr3[l + 1], arr3[ir]);
       }
       if (arr[l] > arr[l + 1]) {
-        SWAP(arr[l], arr[l + 1]);
-        ISWAP(iarr[l], iarr[l + 1]);
+        std::swap(arr[l], arr[l + 1]);
+        std::swap(iarr[l], iarr[l + 1]);
         SWAP3(arr3[l], arr3[l + 1]);
       }
       i = l + 1;
@@ -405,14 +386,14 @@ void ComputeOrientOrderAtom::select3(int k, int n, double *arr, int *iarr, doubl
       a3[0] = arr3[l + 1][0];
       a3[1] = arr3[l + 1][1];
       a3[2] = arr3[l + 1][2];
-      for (;;) {
+      while (true) {
         do i++;
         while (arr[i] < a);
         do j--;
         while (arr[j] > a);
         if (j < i) break;
-        SWAP(arr[i], arr[j]);
-        ISWAP(iarr[i], iarr[j]);
+        std::swap(arr[i], arr[j]);
+        std::swap(iarr[i], iarr[j]);
         SWAP3(arr3[i], arr3[j]);
       }
       arr[l + 1] = arr[j];
@@ -436,7 +417,7 @@ void ComputeOrientOrderAtom::select3(int k, int n, double *arr, int *iarr, doubl
 ------------------------------------------------------------------------- */
 
 void ComputeOrientOrderAtom::calc_boop(double **rlist, int ncount, double qn[], int qlist[],
-                                       int nqlist)
+                                       int nqlist, double **qnm_r, double **qnm_i)
 {
 
   for (int il = 0; il < nqlist; il++) {

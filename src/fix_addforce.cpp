@@ -30,8 +30,6 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-enum { NONE, CONSTANT, EQUAL, ATOM };
-
 /* ---------------------------------------------------------------------- */
 
 FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
@@ -51,6 +49,10 @@ FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
   virial_global_flag = virial_peratom_flag = 1;
   respa_level_support = 1;
   ilevel_respa = 0;
+
+  xstyle = ystyle = zstyle = NONE;
+  xvar = yvar = zvar = -1;
+  varflag = NONE;
 
   if (utils::strmatch(arg[3], "^v_")) {
     xstr = utils::strdup(arg[3] + 2);
@@ -85,11 +87,13 @@ FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
       if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix addforce region", error);
       region = domain->get_region_by_id(arg[iarg + 1]);
       if (!region) error->all(FLERR, "Region {} for fix addforce does not exist", arg[iarg + 1]);
+      delete[] idregion;
       idregion = utils::strdup(arg[iarg + 1]);
       iarg += 2;
     } else if (strcmp(arg[iarg], "energy") == 0) {
       if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix addforce energy", error);
       if (utils::strmatch(arg[iarg + 1], "^v_")) {
+        delete[] estr;
         estr = utils::strdup(arg[iarg + 1] + 2);
       } else
         error->all(FLERR, "Invalid fix addforce energy argument: {}", arg[iarg + 1]);
@@ -109,6 +113,7 @@ FixAddForce::FixAddForce(LAMMPS *lmp, int narg, char **arg) :
 
 FixAddForce::~FixAddForce()
 {
+  if (copymode) return;
   delete[] xstr;
   delete[] ystr;
   delete[] zstr;
@@ -121,8 +126,6 @@ FixAddForce::~FixAddForce()
 
 int FixAddForce::setmask()
 {
-  datamask_read = datamask_modify = 0;
-
   int mask = 0;
   mask |= POST_FORCE;
   mask |= POST_FORCE_RESPA;
@@ -237,9 +240,6 @@ void FixAddForce::post_force(int vflag)
   // virial setup
 
   v_init(vflag);
-
-  if (lmp->kokkos)
-    atom->sync_modify(Host, (unsigned int) (F_MASK | MASK_MASK), (unsigned int) F_MASK);
 
   // update region if necessary
 

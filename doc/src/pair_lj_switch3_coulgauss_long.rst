@@ -1,11 +1,19 @@
 .. index:: pair_style lj/switch3/coulgauss/long
+.. index:: pair_style lj/switch3/coulgauss/long/kk
+.. index:: pair_style lj/switch3/coulgauss/long/omp
 .. index:: pair_style mm3/switch3/coulgauss/long
+.. index:: pair_style mm3/switch3/coulgauss/long/kk
+.. index:: pair_style mm3/switch3/coulgauss/long/omp
 
 pair_style lj/switch3/coulgauss/long command
 ============================================
 
+Accelerator Variants: *lj/switch3/coulgauss/long/kk*, *lj/switch3/coulgauss/long/omp*
+
 pair_style mm3/switch3/coulgauss/long command
 =============================================
+
+Accelerator Variants: *mm3/switch3/coulgauss/long/kk*, *mm3/switch3/coulgauss/long/omp*
 
 Syntax
 """"""
@@ -83,7 +91,7 @@ is combined with Coulomb interaction between Gaussian charge densities:
 
    E = \frac{q_i q_j \mathrm{erf}\left( r/\sqrt{\gamma_1^2+\gamma_2^2} \right) }{\epsilon r_{ij}}
 
-where :math:`q_i` and :math:`q_j` are the charges on the 2 atoms,
+where :math:`q_i` and :math:`q_j` are the charges on the two atoms,
 :math:`\epsilon` is the dielectric constant which can be set by the
 :doc:`dielectric <dielectric>` command, :math:`\gamma_i` and
 :math:`\gamma_j` are the widths of the Gaussian charge distribution and
@@ -103,6 +111,10 @@ commands:
 * :math:`\epsilon` (energy)
 * :math:`\sigma` (distance)
 * :math:`\gamma` (distance)
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 

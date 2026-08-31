@@ -47,9 +47,6 @@ class ImproperCvffIntel : public ImproperCvff {
   template <class flt_t, class acc_t>
   void pack_force_const(ForceConst<flt_t> &fc, IntelBuffers<flt_t, acc_t> *buffers);
 
-#ifdef _LMP_INTEL_OFFLOAD
-  int _use_base;
-#endif
 
   template <class flt_t> class ForceConst {
    public:
@@ -61,7 +58,7 @@ class ImproperCvffIntel : public ImproperCvff {
     fc_packed1 *fc;
 
     ForceConst() : fc(nullptr), _nimpropertypes(0) {}
-    ~ForceConst() { set_ntypes(0, nullptr); }
+    ~ForceConst() noexcept(false) { set_ntypes(0, nullptr); }
 
     void set_ntypes(const int nimpropertypes, Memory *memory);
 

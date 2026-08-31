@@ -1,6 +1,10 @@
 .. index:: pair_style coul/slater
 .. index:: pair_style coul/slater/cut
+.. index:: pair_style coul/slater/cut/omp
 .. index:: pair_style coul/slater/long
+.. index:: pair_style coul/slater/long/gpu
+.. index:: pair_style coul/slater/long/kk
+.. index:: pair_style coul/slater/long/omp
 
 pair_style coul/slater command
 ==============================
@@ -8,8 +12,12 @@ pair_style coul/slater command
 pair_style coul/slater/cut command
 ==================================
 
+Accelerator Variants: *coul/slater/cut/omp*
+
 pair_style coul/slater/long command
 ===================================
+
+Accelerator Variants: *coul/slater/long/gpu*, *coul/slater/long/kk*, *coul/slater/long/omp*
 
 Syntax
 """"""
@@ -40,7 +48,7 @@ Examples
 Description
 """""""""""
 
-Styles *coul/slater* compute electrostatic interactions in mesoscopic models
+Styles *coul/slater/** compute electrostatic interactions in mesoscopic models
 which employ potentials without explicit excluded-volume interactions.
 The goal is to prevent artificial ionic pair formation by including a charge
 distribution in the Coulomb potential, following the formulation of
@@ -71,6 +79,10 @@ commands:
 * :math:`r_c` (distance units)
 
 The global decay length of the charge (:math:`\lambda`) specified in the pair_style command is used for all pairs.
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 

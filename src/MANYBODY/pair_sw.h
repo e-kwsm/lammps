@@ -32,6 +32,7 @@ class PairSW : public Pair {
   void coeff(int, char **) override;
   double init_one(int, int) override;
   void init_style() override;
+  void settings(int, char **) override;
   double single(int, int, int, int, double, double, double, double &) override;
 
   static constexpr int NPARAMS_PER_LINE = 14;
@@ -54,8 +55,8 @@ class PairSW : public Pair {
   int maxshort;               // size of short neighbor list array
   int *neighshort;            // short neighbor list array
   int skip_threebody_flag;    // whether to run threebody loop
+  int params_mapped;          // whether parameters have been read and mapped to elements
 
-  void settings(int, char **) override;
   virtual void allocate();
   virtual void read_file(char *);
   virtual void setup_params();

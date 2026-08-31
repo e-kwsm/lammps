@@ -39,7 +39,9 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 PairLJCharmmfswCoulCharmmfsh::PairLJCharmmfswCoulCharmmfsh(LAMMPS *lmp) :
-  Pair(lmp)
+    Pair(lmp), epsilon(nullptr), sigma(nullptr), eps14(nullptr), sigma14(nullptr), lj1(nullptr),
+    lj2(nullptr), lj3(nullptr), lj4(nullptr), lj14_1(nullptr), lj14_2(nullptr), lj14_3(nullptr),
+    lj14_4(nullptr)
 {
   implicit = 0;
   mix_flag = ARITHMETIC;
@@ -53,8 +55,7 @@ PairLJCharmmfswCoulCharmmfsh::PairLJCharmmfswCoulCharmmfsh(LAMMPS *lmp) :
 
   if (strcmp(update->unit_style,"real") == 0) {
     if ((comm->me == 0) && (force->qqr2e != force->qqr2e_charmm_real))
-      error->message(FLERR,"Switching to CHARMM coulomb energy"
-                     " conversion constant");
+      utils::logmesg(lmp,"Switching to CHARMM coulomb energy conversion constant\n");
     force->qqr2e = force->qqr2e_charmm_real;
   }
 }
@@ -67,8 +68,7 @@ PairLJCharmmfswCoulCharmmfsh::~PairLJCharmmfswCoulCharmmfsh()
 
   if (update && strcmp(update->unit_style,"real") == 0) {
     if ((comm->me == 0) && (force->qqr2e == force->qqr2e_charmm_real))
-      error->message(FLERR,"Restoring original LAMMPS coulomb energy"
-                     " conversion constant");
+      utils::logmesg(lmp,"Restoring original LAMMPS coulomb energy conversion constant\n");
     force->qqr2e = force->qqr2e_lammps_real;
   }
 
@@ -188,7 +188,7 @@ void PairLJCharmmfswCoulCharmmfsh::compute(int eflag, int vflag)
               evdwl12 = lj3[itype][jtype]*cut_lj6*denom_lj12 *
                 (r6inv - cut_lj6inv)*(r6inv - cut_lj6inv);
               evdwl6 = -lj4[itype][jtype]*cut_lj3*denom_lj6 *
-                (r3inv - cut_lj3inv)*(r3inv - cut_lj3inv);;
+                (r3inv - cut_lj3inv)*(r3inv - cut_lj3inv);
               evdwl = evdwl12 + evdwl6;
             } else {
               evdwl12 = r6inv*lj3[itype][jtype]*r6inv -
@@ -267,7 +267,7 @@ void PairLJCharmmfswCoulCharmmfsh::settings(int narg, char **arg)
 void PairLJCharmmfswCoulCharmmfsh::coeff(int narg, char **arg)
 {
   if (narg != 4 && narg != 6)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -295,7 +295,7 @@ void PairLJCharmmfswCoulCharmmfsh::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -525,7 +525,7 @@ single(int i, int j, int itype, int jtype,
       philj12 = lj3[itype][jtype]*cut_lj6*denom_lj12 *
         (r6inv - cut_lj6inv)*(r6inv - cut_lj6inv);
       philj6 = -lj4[itype][jtype]*cut_lj3*denom_lj6 *
-        (r3inv - cut_lj3inv)*(r3inv - cut_lj3inv);;
+        (r3inv - cut_lj3inv)*(r3inv - cut_lj3inv);
       philj = philj12 + philj6;
     } else {
       philj12 = r6inv*lj3[itype][jtype]*r6inv -

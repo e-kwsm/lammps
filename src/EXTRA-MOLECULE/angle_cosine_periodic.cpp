@@ -29,21 +29,28 @@
 #include "neighbor.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define SMALL 0.001
+static constexpr double SMALL = 0.001;
 
 /* ---------------------------------------------------------------------- */
 
-AngleCosinePeriodic::AngleCosinePeriodic(LAMMPS *lmp) : Angle(lmp) {}
+AngleCosinePeriodic::AngleCosinePeriodic(LAMMPS *lmp) :
+    Angle(lmp), k(nullptr), multiplicity(nullptr), b(nullptr)
+{
+  born_matrix_enable = 1;
+}
 
 /* ---------------------------------------------------------------------- */
 
 AngleCosinePeriodic::~AngleCosinePeriodic()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(k);
@@ -117,7 +124,7 @@ void AngleCosinePeriodic::compute(int eflag, int vflag)
     tn = 1.0;
     tn_1 = 1.0;
     tn_2 = 0.0;
-    un = 1.0;
+    un = (m==1) ? 2.0 : 1.0;
     un_1 = 2.0;
     un_2 = 0.0;
 
@@ -198,7 +205,7 @@ void AngleCosinePeriodic::allocate()
 
 void AngleCosinePeriodic::coeff(int narg, char **arg)
 {
-  if (narg != 4) error->all(FLERR,"Incorrect args for angle coefficients");
+  if (narg != 4) error->all(FLERR,"Incorrect args for angle coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -207,7 +214,7 @@ void AngleCosinePeriodic::coeff(int narg, char **arg)
   double c_one = utils::numeric(FLERR,arg[1],false,lmp);
   int b_one = utils::inumeric(FLERR,arg[2],false,lmp);
   int n_one = utils::inumeric(FLERR,arg[3],false,lmp);
-  if (n_one <= 0) error->all(FLERR,"Incorrect args for angle coefficients");
+  if (n_one <= 0) error->all(FLERR,"Incorrect args for angle coefficients" + utils::errorurl(21));
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -218,7 +225,7 @@ void AngleCosinePeriodic::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for angle coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for angle coefficients" + utils::errorurl(21));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -281,13 +288,13 @@ double AngleCosinePeriodic::single(int type, int i1, int i2, int i3)
   double delx1 = x[i1][0] - x[i2][0];
   double dely1 = x[i1][1] - x[i2][1];
   double delz1 = x[i1][2] - x[i2][2];
-  domain->minimum_image(delx1,dely1,delz1);
+  domain->minimum_image(FLERR, delx1,dely1,delz1);
   double r1 = sqrt(delx1*delx1 + dely1*dely1 + delz1*delz1);
 
   double delx2 = x[i3][0] - x[i2][0];
   double dely2 = x[i3][1] - x[i2][1];
   double delz2 = x[i3][2] - x[i2][2];
-  domain->minimum_image(delx2,dely2,delz2);
+  domain->minimum_image(FLERR, delx2,dely2,delz2);
   double r2 = sqrt(delx2*delx2 + dely2*dely2 + delz2*delz2);
 
   double c = delx1*delx2 + dely1*dely2 + delz1*delz2;
@@ -297,4 +304,52 @@ double AngleCosinePeriodic::single(int type, int i1, int i2, int i3)
 
   c = cos(acos(c)*multiplicity[type]);
   return 2.0*k[type]*(1.0-b[type]*powsign(multiplicity[type])*c);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void AngleCosinePeriodic::born_matrix(int type, int i1, int i2, int i3, double &du, double &du2)
+{
+  double **x = atom->x;
+
+  double delx1 = x[i1][0] - x[i2][0];
+  double dely1 = x[i1][1] - x[i2][1];
+  double delz1 = x[i1][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx1,dely1,delz1);
+  double r1 = sqrt(delx1*delx1 + dely1*dely1 + delz1*delz1);
+
+  double delx2 = x[i3][0] - x[i2][0];
+  double dely2 = x[i3][1] - x[i2][1];
+  double delz2 = x[i3][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx2,dely2,delz2);
+  double r2 = sqrt(delx2*delx2 + dely2*dely2 + delz2*delz2);
+
+  double c = delx1*delx2 + dely1*dely2 + delz1*delz2;
+  c /= r1*r2;
+  if (c > 1.0) c = 1.0;
+  if (c < -1.0) c = -1.0;
+  double theta = acos(c);
+
+  double s = sqrt(1.0 - c*c);
+  if (s < SMALL) s = SMALL;
+  s = 1.0/s;
+
+  double m_angle = multiplicity[type] * theta;
+  double prefactor = -2.0 * k[type] * b[type] * powsign(multiplicity[type]) * multiplicity[type];
+
+  du = prefactor * sin(m_angle) / s;
+  du2 = prefactor * (c * sin(m_angle) - s * cos(m_angle) * multiplicity[type]) / (s * s * s);
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *AngleCosinePeriodic::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k;
+  if (strcmp(str, "b") == 0) return (void *) b;
+  if (strcmp(str, "multiplicity") == 0) return (void *) multiplicity;
+  return nullptr;
 }

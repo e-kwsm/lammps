@@ -1,15 +1,16 @@
 .. index:: fix npt/sphere
+.. index:: fix npt/sphere/kk
 .. index:: fix npt/sphere/omp
 
 fix npt/sphere command
 ======================
 
-Accelerator Variants: *npt/sphere/omp*
+Accelerator Variants: *npt/sphere/kk*, *npt/sphere/omp*
 
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID npt/sphere keyword value ...
 

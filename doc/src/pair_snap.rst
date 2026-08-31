@@ -1,10 +1,11 @@
 .. index:: pair_style snap
+.. index:: pair_style snap/intel
 .. index:: pair_style snap/kk
 
 pair_style snap command
 =======================
 
-Accelerator Variants: *snap/kk*
+Accelerator Variants: *snap/intel*, *snap/kk*
 
 Syntax
 """"""
@@ -25,7 +26,7 @@ Description
 """""""""""
 
 Pair style *snap* defines the spectral neighbor analysis potential
-(SNAP), a machine-learning interatomic potential :ref:`(Thompson)
+(SNAP), a machine-learning interatomic potential :ref:`(Thompson2)
 <Thompson20142>`.  Like the GAP framework of Bartok et
 al. :ref:`(Bartok2010) <Bartok20102>`, SNAP uses bispectrum components
 to characterize the local neighborhood of each atom in a very general
@@ -260,6 +261,14 @@ This style is part of the ML-SNAP package.  It is only enabled if LAMMPS
 was built with that package.  See the :doc:`Build package
 <Build_package>` page for more info.
 
+The *snap/intel* accelerator variant will *only* be available if LAMMPS
+is built with Intel *compilers* and for CPUs with AVX-512 support.
+While the INTEL package in general allows multiple floating point
+precision modes to be selected, *snap/intel* will currently always use
+full double precision regardless of the precision mode selected.
+Additionally, the *intel* variant of snap will **NOT** use multiple
+threads with OpenMP.
+
 Related commands
 """"""""""""""""
 
@@ -277,7 +286,7 @@ none
 
 .. _Thompson20142:
 
-**(Thompson)** Thompson, Swiler, Trott, Foiles, Tucker, J Comp Phys, 285, 316 (2015).
+**(Thompson2)** Thompson, Swiler, Trott, Foiles, Tucker, J Comp Phys, 285, 316 (2015).
 
 .. _Bartok20102:
 
@@ -289,4 +298,4 @@ none
 
 .. _Cusentino20202:
 
-**(Cusentino)** Cusentino, Wood, and Thompson, J Phys Chem A, xxx, xxxxx, (2020)
+**(Cusentino)** Cusentino, Wood, Thompson, J Phys Chem A, 124, 5456, (2020)

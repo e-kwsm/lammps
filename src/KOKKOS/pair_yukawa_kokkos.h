@@ -45,71 +45,74 @@ class PairYukawaKokkos : public PairYukawa {
   double init_one(int,int) override;
 
   struct params_yukawa {
+// NOLINTNEXTLINE
     KOKKOS_INLINE_FUNCTION
     params_yukawa() { cutsq=0, a = 0; offset = 0; }
+// NOLINTNEXTLINE
     KOKKOS_INLINE_FUNCTION
     params_yukawa(int /*i*/) { cutsq=0, a = 0; offset = 0; }
-    F_FLOAT cutsq, a, offset;
+    KK_FLOAT cutsq, a, offset;
   };
 
 
  protected:
   template<bool STACKPARAMS, class Specialisation>
+// NOLINTNEXTLINE
   KOKKOS_INLINE_FUNCTION
-  F_FLOAT compute_fpair(const F_FLOAT& rsq, const int& i, const int&j,
+  KK_FLOAT compute_fpair(const KK_FLOAT& rsq, const int& i, const int&j,
                         const int& itype, const int& jtype) const;
 
   template<bool STACKPARAMS, class Specialisation>
+// NOLINTNEXTLINE
   KOKKOS_INLINE_FUNCTION
-  F_FLOAT compute_evdwl(const F_FLOAT& rsq, const int& i, const int&j,
+  KK_FLOAT compute_evdwl(const KK_FLOAT& rsq, const int& i, const int&j,
                         const int& itype, const int& jtype) const;
 
   template<bool STACKPARAMS, class Specialisation>
+// NOLINTNEXTLINE
   KOKKOS_INLINE_FUNCTION
-  F_FLOAT compute_ecoul(const F_FLOAT& /*rsq*/, const int& /*i*/, const int& /*j*/,
+  KK_FLOAT compute_ecoul(const KK_FLOAT& /*rsq*/, const int& /*i*/, const int& /*j*/,
                         const int& /*itype*/, const int& /*jtype*/) const { return 0; }
 
 
   Kokkos::DualView<params_yukawa**,Kokkos::LayoutRight,DeviceType> k_params;
   typename Kokkos::DualView<params_yukawa**,Kokkos::LayoutRight,DeviceType>::t_dev_const_um params;
   params_yukawa m_params[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
-  F_FLOAT m_cutsq[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
-  typename AT::t_x_array_randomread x;
-  typename AT::t_x_array c_x;
-  typename AT::t_f_array f;
+  KK_FLOAT m_cutsq[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
+  typename AT::t_kkfloat_1d_3_lr_randomread x;
+  typename AT::t_kkfloat_1d_3_lr c_x;
+  typename AT::t_kkacc_1d_3 f;
   typename AT::t_int_1d_randomread type;
 
-  DAT::tdual_efloat_1d k_eatom;
-  DAT::tdual_virial_array k_vatom;
-  typename AT::t_efloat_1d d_eatom;
-  typename AT::t_virial_array d_vatom;
-  typename AT::t_tagint_1d tag;
+  DAT::ttransform_kkacc_1d k_eatom;
+  DAT::ttransform_kkacc_1d_6 k_vatom;
+  typename AT::t_kkacc_1d d_eatom;
+  typename AT::t_kkacc_1d_6 d_vatom;
 
   int newton_pair;
-  double special_lj[4];
+  KK_FLOAT special_lj[4];
 
-  typename AT::tdual_ffloat_2d k_cutsq;
-  typename AT::t_ffloat_2d d_cutsq;
+  DAT::ttransform_kkfloat_2d k_cutsq;
+  typename AT::t_kkfloat_2d d_cutsq;
 
 
   int neighflag;
   int nlocal,nall,eflag,vflag;
 
   void allocate() override;
-  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,true>;
+  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,true,0>;
+  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,true,1>;
   friend struct PairComputeFunctor<PairYukawaKokkos,HALF,true>;
   friend struct PairComputeFunctor<PairYukawaKokkos,HALFTHREAD,true>;
-  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,false>;
+  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,false,0>;
+  friend struct PairComputeFunctor<PairYukawaKokkos,FULL,false,1>;
   friend struct PairComputeFunctor<PairYukawaKokkos,HALF,false>;
   friend struct PairComputeFunctor<PairYukawaKokkos,HALFTHREAD,false>;
-  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,FULL,void>(
-    PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
-  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,HALF,void>(
-    PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
-  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,HALFTHREAD,void>(
-    PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
-  friend EV_FLOAT pair_compute<PairYukawaKokkos,void>(
-    PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
+  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,FULL,0>(PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
+  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,FULL,1>(PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
+  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,HALF>(PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
+  friend EV_FLOAT pair_compute_neighlist<PairYukawaKokkos,HALFTHREAD>(PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
+  friend EV_FLOAT pair_compute<PairYukawaKokkos,void>(PairYukawaKokkos*,NeighListKokkos<DeviceType>*);
   friend void pair_virial_fdotr_compute<PairYukawaKokkos>(PairYukawaKokkos*);
 
 };

@@ -1,12 +1,15 @@
 .. index:: fix temp/rescale
+.. index:: fix temp/rescale/kk
 
 fix temp/rescale command
 ========================
 
+Accelerator Variants: *temp/rescale/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID temp/rescale N Tstart Tstop window fraction
 
@@ -125,6 +128,10 @@ remaining thermal degrees of freedom, and the bias is added back in.
 
 ----------
 
+.. include:: accel_styles.rst
+
+----------
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -158,7 +165,7 @@ This fix is not invoked during :doc:`energy minimization <minimize>`.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

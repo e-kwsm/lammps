@@ -33,13 +33,13 @@ Syntax
 
   .. parsed-literal::
 
-          id1, id2 = IDs of the 2 atoms in each pair interaction
-          time/created = the timestep that the 2 atoms began interacting
-          time/broken = the timestep that the 2 atoms stopped interacting
-          time/total = the total number of timesteps the 2 atoms interacted
-          r/min = the minimum radial distance between the 2 atoms during the interaction (distance units)
-          r/ave = the average radial distance between the 2 atoms during the interaction (distance units)
-          x, y, z = the center of mass position of the 2 atoms when they stopped interacting (distance units)
+          id1, id2 = IDs of the two atoms in each pair interaction
+          time/created = the timestep that the two atoms began interacting
+          time/broken = the timestep that the two atoms stopped interacting
+          time/total = the total number of timesteps the two atoms interacted
+          r/min = the minimum radial distance between the two atoms during the interaction (distance units)
+          r/ave = the average radial distance between the two atoms during the interaction (distance units)
+          x, y, z = the center of mass position of the two atoms when they stopped interacting (distance units)
 
 Examples
 """"""""
@@ -119,7 +119,7 @@ should be used.
 
 The *time/min* keyword sets a minimum amount of time that an
 interaction must persist to be included.  This setting can be used to
-censor short-lived interactions.
+exclude short-lived interactions.
 
 The *type/include* keyword filters interactions based on the types of
 the two atoms.  Data is only saved for interactions between atoms
@@ -174,8 +174,8 @@ the specified attribute.
 Restrictions
 """"""""""""
 
-This fix is part of the MISC package.  It is only enabled if LAMMPS
-was built with that package.  See the :doc:`Build package
+This pair style is part of the MISC package.  It is only enabled if
+LAMMPS was built with that package.  See the :doc:`Build package
 <Build_package>` page for more info.
 
 This pair style is currently incompatible with granular pair styles

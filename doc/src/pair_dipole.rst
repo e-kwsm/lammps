@@ -1,17 +1,19 @@
 .. index:: pair_style lj/cut/dipole/cut
 .. index:: pair_style lj/cut/dipole/cut/gpu
+.. index:: pair_style lj/cut/dipole/cut/kk
 .. index:: pair_style lj/cut/dipole/cut/omp
 .. index:: pair_style lj/sf/dipole/sf
 .. index:: pair_style lj/sf/dipole/sf/gpu
 .. index:: pair_style lj/sf/dipole/sf/omp
 .. index:: pair_style lj/cut/dipole/long
 .. index:: pair_style lj/cut/dipole/long/gpu
+.. index:: pair_style lj/cut/dipole/long/omp
 .. index:: pair_style lj/long/dipole/long
 
 pair_style lj/cut/dipole/cut command
 ====================================
 
-Accelerator Variants: *lj/cut/dipole/cut/gpu*, *lj/cut/dipole/cut/omp*
+Accelerator Variants: *lj/cut/dipole/cut/gpu*, *lj/cut/dipole/cut/kk*, *lj/cut/dipole/cut/omp*
 
 pair_style lj/sf/dipole/sf command
 ==================================
@@ -21,7 +23,7 @@ Accelerator Variants: *lj/sf/dipole/sf/gpu*, *lj/sf/dipole/sf/omp*
 pair_style lj/cut/dipole/long command
 =====================================
 
-Accelerator Variants: *lj/cut/dipole/long/gpu*
+Accelerator Variants: *lj/cut/dipole/long/gpu*, *lj/cut/dipole/long/omp*
 
 pair_style lj/long/dipole/long command
 ======================================
@@ -95,40 +97,40 @@ force (F), and torque (T) between particles I and J.
                         \left(\frac{\sigma}{r}\right)^6 \right] \\
    E_{qq}  = & \frac{q_i q_j}{r} \\
    E_{qp}  = & \frac{q}{r^3} (p \bullet \vec{r}) \\
-   E_{pp}  = & \frac{1}{r^3} (\vec{p_i} \bullet \vec{p_j}) -
-             \frac{3}{r^5} (\vec{p_i} \bullet \vec{r}) (\vec{p_j} \bullet \vec{r}) \\
+   E_{pp}  = & \frac{1}{r^3} (\vec{p}_i \bullet \vec{p}_j) -
+             \frac{3}{r^5} (\vec{p}_i \bullet \vec{r}) (\vec{p}_j \bullet \vec{r}) \\
              & \\
    F_{qq}  = & \frac{q_i q_j}{r^3} \vec{r} \\
    F_{qp}  = & -\frac{q}{r^3} \vec{p} + \frac{3q}{r^5}
              (\vec{p} \bullet \vec{r}) \vec{r} \\
-   F_{pp}  = & \frac{3}{r^5} (\vec{p_i} \bullet \vec{p_j}) \vec{r} -
-             \frac{15}{r^7} (\vec{p_i} \bullet \vec{r})
-             (\vec{p_j} \bullet \vec{r}) \vec{r} +
-             \frac{3}{r^5} \left[ (\vec{p_j} \bullet \vec{r}) \vec{p_i} +
-             (\vec{p_i} \bullet \vec{r}) \vec{p_j} \right] \\
+   F_{pp}  = & \frac{3}{r^5} (\vec{p}_i \bullet \vec{p}_j) \vec{r} -
+             \frac{15}{r^7} (\vec{p}_i \bullet \vec{r})
+             (\vec{p}_j \bullet \vec{r}) \vec{r} +
+             \frac{3}{r^5} \left[ (\vec{p}_j \bullet \vec{r}) \vec{p}_i +
+             (\vec{p}_i \bullet \vec{r}) \vec{p}_j \right] \\
              & \\
-   T_{pq} = T_{ij}  = & \frac{q_j}{r^3} (\vec{p_i} \times \vec{r}) \\
-   T_{qp} = T_{ji}  = & - \frac{q_i}{r^3} (\vec{p_j} \times \vec{r}) \\
-   T_{pp} = T_{ij}  = & -\frac{1}{r^3} (\vec{p_i} \times \vec{p_j}) +
-                      \frac{3}{r^5} (\vec{p_j} \bullet \vec{r})
-                      (\vec{p_i} \times \vec{r}) \\
-   T_{pp} = T_{ji}  = & -\frac{1}{r^3} (\vec{p_j} \times \vec{p_i}) +
-                      \frac{3}{r^5} (\vec{p_i} \bullet \vec{r})
-                      (\vec{p_j} \times \vec{r})
+   T_{pq} = T_{ij}  = & \frac{q_j}{r^3} (\vec{p}_i \times \vec{r}) \\
+   T_{qp} = T_{ji}  = & - \frac{q_i}{r^3} (\vec{p}_j \times \vec{r}) \\
+   T_{pp} = T_{ij}  = & -\frac{1}{r^3} (\vec{p}_i \times \vec{p}_j) +
+                      \frac{3}{r^5} (\vec{p}_j \bullet \vec{r})
+                      (\vec{p}_i \times \vec{r}) \\
+   T_{pp} = T_{ji}  = & -\frac{1}{r^3} (\vec{p}_j \times \vec{p}_i) +
+                      \frac{3}{r^5} (\vec{p}_i \bullet \vec{r})
+                      (\vec{p}_j \times \vec{r})
 
 where :math:`q_i` and :math:`q_j` are the charges on the two
-particles, :math:`\vec{p_i}` and :math:`\vec{p_j}` are the dipole
+particles, :math:`\vec{p}_i` and :math:`\vec{p}_j` are the dipole
 moment vectors of the two particles, r is their separation distance,
 and the vector r = Ri - Rj is the separation vector between the two
 particles.  Note that Eqq and Fqq are simply Coulombic energy and
 force, Fij = -Fji as symmetric forces, and Tij != -Tji since the
 torques do not act symmetrically.  These formulas are discussed in
-:ref:`(Allen) <Allen2>` and in :ref:`(Toukmaji) <Toukmaji2>`.
+:ref:`(AllenTildesley) <Allen2>` and in :ref:`(Toukmaji) <Toukmaji2>`.
 
 Also note, that in the code, all of these terms (except Elj) have a
 :math:`C/\epsilon` prefactor, the same as the Coulombic term in the
 LJ + Coulombic pair styles discussed :doc:`here <pair_lj>`.  C is an
-energy-conversion constant and epsilon is the dielectric constant
+energy-conversion constant and :math:`\epsilon` is the dielectric constant
 which can be set by the :doc:`dielectric <dielectric>` command.  The
 same is true of the equations that follow for other dipole pair
 styles.
@@ -139,7 +141,7 @@ moment. In general, a shifted-force potential is a (slightly) modified
 potential containing extra terms that make both the energy and its
 derivative go to zero at the cutoff distance; this removes
 (cutoff-related) problems in energy conservation and any numerical
-instability in the equations of motion :ref:`(Allen)
+instability in the equations of motion :ref:`(AllenTildesley)
 <Allen2>`. Shifted-force interactions for the Lennard-Jones (E_LJ),
 charge-charge (Eqq), charge-dipole (Eqp), dipole-charge (Epq) and
 dipole-dipole (Epp) potentials are computed by these formulas for the
@@ -162,8 +164,8 @@ energy (E), force (F), and torque (T) between particles I and J:
   2\left(\frac{r}{r_c}\right)^{\!3}\right] (\vec{p}\bullet\vec{r}) \\
   E_{pp} = & \left[1-4\left(\frac{r}{r_c}\right)^{\!3} +
   3\left(\frac{r}{r_c}\right)^{\!4}\right]\left[\frac{1}{r^3}
-  (\vec{p_i} \bullet \vec{p_j}) - \frac{3}{r^5}
-  (\vec{p_i} \bullet \vec{r}) (\vec{p_j} \bullet \vec{r})\right] \\
+  (\vec{p}_i \bullet \vec{p}_j) - \frac{3}{r^5}
+  (\vec{p}_i \bullet \vec{r}) (\vec{p}_j \bullet \vec{r})\right] \\
            & \\
 
   F_{LJ}  = & \left\{\left[48\epsilon \left(\frac{\sigma}{r}\right)^{\!12} -
@@ -181,37 +183,37 @@ energy (E), force (F), and torque (T) between particles I and J:
   \frac{q}{r^3}\left[1-3\left(\frac{r}{r_c}\right)^{\!2} +
   2\left(\frac{r}{r_c}\right)^{\!3}\right] \vec{p} \\
   F_{pp}  = &\frac{3}{r^5}\Bigg\{\left[1-\left(\frac{r}{r_c}\right)^{\!4}\right]
-  \left[(\vec{p_i}\bullet\vec{p_j}) - \frac{3}{r^2} (\vec{p_i}\bullet\vec{r})
-  (\vec{p_j} \bullet \vec{r})\right] \vec{r} + \\
+  \left[(\vec{p}_i\bullet\vec{p}_j) - \frac{3}{r^2} (\vec{p}_i\bullet\vec{r})
+  (\vec{p}_j \bullet \vec{r})\right] \vec{r} + \\
     & \left[1 -
   4\left(\frac{r}{r_c}\right)^{\!3}+3\left(\frac{r}{r_c}\right)^{\!4}\right]
-  \left[ (\vec{p_j} \bullet \vec{r}) \vec{p_i} + (\vec{p_i} \bullet \vec{r})
-  \vec{p_j} -\frac{2}{r^2} (\vec{p_i} \bullet \vec{r})
-  (\vec{p_j} \bullet \vec{r})\vec{r}\right] \Bigg\}
+  \left[ (\vec{p}_j \bullet \vec{r}) \vec{p}_i + (\vec{p}_i \bullet \vec{r})
+  \vec{p}_j -\frac{2}{r^2} (\vec{p}_i \bullet \vec{r})
+  (\vec{p}_j \bullet \vec{r})\vec{r}\right] \Bigg\}
 
 .. math::
 
    T_{pq} = T_{ij}  = & \frac{q_j}{r^3} \left[ 1 -
   3\left(\frac{r}{r_c}\right)^{\!2} +
-  2\left(\frac{r}{r_c}\right)^{\!3}\right] (\vec{p_i}\times\vec{r}) \\
+  2\left(\frac{r}{r_c}\right)^{\!3}\right] (\vec{p}_i\times\vec{r}) \\
   T_{qp} = T_{ji}  = & - \frac{q_i}{r^3} \left[ 1 -
   3\left(\frac{r}{r_c}\right)^{\!2} +
-  2\left(\frac{r}{r_c}\right)^{\!3} \right] (\vec{p_j}\times\vec{r}) \\
+  2\left(\frac{r}{r_c}\right)^{\!3} \right] (\vec{p}_j\times\vec{r}) \\
   T_{pp} = T_{ij}  = & -\frac{1}{r^3}\left[1-4\left(\frac{r}{r_c}\right)^{\!3} +
-  e3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p_i} \times \vec{p_j}) + \\
+  e3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p}_i \times \vec{p}_j) + \\
                      & \frac{3}{r^5}\left[1-4\left(\frac{r}{r_c}\right)^{\!3} +
-  3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p_j}\bullet\vec{r})
-  (\vec{p_i} \times \vec{r}) \\
+  3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p}_j\bullet\vec{r})
+  (\vec{p}_i \times \vec{r}) \\
   T_{pp} = T_{ji} = & -\frac{1}{r^3}\left[1-4\left(\frac{r}{r_c}\right)^{\!3} +
-  3\left(\frac{r}{r_c}\right)^{\!4}\right](\vec{p_j} \times \vec{p_i}) + \\
+  3\left(\frac{r}{r_c}\right)^{\!4}\right](\vec{p}_j \times \vec{p}_i) + \\
                      & \frac{3}{r^5}\left[1-4\left(\frac{r}{r_c}\right)^{\!3} +
-  3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p_i} \bullet \vec{r})
-  (\vec{p_j} \times \vec{r})
+  3\left(\frac{r}{r_c}\right)^{\!4}\right] (\vec{p}_i \bullet \vec{r})
+  (\vec{p}_j \times \vec{r})
 
 where :math:`\epsilon` and :math:`\sigma` are the standard LJ
 parameters, :math:`r_c` is the cutoff, :math:`q_i` and :math:`q_j` are
-the charges on the two particles, :math:`\vec{p_i}` and
-:math:`\vec{p_j}` are the dipole moment vectors of the two particles,
+the charges on the two particles, :math:`\vec{p}_i` and
+:math:`\vec{p}_j` are the dipole moment vectors of the two particles,
 r is their separation distance, and the vector r = Ri - Rj is the
 separation vector between the two particles.  Note that Eqq and Fqq
 are simply Coulombic energy and force, Fij = -Fji as symmetric forces,
@@ -219,11 +221,11 @@ and Tij != -Tji since the torques do not act symmetrically.  The
 shifted-force formula for the Lennard-Jones potential is reported in
 :ref:`(Stoddard) <Stoddard>`.  The original (non-shifted) formulas for
 the electrostatic potentials, forces and torques can be found in
-:ref:`(Price) <Price2>`. The shifted-force electrostatic potentials
-have been obtained by applying equation 5.13 of :ref:`(Allen)
+:ref:`(Price2) <Price2>`. The shifted-force electrostatic potentials
+have been obtained by applying equation 5.13 of :ref:`(AllenTildesley)
 <Allen2>`. The formulas for the corresponding forces and torques have
 been obtained by applying the 'chain rule' as in appendix C.3 of
-:ref:`(Allen) <Allen2>`.
+:ref:`(AllenTildesley) <Allen2>`.
 
 If one cutoff is specified in the pair_style command, it is used for
 both the LJ and Coulombic (q,p) terms.  If two cutoffs are specified,
@@ -308,7 +310,7 @@ one of these options:
 * :doc:`fix nvt/sphere update dipole <fix_nvt_sphere>`
 * :doc:`fix npt/sphere update dipole <fix_npt_sphere>`
 
-In all cases the "update dipole" setting insures the dipole moments
+In all cases the "update dipole" setting ensures the dipole moments
 are also rotated when the finite-size spheres rotate.  The 2nd and 3rd
 bullets perform thermostatting; in the case of a Langevin thermostat
 the "omega yes" option also thermostats the rotational degrees of
@@ -377,7 +379,7 @@ none
 
 .. _Allen2:
 
-**(Allen)** Allen and Tildesley, Computer Simulation of Liquids,
+**(AllenTildesley)** Allen and Tildesley, Computer Simulation of Liquids,
 Clarendon Press, Oxford, 1987.
 
 .. _Toukmaji2:
@@ -391,4 +393,4 @@ Clarendon Press, Oxford, 1987.
 
 .. _Price2:
 
-**(Price)** Price, Stone and Alderton, Mol Phys, 52, 987 (1984).
+**(Price2)** Price, Stone and Alderton, Mol Phys, 52, 987 (1984).

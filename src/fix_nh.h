@@ -33,6 +33,7 @@ class FixNH : public Fix {
   void pre_exchange() override;
   double compute_scalar() override;
   double compute_vector(int) override;
+  std::string get_thermo_colname(int) override;
   void write_restart(FILE *) override;
   virtual int pack_restart_data(double *);    // pack restart data
   void restart(char *) override;
@@ -66,9 +67,8 @@ class FixNH : public Fix {
   double drag, tdrag_factor;     // drag factor on particle thermostat
   double pdrag_factor;           // drag factor on barostat
   int kspace_flag;               // 1 if KSpace invoked, 0 if not
-  int nrigid;                    // number of rigid fixes
   int dilate_group_bit;          // mask for dilation group
-  int *rfix;                     // indices of rigid fixes
+  std::vector<Fix *> rfix;       // list of rigid fixes
   char *id_dilate;               // group name to dilate
   class Irregular *irregular;    // for migrating atoms after box flips
 
@@ -121,6 +121,9 @@ class FixNH : public Fix {
   int scalexz;     // 1 if xz scaled with lz
   int scalexy;     // 1 if xy scaled with ly
   int flipflag;    // 1 if box flips are invoked as needed
+  int isochoric;   // 1 if isochoric NPT simulation
+  int p_isoch[3];  // 1 if dimension is used for isochoric simulation
+  double vol_start; // reference volume for isochoric simulation
 
   int pre_exchange_flag;    // set if pre_exchange needed for box flips
 

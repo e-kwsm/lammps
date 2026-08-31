@@ -21,6 +21,7 @@ CommandStyle(read_data,ReadData);
 #define LMP_READ_DATA_H
 
 #include "command.h"
+#include "safe_pointers.h"
 
 namespace LAMMPS_NS {
 class Fix;
@@ -32,12 +33,12 @@ class ReadData : public Command {
   static bool is_data_section(const std::string &);
 
  private:
-  int me, compressed;
+  int me;
   char *line, *keyword, *buffer, *style;
-  FILE *fp;
+  SafeFilePtr fp;
   char **coeffarg;
   int ncoeffarg, maxcoeffarg;
-  char argoffset1[8], argoffset2[8];
+  std::string argoffset1, argoffset2;
 
   bigint id_offset, mol_offset;
 
@@ -59,11 +60,16 @@ class ReadData : public Command {
 
   class LabelMap *lmap;
 
-  // box info
+  // box info read from file
+
+  int triclinic, triclinic_general;
+  int xloxhi_flag, yloyhi_flag, zlozhi_flag, tilt_flag;
+  int avec_flag, bvec_flag, cvec_flag, abc_origin_flag;
 
   double boxlo[3], boxhi[3];
   double xy, xz, yz;
-  int triclinic;
+  double avec[3], bvec[3], cvec[3];
+  double abc_origin[3];
 
   // optional args
 

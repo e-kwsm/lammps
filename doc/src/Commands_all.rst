@@ -1,29 +1,20 @@
-.. table_from_list::
-   :columns: 3
+.. include:: Commands_html.rst
 
-   * :doc:`General commands <Commands_all>`
-   * :doc:`Fix styles <Commands_fix>`
-   * :doc:`Compute styles <Commands_compute>`
-   * :doc:`Pair styles <Commands_pair>`
-   * :ref:`Bond styles <bond>`
-   * :ref:`Angle styles <angle>`
-   * :ref:`Dihedral styles <dihedral>`
-   * :ref:`Improper styles <improper>`
-   * :doc:`KSpace styles <Commands_kspace>`
-   * :doc:`Dump styles <Commands_dump>`
+.. raw:: latex
+
+   \clearpage
 
 General commands
 ================
 
-An alphabetic list of general LAMMPS commands.  Note that style
-commands with many variants, can be more easily accessed via the small
-table above.
+An alphabetic list of general LAMMPS commands.
 
 .. table_from_list::
-   :columns: 5
+   :columns: 6
 
    * :doc:`angle_coeff <angle_coeff>`
    * :doc:`angle_style <angle_style>`
+   * :doc:`angle_write <angle_write>`
    * :doc:`atom_modify <atom_modify>`
    * :doc:`atom_style <atom_style>`
    * :doc:`balance <balance>`
@@ -45,6 +36,7 @@ table above.
    * :doc:`dielectric <dielectric>`
    * :doc:`dihedral_coeff <dihedral_coeff>`
    * :doc:`dihedral_style <dihedral_style>`
+   * :doc:`dihedral_write <dihedral_write>`
    * :doc:`dimension <dimension>`
    * :doc:`displace_atoms <displace_atoms>`
    * :doc:`dump <dump>`
@@ -52,6 +44,7 @@ table above.
    * :doc:`echo <echo>`
    * :doc:`fix <fix>`
    * :doc:`fix_modify <fix_modify>`
+   * :doc:`geturl <geturl>`
    * :doc:`group <group>`
    * :doc:`if <if>`
    * :doc:`improper_coeff <improper_coeff>`
@@ -89,8 +82,7 @@ table above.
    * :doc:`region <region>`
    * :doc:`replicate <replicate>`
    * :doc:`rerun <rerun>`
-   * :doc:`reset_atom_ids <reset_atom_ids>`
-   * :doc:`reset_mol_ids <reset_mol_ids>`
+   * :doc:`reset_atoms <reset_atoms>`
    * :doc:`reset_timestep <reset_timestep>`
    * :doc:`restart <restart>`
    * :doc:`run <run>`
@@ -113,19 +105,22 @@ table above.
    * :doc:`write_coeff <write_coeff>`
    * :doc:`write_data <write_data>`
    * :doc:`write_dump <write_dump>`
+   * :doc:`write_molecule <write_molecule>`
    * :doc:`write_restart <write_restart>`
 
 Additional general LAMMPS commands provided by packages.  A few
 commands have accelerated versions.  This is indicated by an
-additional letter in parenthesis: k = KOKKOS.
+additional letter in parentheses: k = KOKKOS.
 
 .. table_from_list::
-   :columns: 5
+   :columns: 6
 
    * :doc:`dynamical_matrix (k) <dynamical_matrix>`
+   * :doc:`fenix <fenix>`
    * :doc:`group2ndx <group2ndx>`
    * :doc:`hyper <hyper>`
    * :doc:`kim <kim_commands>`
+   * :doc:`fitpod <fitpod_command>`
    * :doc:`mdi <mdi>`
    * :doc:`ndx2group <group2ndx>`
    * :doc:`neb <neb>`
@@ -133,6 +128,7 @@ additional letter in parenthesis: k = KOKKOS.
    * :doc:`plugin <plugin>`
    * :doc:`prd <prd>`
    * :doc:`python <python>`
+   * :doc:`region2vmd <region2vmd>`
    * :doc:`tad <tad>`
    * :doc:`temper <temper>`
    * :doc:`temper/grem <temper_grem>`

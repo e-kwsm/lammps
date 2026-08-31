@@ -17,7 +17,6 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
-#include "group.h"
 #include "memory.h"
 #include "modify.h"
 #include "neigh_list.h"
@@ -26,14 +25,14 @@
 #include "update.h"
 
 #include <cmath>
-#include <cstring>
 
 using namespace LAMMPS_NS;
 
+static constexpr int MAXLOOP = 100;
 /* ---------------------------------------------------------------------- */
 
 ComputeClusterAtom::ComputeClusterAtom(LAMMPS *lmp, int narg, char **arg) :
-    Compute(lmp, narg, arg), clusterID(nullptr)
+    Compute(lmp, narg, arg), list(nullptr), clusterID(nullptr)
 {
   if (narg != 4) error->all(FLERR, "Illegal compute cluster/atom command");
 
@@ -63,17 +62,15 @@ void ComputeClusterAtom::init()
   if (force->pair == nullptr)
     error->all(FLERR, "Compute cluster/atom requires a pair style to be defined");
   if (sqrt(cutsq) > force->pair->cutforce)
-    error->all(FLERR, "Compute cluster/atom cutoff is longer than pairwise cutoff");
+    error->all(FLERR, "Compute cluster/atom cutoff {} is longer than pairwise cutoff {}", sqrt(cutsq), force->pair->cutforce);
 
   // need an occasional full neighbor list
   // full required so that pair of atoms on 2 procs both set their clusterID
 
   neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
 
-  int count = 0;
-  for (int i = 0; i < modify->ncompute; i++)
-    if (strcmp(modify->compute[i]->style, "cluster/atom") == 0) count++;
-  if (count > 1 && comm->me == 0) error->warning(FLERR, "More than one compute cluster/atom");
+  if ((comm->me == 0) && (modify->get_compute_by_style("^cluster/atom").size() > 1))
+    error->warning(FLERR, "More than one compute {}", style);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -102,13 +99,14 @@ void ComputeClusterAtom::compute_peratom()
     vector_atom = clusterID;
   }
 
-  // invoke full neighbor list (will copy or build if necessary)
-  // on the first step of a run, set preflag to one in neighbor->build_one(...)
+  // communicate coords for ghost atoms if box can change, e.g. fix deform
+  // this ensures ghost atom coords are current
 
-  if (update->firststep == update->ntimestep)
-    neighbor->build_one(list, 1);
-  else
-    neighbor->build_one(list);
+  comm->forward_comm();
+
+  // invoke full neighbor list (will copy or build if necessary)
+
+  neighbor->build_one(list);
 
   inum = list->inum;
   ilist = list->ilist;
@@ -139,9 +137,11 @@ void ComputeClusterAtom::compute_peratom()
 
   int change, done, anychange;
 
-  while (true) {
+  int counter = 0;
+  // stop after MAXLOOP iterations
+  while (counter < MAXLOOP) {
     comm->forward_comm(this);
-
+    ++counter;
     change = 0;
     while (true) {
       done = 1;
@@ -180,6 +180,8 @@ void ComputeClusterAtom::compute_peratom()
     MPI_Allreduce(&change, &anychange, 1, MPI_INT, MPI_MAX, world);
     if (!anychange) break;
   }
+  if ((comm->me == 0) && (counter >= MAXLOOP))
+    error->warning(FLERR, "Compute cluster/atom did not converge after {} iterations", MAXLOOP);
 }
 
 /* ---------------------------------------------------------------------- */

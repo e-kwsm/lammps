@@ -15,6 +15,10 @@
 // clang-format off
 // list all deprecated and removed dump styles here
 DumpStyle(DEPRECATED,DumpDeprecated);
+DumpStyle(atom/mpiio,DumpDeprecated);
+DumpStyle(cfg/mpiio,DumpDeprecated);
+DumpStyle(custom/mpiio,DumpDeprecated);
+DumpStyle(xyz/mpiio,DumpDeprecated);
 // clang-format on
 #else
 
@@ -29,6 +33,7 @@ class DumpDeprecated : public Dump {
  public:
   DumpDeprecated(class LAMMPS *, int, char **);
 
+ protected:
   void init_style() override {}
   void write_header(bigint) override {}
   void pack(tagint *) override {}

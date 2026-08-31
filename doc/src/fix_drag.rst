@@ -1,12 +1,15 @@
 .. index:: fix drag
+.. index:: fix drag/kk
 
 fix drag command
 ================
 
+Accelerator Variant: *drag/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID drag x y z fmag delta
 
@@ -54,6 +57,12 @@ calculated by this fix are "extensive".
 
 No parameter of this fix can be used with the *start/stop* keywords of
 the :doc:`run <run>` command.  This fix is not invoked during :doc:`energy minimization <minimize>`.
+
+----------
+
+.. include:: accel_styles.rst
+
+----------
 
 Restrictions
 """"""""""""

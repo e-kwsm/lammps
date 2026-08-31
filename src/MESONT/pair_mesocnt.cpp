@@ -34,30 +34,37 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <string>
+#include <exception>
+#include <iterator>
+#include <stdexcept>
 #include <unordered_map>
-#include <vector>
 
 using namespace LAMMPS_NS;
 using namespace MathExtra;
 using MathConst::MY_2PI;
 using MathConst::MY_PI;
 
-#define MAXLINE 1024
-#define SELF_CUTOFF 3
-#define SMALL 1.0e-6
-#define SWITCH 1.0e-4
-#define RHOMIN 10.0
+static constexpr int SELF_CUTOFF = 3;
+static constexpr double SMALL = 1.0e-6;
+static constexpr double SWITCH = 1.0e-4;
+static constexpr double RHOMIN = 10.0;
 
-#define QUAD_FINF 129
-#define QUAD_FSEMI 10
+static constexpr int QUAD_FINF = 129;
+static constexpr int QUAD_FSEMI = 10;
 
-#define BISECTION_STEPS 1000000
-#define BISECTION_EPS 1.0e-15
+static constexpr int BISECTION_STEPS = 1000000;
+static constexpr double BISECTION_EPS = 1.0e-15;
 
 /* ---------------------------------------------------------------------- */
 
-PairMesoCNT::PairMesoCNT(LAMMPS *lmp) : Pair(lmp)
+PairMesoCNT::PairMesoCNT(LAMMPS *lmp) :
+    Pair(lmp), end_types(nullptr), reduced_nlist(nullptr), numchainlist(nullptr), selfid(nullptr),
+    reduced_neighlist(nullptr), nchainlist(nullptr), endlist(nullptr), selfpos(nullptr),
+    chainlist(nullptr), param(nullptr), w(nullptr), wnode(nullptr), dq_w(nullptr), q1_dq_w(nullptr),
+    q2_dq_w(nullptr), gl_nodes_finf(nullptr), gl_nodes_fsemi(nullptr), gl_weights_finf(nullptr),
+    gl_weights_fsemi(nullptr), uinf_data(nullptr), gamma_data(nullptr), phi_data(nullptr),
+    usemi_data(nullptr), uinf_coeff(nullptr), gamma_coeff(nullptr), phi_coeff(nullptr),
+    usemi_coeff(nullptr), flocal(nullptr), fglobal(nullptr), basis(nullptr)
 {
   single_enable = 0;
   restartinfo = 0;
@@ -70,6 +77,8 @@ PairMesoCNT::PairMesoCNT(LAMMPS *lmp) : Pair(lmp)
   ghostneigh = 0;
 
   comm_forward = 3;
+  special_local_topo = nullptr;
+  nmax_mesocnt = 0;
 }
 
 /* ----------------------------------------------------------------------
@@ -114,6 +123,8 @@ PairMesoCNT::~PairMesoCNT()
     memory->destroy(gl_weights_finf);
     memory->destroy(gl_weights_fsemi);
   }
+
+  memory->destroy(special_local_topo);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -481,7 +492,7 @@ void PairMesoCNT::compute(int eflag, int vflag)
           geometry(r1, r2, p1, p2, nullptr, p, m, param, basis);
 
           if (param[0] > cutoff) continue;
-          if (!(param[2] < 0 && param[3] > 0)) {
+          if (param[2] >= 0 || param[3] <= 0) {
             double salpha = sin(param[1]);
             double sxi1 = salpha * param[2];
             double sxi2 = salpha * param[3];
@@ -503,7 +514,7 @@ void PairMesoCNT::compute(int eflag, int vflag)
             geometry(r1, r2, p2, p1, qe, p, m, param, basis);
 
           if (param[0] > cutoff) continue;
-          if (!(param[2] < 0 && param[3] > 0)) {
+          if (param[2] >= 0 || param[3] <= 0) {
             double hsq = param[0] * param[0];
             double calpha = cos(param[1]);
             double etamin = calpha * param[2];
@@ -1016,8 +1027,11 @@ void PairMesoCNT::bond_neigh_topo()
   // create version of atom->special with local ids and correct images
 
   int atom1, atom2;
-  int **special_local;
-  memory->create(special_local, nlocal + nghost, 2, "pair:special_local");
+  if (atom->nmax > nmax_mesocnt) {
+    memory->grow(special_local_topo, atom->nmax, 2, "pair:special_local_topo");
+    nmax_mesocnt = atom->nmax;
+  }
+  int **special_local = special_local_topo;
 
   for (int i = 0; i < nlocal + nghost; i++) {
     atom1 = atom->map(special[i][0]);
@@ -1130,7 +1144,7 @@ void PairMesoCNT::bond_neigh_topo()
           try {
             curr_reduced = reduced_map.at(curr_local);
             next_reduced = reduced_map.at(next_local);
-          } catch (const std::out_of_range &e) {
+          } catch (const std::out_of_range &) {
             break;
           }
 
@@ -1161,7 +1175,7 @@ void PairMesoCNT::bond_neigh_topo()
     if (numchainlist[i]) empty_neigh = false;
   }
 
-  memory->destroy(special_local);
+
 
   // count neighbor chain lengths per bond
 
@@ -1371,7 +1385,7 @@ void PairMesoCNT::chain_split(int *redlist, int numred, int *nchain, int **chain
 
   tagint *tag = atom->tag;
   tagint *mol = atom->molecule;
-  tagint *type = atom->type;
+  int *type = atom->type;
   int clen = 0;
   int cid = 0;
 
@@ -1885,7 +1899,7 @@ void PairMesoCNT::spline_coeff(double **data, double ****coeff, double dx, doubl
 inline double PairMesoCNT::spline(double x, double xstart, double dx, double **coeff,
                                   int coeff_size)
 {
-  int i = ceil((x - xstart) / dx);
+  int i = ceil((x - xstart) / dx); // NOLINT
 
   // linear extrapolation
 
@@ -1914,7 +1928,7 @@ inline double PairMesoCNT::spline(double x, double xstart, double dx, double **c
 inline double PairMesoCNT::dspline(double x, double xstart, double dx, double **coeff,
                                    int coeff_size)
 {
-  int i = ceil((x - xstart) / dx);
+  int i = ceil((x - xstart) / dx); // NOLINT
 
   // constant extrapolation
 
@@ -1943,8 +1957,8 @@ inline double PairMesoCNT::dspline(double x, double xstart, double dx, double **
 inline double PairMesoCNT::spline(double x, double y, double xstart, double ystart, double dx,
                                   double dy, double ****coeff, int coeff_size)
 {
-  int i = ceil((x - xstart) / dx);
-  int j = ceil((y - ystart) / dy);
+  int i = ceil((x - xstart) / dx); // NOLINT
+  int j = ceil((y - ystart) / dy); // NOLINT
 
   // constant extrapolation
 
@@ -1990,8 +2004,8 @@ inline double PairMesoCNT::spline(double x, double y, double xstart, double ysta
 inline double PairMesoCNT::dxspline(double x, double y, double xstart, double ystart, double dx,
                                     double dy, double ****coeff, int coeff_size)
 {
-  int i = ceil((x - xstart) / dx);
-  int j = ceil((y - ystart) / dy);
+  int i = ceil((x - xstart) / dx); // NOLINT
+  int j = ceil((y - ystart) / dy); // NOLINT
 
   // constant extrapolation
 
@@ -2035,8 +2049,8 @@ inline double PairMesoCNT::dxspline(double x, double y, double xstart, double ys
 inline double PairMesoCNT::dyspline(double x, double y, double xstart, double ystart, double dx,
                                     double dy, double ****coeff, int coeff_size)
 {
-  int i = ceil((x - xstart) / dx);
-  int j = ceil((y - ystart) / dy);
+  int i = ceil((x - xstart) / dx); // NOLINT
+  int j = ceil((y - ystart) / dy); // NOLINT
 
   // constant extrapolation
 
@@ -2177,9 +2191,9 @@ void PairMesoCNT::geometry(const double *r1, const double *r2, const double *p1,
    computes gradients with respect to positions
 ------------------------------------------------------------------------- */
 
-inline void PairMesoCNT::weight(const double *r1, const double *r2, const double *p1,
-                                const double *p2, double &w, double *dr1_w, double *dr2_w,
-                                double *dp1_w, double *dp2_w)
+void PairMesoCNT::weight(const double *r1, const double *r2, const double *p1,
+                         const double *p2, double &w, double *dr1_w, double *dr2_w,
+                         double *dp1_w, double *dp2_w)
 {
   double dr, dp, rhoc, rhomin, rho, frac, arg, factor;
   double r[3], p[3];
@@ -2583,4 +2597,13 @@ void PairMesoCNT::gl_init_weights(int quad, double *gl_nodes, double *gl_weights
 
     gl_weights[i] = 2.0 / ((1.0 - x * x) * dlegendre * dlegendre);
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double PairMesoCNT::memory_usage()
+{
+  double bytes = Pair::memory_usage();
+  if (special_local_topo) bytes += (double) nmax_mesocnt * 2 * sizeof(int);    // special_local_topo[nmax][2]
+  return bytes;
 }

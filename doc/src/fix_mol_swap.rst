@@ -6,7 +6,7 @@ fix mol/swap command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID mol/swap N X itype jtype seed T keyword value ...
 
@@ -14,7 +14,7 @@ Syntax
 * atom/swap = style name of this fix command
 * N = invoke this fix every N steps
 * X = number of swaps to attempt every N steps
-* itype,jtype = two atom types to swap with each other
+* itype,jtype = two atom types (1-Ntypes or type label) to swap with each other
 * seed = random # seed (positive integer)
 * T = scaling temperature of the MC swaps (temperature units)
 * zero or more keyword/value pairs may be appended to args
@@ -33,6 +33,9 @@ Examples
 
    fix 2 all mol/swap 100 1 2 3 29494 300.0 ke no
    fix mySwap fluid mol/swap 500 10 1 2 482798 1.0
+
+   labelmap atom 1 A 2 B
+   fix mySwap fluid mol/swap 500 10 A B 482798 1.0
 
 Description
 """""""""""
@@ -119,6 +122,36 @@ should be done.
   a new neighbor list needs to be generated for every attempted swap.
   This is potentially expensive if N is small or X is large.
 
+----------
+
+Dump image info
+"""""""""""""""
+
+.. versionadded:: 11Feb2026
+
+Fix *mol/swap* supports the *fix* keyword of :doc:`dump image
+<dump_image>`.  The fix will pass geometry information about atoms
+involved in a swap to *dump image* so that these atoms can be
+highlighted in the visualization as additional spheres.  For how
+long those additional spheres will be shown depends on the value of the
+*vizsteps* setting (default is 1000) which can be changed by using the
+:doc:`fix_modify command <fix_modify>`.  If an atom is involved in
+multiple swaps, the check on showing the additional graphics depends
+on the timestep of its last swap.
+
+The color of the additional spheres is by default that of the atom type
+*before* the swap when using color styles "type" or "element".  With
+color style "const" the default value of "white" can be changed using
+:doc:`dump_modify fcolor <dump_image>`.  The transparency is by default
+fully opaque and can be changed with *dump\_modify ftrans*\ .
+
+The *fflag1* setting of *dump image fix* has no effect.
+
+The *fflag2* setting allows you to set the radius of the added
+spheres, since the radius is set to zero internally.
+
+----------
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -143,10 +176,10 @@ This fix computes a global vector of length 2, which can be accessed
 by various :doc:`output commands <Howto_output>`.  The vector values are
 the following global cumulative quantities:
 
-* 1 = swap attempts
-* 2 = swap accepts
+  #. swap attempts
+  #. swap accepts
 
-The vector values calculated by this fix are "extensive".
+The vector values calculated by this fix are "intensive".
 
 No parameter of this fix can be used with the *start/stop* keywords of
 the :doc:`run <run>` command.  This fix is not invoked during

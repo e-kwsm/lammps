@@ -22,6 +22,7 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "math_const.h"
 #include "memory.h"
 #include "neigh_list.h"
@@ -35,8 +36,12 @@ using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairNMCutCoulCut::PairNMCutCoulCut(LAMMPS *lmp) : Pair(lmp)
+PairNMCutCoulCut::PairNMCutCoulCut(LAMMPS *lmp) :
+    Pair(lmp), cut_lj(nullptr), cut_ljsq(nullptr), cut_coul(nullptr), cut_coulsq(nullptr),
+    e0(nullptr), r0(nullptr), nn(nullptr), mm(nullptr), nm(nullptr), e0nm(nullptr), r0n(nullptr),
+    r0m(nullptr), offset(nullptr)
 {
+  born_matrix_enable = 1;
   writedata = 1;
 }
 
@@ -44,6 +49,8 @@ PairNMCutCoulCut::PairNMCutCoulCut(LAMMPS *lmp) : Pair(lmp)
 
 PairNMCutCoulCut::~PairNMCutCoulCut()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -223,7 +230,7 @@ void PairNMCutCoulCut::settings(int narg, char **arg)
 
 void PairNMCutCoulCut::coeff(int narg, char **arg)
 {
-  if (narg < 6 || narg > 8) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (narg < 6 || narg > 8) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -254,7 +261,7 @@ void PairNMCutCoulCut::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -275,7 +282,9 @@ void PairNMCutCoulCut::init_style()
 
 double PairNMCutCoulCut::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   double cut = MAX(cut_lj[i][j],cut_coul[i][j]);
   cut_ljsq[i][j] = cut_lj[i][j] * cut_lj[i][j];
@@ -477,6 +486,38 @@ double PairNMCutCoulCut::single(int i, int j, int itype, int jtype,
   }
 
   return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairNMCutCoulCut::born_matrix(int i, int j, int itype, int jtype, double rsq,
+                            double factor_coul, double factor_lj, double &dupair,
+                            double &du2pair)
+{
+  double r, rinv, r2inv, r3inv;
+  double du_lj, du2_lj, du_coul, du2_coul;
+
+  double *q = atom->q;
+  double qqrd2e = force->qqrd2e;
+
+  r2inv = 1.0 / rsq;
+  rinv = sqrt(r2inv);
+  r3inv = r2inv * rinv;
+  r = sqrt(rsq);
+
+  double prefactor = e0nm[itype][jtype]*nm[itype][jtype];
+
+  du_lj = prefactor *
+          (r0m[itype][jtype]/pow(r,mm[itype][jtype]) - r0n[itype][jtype]/pow(r,nn[itype][jtype])) / r;
+  du2_lj = prefactor *
+          (r0n[itype][jtype]*(nn[itype][jtype] + 1.0) / pow(r,nn[itype][jtype]) -
+           r0m[itype][jtype]*(mm[itype][jtype] + 1.0) / pow(r,mm[itype][jtype])) / rsq;
+
+  du_coul = -qqrd2e * q[i] * q[j] * r2inv;
+  du2_coul = 2.0 * qqrd2e * q[i] * q[j] * r3inv;
+
+  dupair = factor_lj * du_lj + factor_coul * du_coul;
+  du2pair = factor_lj * du2_lj + factor_coul * du2_coul;
 }
 
 /* ---------------------------------------------------------------------- */

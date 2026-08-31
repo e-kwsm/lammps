@@ -20,14 +20,14 @@
 #include "comm.h"
 #include "error.h"
 #include "memory.h"
+#include "safe_pointers.h"
 #include "tokenizer.h"
 
 #include <cstring>
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 1024
-#define MAXWORD 3
+static constexpr int MAXLINE = 1024;
 
 /* ---------------------------------------------------------------------- */
 
@@ -84,8 +84,9 @@ void MLIAPModelSimple::read_coeffs(char *coefffilename)
 {
 
   // open coefficient file on proc 0
+  // SafeFilePtr auto-closes on every exit path (normal, EOF error, exception)
 
-  FILE *fpcoeff;
+  SafeFilePtr fpcoeff;
   if (comm->me == 0) {
     fpcoeff = utils::open_potential(coefffilename, lmp, nullptr);
     if (fpcoeff == nullptr)
@@ -93,7 +94,8 @@ void MLIAPModelSimple::read_coeffs(char *coefffilename)
                  utils::getsyserror());
   }
 
-  char line[MAXLINE], *ptr;
+  char line[MAXLINE] = {'\0'};
+  char *ptr;
   int eof = 0;
 
   int n;
@@ -101,10 +103,9 @@ void MLIAPModelSimple::read_coeffs(char *coefffilename)
   while (nwords == 0) {
     if (comm->me == 0) {
       ptr = fgets(line, MAXLINE, fpcoeff);
-      if (ptr == nullptr) {
+      if (ptr == nullptr)
         eof = 1;
-        fclose(fpcoeff);
-      } else
+      else
         n = strlen(line) + 1;
     }
     MPI_Bcast(&eof, 1, MPI_INT, 0, world);
@@ -144,10 +145,9 @@ void MLIAPModelSimple::read_coeffs(char *coefffilename)
     for (int icoeff = 0; icoeff < nparams; icoeff++) {
       if (comm->me == 0) {
         ptr = fgets(line, MAXLINE, fpcoeff);
-        if (ptr == nullptr) {
+        if (ptr == nullptr)
           eof = 1;
-          fclose(fpcoeff);
-        } else
+        else
           n = strlen(line) + 1;
       }
 
@@ -168,7 +168,6 @@ void MLIAPModelSimple::read_coeffs(char *coefffilename)
       }
     }
   }
-  if (comm->me == 0) fclose(fpcoeff);
 }
 
 /* ----------------------------------------------------------------------

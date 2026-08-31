@@ -21,6 +21,7 @@ CommandStyle(write_data,WriteData);
 #define LMP_WRITE_DATA_H
 
 #include "command.h"
+#include "safe_pointers.h"
 
 namespace LAMMPS_NS {
 
@@ -31,12 +32,13 @@ class WriteData : public Command {
   void write(const std::string &);
 
  private:
-  int me, nprocs;
   int pairflag;
   int coeffflag;
   int fixflag;
+  int triclinic_general;
   int lmapflag;
-  FILE *fp;
+  int noinitflag;
+  SafeFilePtr fp;
   bigint nbonds_local, nbonds;
   bigint nangles_local, nangles;
   bigint ndihedrals_local, ndihedrals;

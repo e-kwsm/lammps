@@ -26,7 +26,7 @@
 #include "domain.h"
 #include "error.h"
 #include "force.h"
-#include "gridcomm.h"
+#include "grid3d.h"
 #include "math_const.h"
 #include "math_special.h"
 #include "memory.h"
@@ -34,6 +34,7 @@
 #include "suffix.h"
 
 #include <cmath>
+#include <cstring>
 
 #include "omp_compat.h"
 
@@ -41,22 +42,8 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define MAXORDER 7
-#define OFFSET 16384
-#define LARGE 10000.0
-#define SMALL 0.00001
-#define EPS_HOC 1.0e-7
-
-enum{REVERSE_RHO};
-enum{FORWARD_IK,FORWARD_AD,FORWARD_IK_PERATOM,FORWARD_AD_PERATOM};
-
-#ifdef FFT_SINGLE
-#define ZEROF 0.0f
-#define ONEF  1.0f
-#else
-#define ZEROF 0.0
-#define ONEF  1.0
-#endif
+static constexpr int OFFSET = 16384;
+static constexpr FFT_SCALAR ZEROF = 0.0;
 
 /* ---------------------------------------------------------------------- */
 
@@ -93,16 +80,15 @@ PPPMIntel::~PPPMIntel()
 void PPPMIntel::init()
 {
   PPPM::init();
+
+  // slab correction is not (yet) supported for triclinic boxes with pppm/intel
+
+  if (domain->triclinic && slabflag)
+    error->all(FLERR,"Cannot (yet) use pppm/intel with triclinic box and slab correction");
+
   fix = static_cast<FixIntel *>(modify->get_fix_by_id("package_intel"));
   if (!fix) error->all(FLERR, "The 'package intel' command is required for /intel styles");
 
-  #ifdef _LMP_INTEL_OFFLOAD
-  _use_base = 0;
-  if (fix->offload_balance() != 0.0) {
-    _use_base = 1;
-    return;
-  }
-  #endif
 
   fix->kspace_init_check();
 
@@ -142,12 +128,6 @@ void PPPMIntel::init()
 
 void PPPMIntel::compute(int eflag, int vflag)
 {
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (_use_base) {
-    PPPM::compute(eflag, vflag);
-    return;
-  }
-  #endif
   compute_first(eflag,vflag);
   compute_second(eflag,vflag);
 }
@@ -156,8 +136,6 @@ void PPPMIntel::compute(int eflag, int vflag)
 
 void PPPMIntel::compute_first(int eflag, int vflag)
 {
-  int i,j;
-
   // set energy/virial flags
   // invoke allocate_peratom() if needed for first time
 
@@ -227,7 +205,7 @@ void PPPMIntel::compute_first(int eflag, int vflag)
   //   to fully sum contribution in their 3d bricks
   // remap from 3d decomposition to FFT decomposition
 
-  gc->reverse_comm(GridComm::KSPACE,this,1,sizeof(FFT_SCALAR),REVERSE_RHO,
+  gc->reverse_comm(Grid3d::KSPACE,this,REVERSE_RHO,1,sizeof(FFT_SCALAR),
                    gc_buf1,gc_buf2,MPI_FFT_SCALAR);
   brick2fft();
 
@@ -243,21 +221,21 @@ void PPPMIntel::compute_first(int eflag, int vflag)
   // to fill ghost cells surrounding their 3d bricks
 
   if (differentiation_flag == 1)
-    gc->forward_comm(GridComm::KSPACE,this,1,sizeof(FFT_SCALAR),FORWARD_AD,
+    gc->forward_comm(Grid3d::KSPACE,this,FORWARD_AD,1,sizeof(FFT_SCALAR),
                      gc_buf1,gc_buf2,MPI_FFT_SCALAR);
   else
-    gc->forward_comm(GridComm::KSPACE,this,3,sizeof(FFT_SCALAR),FORWARD_IK,
+    gc->forward_comm(Grid3d::KSPACE,this,FORWARD_IK,3,sizeof(FFT_SCALAR),
                      gc_buf1,gc_buf2,MPI_FFT_SCALAR);
 
   // extra per-atom energy/virial communication
 
   if (evflag_atom) {
     if (differentiation_flag == 1 && vflag_atom)
-      gc->forward_comm(GridComm::KSPACE,this,6,sizeof(FFT_SCALAR),
-                       FORWARD_AD_PERATOM,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+      gc->forward_comm(Grid3d::KSPACE,this,FORWARD_AD_PERATOM,6,sizeof(FFT_SCALAR),
+                       gc_buf1,gc_buf2,MPI_FFT_SCALAR);
     else if (differentiation_flag == 0)
-      gc->forward_comm(GridComm::KSPACE,this,7,sizeof(FFT_SCALAR),
-                       FORWARD_IK_PERATOM,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+      gc->forward_comm(Grid3d::KSPACE,this,FORWARD_IK_PERATOM,7,sizeof(FFT_SCALAR),
+                       gc_buf1,gc_buf2,MPI_FFT_SCALAR);
   }
 }
 
@@ -361,7 +339,7 @@ void PPPMIntel::compute_second(int /*eflag*/, int /*vflag*/)
 template<class flt_t, class acc_t>
 void PPPMIntel::particle_map(IntelBuffers<flt_t,acc_t> *buffers)
 {
-  ATOM_T * _noalias const x = buffers->get_x(0);
+  ATOM_T * _noalias const x = buffers->get_x();
   int nlocal = atom->nlocal;
   int nthr;
   if (_use_lrt)
@@ -372,7 +350,7 @@ void PPPMIntel::particle_map(IntelBuffers<flt_t,acc_t> *buffers)
   int flag = 0;
 
   if (!std::isfinite(boxlo[0]) || !std::isfinite(boxlo[1]) || !std::isfinite(boxlo[2]))
-    error->one(FLERR,"Non-numeric box dimensions - simulation unstable");
+    error->one(FLERR,"Non-numeric box dimensions - simulation unstable" + utils::errorurl(6));
 
   #if defined(_OPENMP)
   #pragma omp parallel LMP_DEFAULT_NONE \
@@ -420,7 +398,7 @@ void PPPMIntel::particle_map(IntelBuffers<flt_t,acc_t> *buffers)
     }
   }
 
-  if (flag) error->one(FLERR,"Out of range atoms - cannot compute PPPM");
+  if (flag) error->one(FLERR, Error::NOLASTLINE, "Out of range atoms - cannot compute PPPM" + utils::errorurl(4));
 }
 
 
@@ -442,8 +420,8 @@ void PPPMIntel::make_rho(IntelBuffers<flt_t,acc_t> *buffers)
   // (dx,dy,dz) = distance to "lower left" grid pt
   // (mx,my,mz) = global coords of moving stencil pt
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
-  flt_t * _noalias const q = buffers->get_q(0);
+  ATOM_T * _noalias const x = buffers->get_x();
+  flt_t * _noalias const q = buffers->get_q();
   int nlocal = atom->nlocal;
   int nthr;
   if (_use_lrt)
@@ -465,7 +443,6 @@ void PPPMIntel::make_rho(IntelBuffers<flt_t,acc_t> *buffers)
     const flt_t xi = delxinv;
     const flt_t yi = delyinv;
     const flt_t zi = delzinv;
-    const flt_t fshift = shift;
     const flt_t fshiftone = shiftone;
     const flt_t fdelvolinv = delvolinv;
 
@@ -603,8 +580,8 @@ void PPPMIntel::fieldforce_ik(IntelBuffers<flt_t,acc_t> *buffers)
   // (mx,my,mz) = global coords of moving stencil pt
   // ek = 3 components of E-field on particle
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
-  flt_t * _noalias const q = buffers->get_q(0);
+  ATOM_T * _noalias const x = buffers->get_x();
+  flt_t * _noalias const q = buffers->get_q();
   FORCE_T * _noalias const f = buffers->get_f();
   int nlocal = atom->nlocal;
   int nthr;
@@ -698,8 +675,6 @@ void PPPMIntel::fieldforce_ik(IntelBuffers<flt_t,acc_t> *buffers)
       _alignvar(FFT_SCALAR ekx_arr[INTEL_P3M_ALIGNED_MAXORDER], 64) = {0};
       _alignvar(FFT_SCALAR eky_arr[INTEL_P3M_ALIGNED_MAXORDER], 64) = {0};
       _alignvar(FFT_SCALAR ekz_arr[INTEL_P3M_ALIGNED_MAXORDER], 64) = {0};
-      _alignvar(FFT_SCALAR ekxy_arr[2 * INTEL_P3M_ALIGNED_MAXORDER], 64) = {0};
-      _alignvar(FFT_SCALAR ekz0_arr[2 * INTEL_P3M_ALIGNED_MAXORDER], 64) = {0};
 
       #if defined(LMP_SIMD_COMPILER)
       #pragma loop_count min(2), max(INTEL_P3M_ALIGNED_MAXORDER), avg(7)
@@ -762,8 +737,8 @@ void PPPMIntel::fieldforce_ad(IntelBuffers<flt_t,acc_t> *buffers)
   // (mx,my,mz) = global coords of moving stencil pt
   // ek = 3 components of E-field on particle
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
-  const flt_t * _noalias const q = buffers->get_q(0);
+  ATOM_T * _noalias const x = buffers->get_x();
+  const flt_t * _noalias const q = buffers->get_q();
   FORCE_T * _noalias const f = buffers->get_f();
   int nlocal = atom->nlocal;
   int nthr;
@@ -953,18 +928,18 @@ void PPPMIntel::fieldforce_ad(IntelBuffers<flt_t,acc_t> *buffers)
       const flt_t s1 = x[i].x * hx_inv;
       const flt_t s2 = x[i].y * hy_inv;
       const flt_t s3 = x[i].z * hz_inv;
-      flt_t sf = fsf_coeff0 * sin(ftwo_pi * s1);
-      sf += fsf_coeff1 * sin(ffour_pi * s1);
+      flt_t sf = fsf_coeff0 * std::sin(ftwo_pi * s1);
+      sf += fsf_coeff1 * std::sin(ffour_pi * s1);
       sf *= twoqsq;
       f[i].x += qfactor * particle_ekx[i] - fqqrd2es * sf;
 
-      sf = fsf_coeff2 * sin(ftwo_pi * s2);
-      sf += fsf_coeff3 * sin(ffour_pi * s2);
+      sf = fsf_coeff2 * std::sin(ftwo_pi * s2);
+      sf += fsf_coeff3 * std::sin(ffour_pi * s2);
       sf *= twoqsq;
       f[i].y += qfactor * particle_eky[i] - fqqrd2es * sf;
 
-      sf = fsf_coeff4 * sin(ftwo_pi * s3);
-      sf += fsf_coeff5 * sin(ffour_pi * s3);
+      sf = fsf_coeff4 * std::sin(ftwo_pi * s3);
+      sf += fsf_coeff5 * std::sin(ffour_pi * s3);
       sf *= twoqsq;
 
       if (slabflag != 2) f[i].z += qfactor * particle_ekz[i] - fqqrd2es * sf;
@@ -1142,16 +1117,6 @@ FFT_SCALAR *** PPPMIntel::create3d_offset(FFT_SCALAR ***&array, int n1lo,
   array -= n1lo;
   return array;
 }
-
-/* ----------------------------------------------------------------------
-   Returns 0 if Intel optimizations for PPPM ignored due to offload
-------------------------------------------------------------------------- */
-
-#ifdef _LMP_INTEL_OFFLOAD
-int PPPMIntel::use_base() {
-  return _use_base;
-}
-#endif
 
 /* ----------------------------------------------------------------------
    allows usage in derived classes (pppm/electrode/intel)

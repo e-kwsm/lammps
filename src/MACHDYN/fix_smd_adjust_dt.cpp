@@ -37,14 +37,13 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define BIG 1.0e20
+static constexpr double BIG = 1.0e20;
 
 /* ---------------------------------------------------------------------- */
 
 FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
                 Fix(lmp, narg, arg) {
-        if (narg != 4)
-                error->all(FLERR, "Illegal fix smd/adjust_dt command");
+        if (narg != 4) error->all(FLERR, "Illegal fix smd/adjust_dt command");
 
         // set time_depend, else elapsed time accumulation can be messed up
 
@@ -57,7 +56,7 @@ FixSMDTlsphDtReset::FixSMDTlsphDtReset(LAMMPS *lmp, int narg, char **arg) :
         extvector = 0;
         restart_global = 1; // this fix stores global (i.e., not per-atom) info: elaspsed time
 
-        safety_factor = atof(arg[3]);
+        safety_factor = utils::numeric(FLERR,arg[3],false,lmp);
 
         // initializations
         t_elapsed = 0.0;
@@ -103,11 +102,11 @@ void FixSMDTlsphDtReset::end_of_step() {
          * extract minimum CFL timestep from TLSPH and ULSPH pair styles
          */
 
-        auto dtCFL_TLSPH = (double *) force->pair->extract("smd/tlsph/dtCFL_ptr", itmp);
-        auto dtCFL_ULSPH = (double *) force->pair->extract("smd/ulsph/dtCFL_ptr", itmp);
-        auto dt_TRI = (double *) force->pair->extract("smd/tri_surface/stable_time_increment_ptr", itmp);
-        auto dt_HERTZ = (double *) force->pair->extract("smd/hertz/stable_time_increment_ptr", itmp);
-        auto dt_PERI_IPMB = (double *) force->pair->extract("smd/peri_ipmb/stable_time_increment_ptr", itmp);
+        auto *dtCFL_TLSPH = (double *) force->pair->extract("smd/tlsph/dtCFL_ptr", itmp);
+        auto *dtCFL_ULSPH = (double *) force->pair->extract("smd/ulsph/dtCFL_ptr", itmp);
+        auto *dt_TRI = (double *) force->pair->extract("smd/tri_surface/stable_time_increment_ptr", itmp);
+        auto *dt_HERTZ = (double *) force->pair->extract("smd/hertz/stable_time_increment_ptr", itmp);
+        auto *dt_PERI_IPMB = (double *) force->pair->extract("smd/peri_ipmb/stable_time_increment_ptr", itmp);
 
         if ((dtCFL_TLSPH == nullptr) && (dtCFL_ULSPH == nullptr) && (dt_TRI == nullptr) && (dt_HERTZ == nullptr)
                         && (dt_PERI_IPMB == nullptr)) {
@@ -190,8 +189,7 @@ void FixSMDTlsphDtReset::end_of_step() {
         update->dt_default = 0;
         if (force->pair)
                 force->pair->reset_dt();
-        for (int i = 0; i < modify->nfix; i++)
-                modify->fix[i]->reset_dt();
+        for (const auto &ifix : modify->get_fix_list()) ifix->reset_dt();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -222,7 +220,7 @@ void FixSMDTlsphDtReset::write_restart(FILE *fp) {
 
 void FixSMDTlsphDtReset::restart(char *buf) {
         int n = 0;
-        auto list = (double *) buf;
+        auto *list = (double *) buf;
         t_elapsed = list[n++];
 }
 

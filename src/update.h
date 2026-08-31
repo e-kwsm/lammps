@@ -16,12 +16,25 @@
 
 #include "pointers.h"
 
+#include "creator_registry.h"
+
 #include <map>
 
 namespace LAMMPS_NS {
 
 class Update : protected Pointers {
  public:
+  Update(class LAMMPS *);
+  ~Update() override;
+  void init();
+  void set_units(const char *);
+  void create_integrate(int, char **, int);
+  void create_minimize(int, char **, int);
+  void reset_timestep(int, char **);
+  void reset_timestep(bigint, bool);
+  void update_time();
+  double memory_usage();
+
   double dt;                     // timestep
   double etol, ftol;             // minimizer tolerances on energy/force
   bigint ntimestep;              // current step (dynamics or min iterations)
@@ -49,25 +62,12 @@ class Update : protected Pointers {
   class Min *minimize;
   char *minimize_style;
 
-  typedef Integrate *(*IntegrateCreator)(LAMMPS *, int, char **);
-  typedef Min *(*MinimizeCreator)(LAMMPS *);
+  using IntegrateCreator = Integrate *(*) (LAMMPS *, int, char **);
+  using MinimizeCreator = Min *(*) (LAMMPS *);
 
-  typedef std::map<std::string, IntegrateCreator> IntegrateCreatorMap;
-  typedef std::map<std::string, MinimizeCreator> MinimizeCreatorMap;
-
-  IntegrateCreatorMap *integrate_map;
-  MinimizeCreatorMap *minimize_map;
-
-  Update(class LAMMPS *);
-  ~Update() override;
-  void init();
-  void set_units(const char *);
-  void create_integrate(int, char **, int);
-  void create_minimize(int, char **, int);
-  void reset_timestep(int, char **);
-  void reset_timestep(bigint, bool);
-  void update_time();
-  double memory_usage();
+  // global registries of integrate and minimize style factory functions
+  static CreatorRegistry<IntegrateCreator> &integrate_styles();
+  static CreatorRegistry<MinimizeCreator> &minimize_styles();
 
  private:
   void new_integrate(char *, int, char **, int, int &);

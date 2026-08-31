@@ -13,13 +13,16 @@
 
 #include "lammps.h"
 
+#include "atom.h"
 #include "citeme.h"
 #include "comm.h"
 #include "force.h"
 #include "info.h"
 #include "input.h"
 #include "output.h"
+#include "platform.h"
 #include "update.h"
+#include "utils.h"
 #include "variable.h"
 
 #include "../testing/core.h"
@@ -77,8 +80,9 @@ TEST_F(SimpleCommandsTest, Echo)
     ASSERT_EQ(lmp->input->echo_screen, 0);
     ASSERT_EQ(lmp->input->echo_log, 1);
 
-    TEST_FAILURE(".*ERROR: Illegal echo command.*", command("echo"););
-    TEST_FAILURE(".*ERROR: Unknown echo keyword: xxx.*", command("echo xxx"););
+    TEST_FAILURE(".*ERROR: Echo command expects exactly one argument.*", command("echo"););
+    TEST_FAILURE(".*ERROR: Echo command expects exactly one argument.*", command("echo x x"););
+    TEST_FAILURE(".*ERROR: Unknown echo command keyword: xxx.*", command("echo xxx"););
 }
 
 TEST_F(SimpleCommandsTest, Log)
@@ -212,8 +216,11 @@ TEST_F(SimpleCommandsTest, Quit)
     END_HIDE_OUTPUT();
     TEST_FAILURE(".*ERROR: Expected integer .*", command("quit xxx"););
 
-    // the following tests must be skipped with OpenMPI due to using threads
-    if (platform::mpi_vendor() == "Open MPI") GTEST_SKIP();
+    // the following tests must be skipped with OpenMPI or MPICH 4.1 and later due to using threads
+    if (platform::mpi_vendor() == "Open MPI") GTEST_SKIP() << "OpenMPI";
+#if defined(MPICH_NUMVERSION)
+    if (MPICH_NUMVERSION >= 40100000) GTEST_SKIP() << "MPICH with threads";
+#endif
     ASSERT_EXIT(command("quit"), ExitedWithCode(0), "");
     ASSERT_EXIT(command("quit 9"), ExitedWithCode(9), "");
 }
@@ -265,14 +272,22 @@ TEST_F(SimpleCommandsTest, Suffix)
 
     BEGIN_HIDE_OUTPUT();
     command("suffix one");
+    command("suffix yes");
     END_HIDE_OUTPUT();
     ASSERT_THAT(lmp->suffix, StrEq("one"));
+    ASSERT_EQ(lmp->suffix_enable, 1);
+    ASSERT_THAT(utils::strip_style_suffix("one/four", lmp), StrEq("one/four"));
+    ASSERT_THAT(utils::strip_style_suffix("four/one", lmp), StrEq("four"));
 
     BEGIN_HIDE_OUTPUT();
     command("suffix hybrid two three");
     END_HIDE_OUTPUT();
     ASSERT_THAT(lmp->suffix, StrEq("two"));
     ASSERT_THAT(lmp->suffix2, StrEq("three"));
+    ASSERT_THAT(utils::strip_style_suffix("one/four", lmp), StrEq("one/four"));
+    ASSERT_THAT(utils::strip_style_suffix("one/two", lmp), StrEq("one"));
+    ASSERT_THAT(utils::strip_style_suffix("one/three", lmp), StrEq("one"));
+    ASSERT_THAT(utils::strip_style_suffix("four/one", lmp), StrEq("four/one"));
 
     BEGIN_HIDE_OUTPUT();
     command("suffix four");
@@ -284,11 +299,13 @@ TEST_F(SimpleCommandsTest, Suffix)
     command("suffix off");
     END_HIDE_OUTPUT();
     ASSERT_EQ(lmp->suffix_enable, 0);
+    ASSERT_THAT(utils::strip_style_suffix("one/four", lmp), StrEq("one/four"));
 
     BEGIN_HIDE_OUTPUT();
     command("suffix yes");
     END_HIDE_OUTPUT();
     ASSERT_EQ(lmp->suffix_enable, 1);
+    ASSERT_THAT(utils::strip_style_suffix("one/four", lmp), StrEq("one"));
 
     BEGIN_HIDE_OUTPUT();
     command("suffix no");
@@ -311,8 +328,8 @@ TEST_F(SimpleCommandsTest, Suffix)
     ASSERT_EQ(lmp->suffix_enable, 1);
 
     TEST_FAILURE(".*ERROR: Illegal suffix command.*", command("suffix"););
-    TEST_FAILURE(".*ERROR: Illegal suffix command.*", command("suffix hybrid"););
-    TEST_FAILURE(".*ERROR: Illegal suffix command.*", command("suffix hybrid one"););
+    TEST_FAILURE(".*ERROR: Illegal suffix hybrid command.*", command("suffix hybrid"););
+    TEST_FAILURE(".*ERROR: Illegal suffix hybrid command.*", command("suffix hybrid one"););
 }
 
 TEST_F(SimpleCommandsTest, Thermo)
@@ -365,7 +382,9 @@ TEST_F(SimpleCommandsTest, TimeStep)
     END_HIDE_OUTPUT();
     ASSERT_EQ(lmp->update->dt, -0.1);
 
-    TEST_FAILURE(".*ERROR: Illegal timestep command.*", command("timestep"););
+    TEST_FAILURE(".*ERROR: Timestep command expects exactly one argument.*", command("timestep"););
+    TEST_FAILURE(".*ERROR: Timestep command expects exactly one argument.*",
+                 command("timestep 1.0 2.0"););
     TEST_FAILURE(".*ERROR: Expected floating point.*", command("timestep xxx"););
 }
 
@@ -390,32 +409,31 @@ TEST_F(SimpleCommandsTest, Units)
     END_HIDE_OUTPUT();
     ASSERT_THAT(lmp->update->unit_style, StrEq("lj"));
 
-    TEST_FAILURE(".*ERROR: Illegal units command.*", command("units unknown"););
+    TEST_FAILURE(".*ERROR: Unknown units style unknown.*", command("units unknown"););
 }
 
 #if defined(LMP_PLUGIN)
 TEST_F(SimpleCommandsTest, Plugin)
 {
-    const char *bindir = getenv("LAMMPS_PLUGIN_BIN_DIR");
-    const char *config = getenv("CMAKE_CONFIG_TYPE");
-    if (!bindir) GTEST_SKIP();
-    std::string loadfmt = platform::path_join("plugin load ", bindir);
-    if (config) loadfmt = platform::path_join(loadfmt, config);
-    loadfmt = platform::path_join(loadfmt, "{}plugin.so");
+    const char *bindir = getenv("LAMMPS_PLUGIN_DIR");
+    if (!bindir) GTEST_SKIP() << "LAMMPS_PLUGIN_DIR not set";
+    auto loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "hello");
     ::testing::internal::CaptureStdout();
-    lmp->input->one(fmt::format(loadfmt, "hello"));
+    lmp->input->one(loadcmd);
     auto text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
-    ASSERT_THAT(text, ContainsRegex(".*Loading plugin: Hello world command.*"));
+    ASSERT_THAT(text, ContainsRegex(".*\n.*Loading plugin: Hello world command.*"));
 
     ::testing::internal::CaptureStdout();
-    lmp->input->one(fmt::format(loadfmt, "xxx"));
+    loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "xxx");
+    lmp->input->one(loadcmd);
     text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
     ASSERT_THAT(text, ContainsRegex(".*Open of file .*xxx.* failed.*"));
 
     ::testing::internal::CaptureStdout();
-    lmp->input->one(fmt::format(loadfmt, "nve2"));
+    loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "nve2");
+    lmp->input->one(loadcmd);
     text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
     ASSERT_THAT(text, ContainsRegex(".*Loading plugin: NVE2 variant fix style.*"));
@@ -423,11 +441,12 @@ TEST_F(SimpleCommandsTest, Plugin)
     lmp->input->one("plugin list");
     text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
-    ASSERT_THAT(text, ContainsRegex(".*1: command style plugin hello"
-                                    ".*2: fix style plugin nve2.*"));
+    ASSERT_THAT(text, ContainsRegex(".*1: command style plugin hello\n.*"));
+    ASSERT_THAT(text, ContainsRegex(".*2: fix style plugin nve2.*"));
 
     ::testing::internal::CaptureStdout();
-    lmp->input->one(fmt::format(loadfmt, "hello"));
+    loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "hello");
+    lmp->input->one(loadcmd);
     text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
     ASSERT_THAT(text, ContainsRegex(".*Ignoring load of command style hello: "
@@ -458,10 +477,39 @@ TEST_F(SimpleCommandsTest, Plugin)
     ASSERT_THAT(text, ContainsRegex(".*Ignoring unload of fix style nve: not from a plugin.*"));
 
     ::testing::internal::CaptureStdout();
+    loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "hello");
+    lmp->input->one(loadcmd);
+    text = ::testing::internal::GetCapturedStdout();
+    ::testing::internal::CaptureStdout();
     lmp->input->one("plugin list");
     text = ::testing::internal::GetCapturedStdout();
     if (verbose) std::cout << text;
-    ASSERT_THAT(text, ContainsRegex(".*Currently loaded plugins.*"));
+    ASSERT_THAT(text, ContainsRegex(".*Currently loaded plugins: 1.*"));
+    ASSERT_THAT(text, ContainsRegex(".*command style plugin hello.*"));
+
+    ::testing::internal::CaptureStdout();
+    lmp->input->one("plugin clear");
+    lmp->input->one("plugin list");
+    text = ::testing::internal::GetCapturedStdout();
+    if (verbose) std::cout << text;
+    ASSERT_THAT(text, ContainsRegex(".*Currently loaded plugins: 0\n$"));
+
+    ::testing::internal::CaptureStdout();
+    loadcmd = fmt::format("plugin load {}/{}plugin.so", bindir, "no");
+    lmp->input->one(loadcmd);
+    lmp->input->one("plugin list");
+    text = ::testing::internal::GetCapturedStdout();
+    if (verbose) std::cout << text;
+    ASSERT_THAT(text, ContainsRegex(".*Plugin symbol lookup failure in file.*noplugin.so:.*"));
+    ASSERT_THAT(text, ContainsRegex(".*Currently loaded plugins: 0\n$"));
+
+    ::testing::internal::CaptureStdout();
+    lmp->input->one(fmt::format("shell putenv LAMMPS_PLUGIN_PATH={}", bindir));
+    lmp->input->one("clear");
+    lmp->input->one("plugin list");
+    text = ::testing::internal::GetCapturedStdout();
+    if (verbose) std::cout << text;
+    ASSERT_THAT(text, ContainsRegex(".*Currently loaded plugins: 12.*"));
 }
 #endif
 
@@ -542,15 +590,70 @@ TEST_F(SimpleCommandsTest, CiteMe)
     // no new citation. no CITE-CITE-CITE- lines
     ASSERT_THAT(text, Not(ContainsRegex(".*CITE-CITE-CITE-CITE.*")));
 }
+
+TEST_F(SimpleCommandsTest, run)
+{
+    bool caught = false;
+    try {
+        BEGIN_HIDE_OUTPUT();
+        command("run 0");
+    } catch (LAMMPSException &e) {
+        END_HIDE_OUTPUT();
+        EXPECT_THAT(e.what(), ContainsRegex("ERROR: Run command before simulation box is defined"));
+        caught = true;
+    } catch (std::exception &e) {
+        END_HIDE_OUTPUT();
+        GTEST_FAIL() << "Invalid exception: " << e.what() << "\n";
+    }
+    ASSERT_TRUE(caught);
+
+    BEGIN_HIDE_OUTPUT();
+    command("region box block 0 1 0 1 0 1");
+    command("create_box 1 box");
+    command("mass 1 1.0");
+    command("run 10 post no");
+    END_HIDE_OUTPUT();
+    EXPECT_EQ(lmp->update->ntimestep, 10);
+    BEGIN_HIDE_OUTPUT();
+    command("run 15 upto post yes");
+    END_HIDE_OUTPUT();
+    EXPECT_EQ(lmp->update->ntimestep, 15);
+
+    TEST_FAILURE(".*ERROR: Illegal run start command: missing arg.*", command("run 10 start"););
+    TEST_FAILURE(".*ERROR: Illegal run stop command: missing arg.*", command("run 10 stop"););
+    TEST_FAILURE(".*ERROR: Illegal run every command: missing arg.*", command("run 10 every"););
+    TEST_FAILURE(".*ERROR: Unknown run keyword: xxx", command("run 10 xxx"););
+    TEST_FAILURE(".*ERROR: Invalid run command upto value: 10.*", command("run 10 upto"););
+    TEST_FAILURE(".*ERROR: Invalid run command start value: -10.*", command("run 10 start -10"););
+    TEST_FAILURE(".*ERROR: Run command start value 20 is after start of run at step 15.*",
+                 command("run 10 start 20"););
+    TEST_FAILURE(".*ERROR: Invalid run command stop value: -10.*", command("run 10 stop -10"););
+    TEST_FAILURE(".*ERROR: Run command stop value 20 is before end of run at step 25.*",
+                 command("run 10 stop 20"););
+
+    BEGIN_HIDE_OUTPUT();
+    command("run 15 post no start 0 stop 100");
+    END_HIDE_OUTPUT();
+    EXPECT_EQ(lmp->update->ntimestep, 30);
+
+    EXPECT_DOUBLE_EQ(lmp->atom->mass[1], 1.0);
+    BEGIN_HIDE_OUTPUT();
+    command("run 10 post no every 5 \"mass 1 2.0\"");
+    END_HIDE_OUTPUT();
+    EXPECT_EQ(lmp->update->ntimestep, 40);
+    EXPECT_DOUBLE_EQ(lmp->atom->mass[1], 2.0);
+
+    BEGIN_HIDE_OUTPUT();
+    command("run 20 post no every 5 NULL");
+    END_HIDE_OUTPUT();
+    EXPECT_EQ(lmp->update->ntimestep, 60);
+}
 } // namespace LAMMPS_NS
 
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
-
-    if (LAMMPS_NS::platform::mpi_vendor() == "Open MPI" && !Info::has_exceptions())
-        std::cout << "Warning: using OpenMPI without exceptions. Death tests will be skipped\n";
 
     // handle arguments passed via environment variable
     if (const char *var = getenv("TEST_ARGS")) {

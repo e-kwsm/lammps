@@ -17,12 +17,11 @@
 #include <cmath>
 #include <string>
 
-#define maxelt 5
+constexpr int MAXELT = 8;
 
 namespace LAMMPS_NS {
 class Memory;
 
-typedef enum { FCC, BCC, HCP, DIM, DIA, DIA3, B1, C11, L12, B2, CH4, LIN, ZIG, TRI, SC } lattice_t;
 
 class MEAM {
  public:
@@ -30,6 +29,8 @@ class MEAM {
   virtual ~MEAM();
 
   int copymode;
+  int msmeamflag;
+  using lattice_t = enum { FCC, BCC, HCP, DIM, DIA, DIA3, B1, C11, L12, B2, CH4, LIN, ZIG, TRI, SC };
 
  protected:
   Memory *memory;
@@ -74,6 +75,12 @@ class MEAM {
   // vind[23]D = Voight notation index maps for 2 and 3D
   // v2D,v3D = array of factors to apply for Voight notation
 
+  // MS-MEAM parameters
+
+  // msmeamflag = flag to activate MS-MEAM
+  // betam[1-3]_meam = MS-MEAM electron density constants
+  // tm[1-3]_meam = MS-MEAM coefficients on densities in Gamma computation
+
   // nr,dr = pair function discretization parameters
   // nrar,rdrar = spline coeff array parameters
 
@@ -81,30 +88,30 @@ class MEAM {
   // stheta_meam = sin(theta/2) in radian used in line, zigzag, and trimer reference structures
   // ctheta_meam = cos(theta/2) in radian used in line, zigzag, and trimer reference structures
 
-  double Ec_meam[maxelt][maxelt], re_meam[maxelt][maxelt];
-  double A_meam[maxelt], alpha_meam[maxelt][maxelt], rho0_meam[maxelt];
-  double delta_meam[maxelt][maxelt];
-  double beta0_meam[maxelt], beta1_meam[maxelt];
-  double beta2_meam[maxelt], beta3_meam[maxelt];
-  double t0_meam[maxelt], t1_meam[maxelt];
-  double t2_meam[maxelt], t3_meam[maxelt];
-  double rho_ref_meam[maxelt];
-  int ibar_meam[maxelt], ielt_meam[maxelt];
-  lattice_t lattce_meam[maxelt][maxelt];
-  int nn2_meam[maxelt][maxelt];
-  int zbl_meam[maxelt][maxelt];
-  int eltind[maxelt][maxelt];
+  double Ec_meam[MAXELT][MAXELT], re_meam[MAXELT][MAXELT];
+  double A_meam[MAXELT], alpha_meam[MAXELT][MAXELT], rho0_meam[MAXELT];
+  double delta_meam[MAXELT][MAXELT];
+  double beta0_meam[MAXELT], beta1_meam[MAXELT];
+  double beta2_meam[MAXELT], beta3_meam[MAXELT];
+  double t0_meam[MAXELT], t1_meam[MAXELT];
+  double t2_meam[MAXELT], t3_meam[MAXELT];
+  double rho_ref_meam[MAXELT];
+  int ibar_meam[MAXELT], ielt_meam[MAXELT];
+  lattice_t lattce_meam[MAXELT][MAXELT];
+  int nn2_meam[MAXELT][MAXELT];
+  int zbl_meam[MAXELT][MAXELT];
+  int eltind[MAXELT][MAXELT];
   int neltypes;
 
   double **phir;
 
   double **phirar, **phirar1, **phirar2, **phirar3, **phirar4, **phirar5, **phirar6;
 
-  double attrac_meam[maxelt][maxelt], repuls_meam[maxelt][maxelt];
+  double attrac_meam[MAXELT][MAXELT], repuls_meam[MAXELT][MAXELT];
 
-  double Cmin_meam[maxelt][maxelt][maxelt];
-  double Cmax_meam[maxelt][maxelt][maxelt];
-  double rc_meam, delr_meam, ebound_meam[maxelt][maxelt];
+  double Cmin_meam[MAXELT][MAXELT][MAXELT];
+  double Cmax_meam[MAXELT][MAXELT][MAXELT];
+  double rc_meam, delr_meam, ebound_meam[MAXELT][MAXELT];
   int augt1, ialloy, mix_ref_t, erose_form;
   int emb_lin_neg, bkgd_dyn;
   double gsmooth_factor;
@@ -115,18 +122,28 @@ class MEAM {
   int nr, nrar;
   double dr, rdrar;
 
+  // MS-MEAM parameters
+
+  double t1m_meam[MAXELT], t2m_meam[MAXELT], t3m_meam[MAXELT];
+  double beta1m_meam[MAXELT], beta2m_meam[MAXELT], beta3m_meam[MAXELT];
+  //int msmeamflag; // made public for pair style settings
+
  public:
   int nmax;
   double *rho, *rho0, *rho1, *rho2, *rho3, *frhop;
   double *gamma, *dgamma1, *dgamma2, *dgamma3, *arho2b;
   double **arho1, **arho2, **arho3, **arho3b, **t_ave, **tsq_ave;
 
+  // MS-MEAM arrays
+
+  double **arho1m, **arho2m, *arho2mb, **arho3m, **arho3mb;
+
   int maxneigh;
   double *scrfcn, *dscrfcn, *fcpair;
 
   //angle for trimer, zigzag, line reference structures
-  double stheta_meam[maxelt][maxelt];
-  double ctheta_meam[maxelt][maxelt];
+  double stheta_meam[MAXELT][MAXELT];
+  double ctheta_meam[MAXELT][MAXELT];
 
  protected:
   // meam_funcs.cpp
@@ -242,7 +259,7 @@ class MEAM {
                   double, double, double, double, double, int, int, lattice_t);
   void get_sijk(double, int, int, int, double *);
   void get_densref(double, int, int, double *, double *, double *, double *, double *, double *,
-                   double *, double *);
+                   double *, double *, double *, double *, double *, double *, double *, double *); // last 6 args for msmeam
   void interpolate_meam(int);
 
  public:
@@ -282,10 +299,12 @@ class MEAM {
   }
   // clang-format on
   static int get_Zij(const lattice_t latt);
+  // last 6 args are optional msmeam parameters
   void meam_setup_global(int nelt, lattice_t *lat, int *ielement, double *atwt, double *alpha,
                          double *b0, double *b1, double *b2, double *b3, double *alat, double *esub,
                          double *asub, double *t0, double *t1, double *t2, double *t3,
-                         double *rozero, int *ibar);
+                         double *rozero, int *ibar, double *b1m, double *b2m, double *b3m,
+                         double *t1m, double *t2m, double *t3m);
   void meam_setup_param(int which, double value, int nindex, int *index /*index(3)*/,
                         int *errorflag);
   virtual void meam_setup_done(double *cutmax);

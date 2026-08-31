@@ -49,9 +49,9 @@ int GaussT::init(const int ntypes,
                  double *host_special_lj, const int nlocal,
                  const int nall, const int max_nbors,
                  const int maxspecial, const double cell_size,
-                 const double gpu_split, FILE *_screen) {
+                           FILE *_screen) {
   int success;
-  success=this->init_atomic(nlocal,nall,max_nbors,maxspecial,cell_size,gpu_split,
+  success=this->init_atomic(nlocal,nall,max_nbors,maxspecial,cell_size,
                             _screen,gauss,"k_gauss");
   if (success!=0)
     return success;
@@ -133,13 +133,13 @@ int GaussT::loop(const int eflag, const int vflag) {
   this->time_pair.start();
   if (shared_types) {
     this->k_pair_sel->set_size(GX,BX);
-    this->k_pair_sel->run(&this->atom->x, &gauss1,
+    this->k_pair_sel->run(&this->atom->x, &gauss1, &sp_lj,
                           &this->nbor->dev_nbor, &this->_nbor_data->begin(),
                           &this->ans->force, &this->ans->engv, &eflag, &vflag,
                           &ainum, &nbor_pitch, &this->_threads_per_atom);
   } else {
     this->k_pair.set_size(GX,BX);
-    this->k_pair.run(&this->atom->x, &gauss1, &_lj_types,
+    this->k_pair.run(&this->atom->x, &gauss1, &_lj_types, &sp_lj,
                      &this->nbor->dev_nbor, &this->_nbor_data->begin(),
                      &this->ans->force, &this->ans->engv, &eflag, &vflag,
                      &ainum, &nbor_pitch, &this->_threads_per_atom);

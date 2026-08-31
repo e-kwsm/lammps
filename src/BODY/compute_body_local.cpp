@@ -25,7 +25,7 @@
 
 using namespace LAMMPS_NS;
 
-#define DELTA 10000
+static constexpr int DELTA = 10000;
 
 enum{ID,TYPE,INDEX};
 
@@ -85,7 +85,7 @@ ComputeBodyLocal::~ComputeBodyLocal()
 
 void ComputeBodyLocal::init()
 {
-  // if non-body particles in group insure only indices 1,2,3 are used
+  // if non-body particles in group ensure only indices 1,2,3 are used
 
   int nonbody = 0;
   int *mask = atom->mask;
@@ -153,7 +153,7 @@ int ComputeBodyLocal::compute_body(int flag)
   // perform computation and fill output vector/array
 
   int m,n,ibonus;
-  auto values = new double[bptr->noutcol()];
+  auto *values = new double[bptr->noutcol()];
 
   double **x = atom->x;
   tagint *tag = atom->tag;

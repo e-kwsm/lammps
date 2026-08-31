@@ -6,7 +6,7 @@ quit command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    quit status
 
@@ -41,7 +41,7 @@ returned.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

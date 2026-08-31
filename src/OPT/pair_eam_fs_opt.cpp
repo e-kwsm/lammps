@@ -1,4 +1,3 @@
-// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    https://www.lammps.org/, Sandia National Laboratories
@@ -25,11 +24,12 @@
 using namespace LAMMPS_NS;
 
 /* ----------------------------------------------------------------------
-   multiple inheritance from two parent classes
-   invoke constructor of grandparent class, then of each parent
-   inherit optimized compute() from PairEAMOpt
-   inherit everything else from PairEAMFS
+   inherit optimized compute() from PairEAMOpt,
+   select the eam/fs file format as in PairEAMFS
 ------------------------------------------------------------------------- */
 
-PairEAMFSOpt::PairEAMFSOpt(LAMMPS *lmp) :
-  PairEAM(lmp), PairEAMFS(lmp), PairEAMOpt(lmp) {}
+PairEAMFSOpt::PairEAMFSOpt(LAMMPS *lmp) : PairEAMOpt(lmp)
+{
+  fileformat = FS;
+  one_coeff = 1;
+}

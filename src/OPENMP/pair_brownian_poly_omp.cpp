@@ -36,12 +36,6 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define EPSILON 1.0e-10
-
-// same as fix_wall.cpp
-
-enum{EDGE,CONSTANT,VARIABLE};
-
 /* ---------------------------------------------------------------------- */
 
 PairBrownianPolyOMP::PairBrownianPolyOMP(LAMMPS *lmp) :
@@ -93,7 +87,7 @@ void PairBrownianPolyOMP::compute(int eflag, int vflag)
         for (int m = 0; m < wallfix->nwall; m++) {
           int dim = wallfix->wallwhich[m] / 2;
           int side = wallfix->wallwhich[m] % 2;
-          if (wallfix->xstyle[m] == VARIABLE) {
+          if (wallfix->xstyle[m] == FixWall::VARIABLE) {
             wallcoord = input->variable->compute_equal(wallfix->xindex[m]);
           }
           else wallcoord = wallfix->coord0[m];
@@ -187,7 +181,6 @@ void PairBrownianPolyOMP::eval(int iifrom, int iito, ThrData * const thr)
   RanMars &rng = *random_thr[thr->get_tid()];
 
   double vxmu2f = force->vxmu2f;
-  int overlaps = 0;
   double randr;
   double prethermostat;
   double xl[3],a_sq,a_sh,a_pu,Fbmag;
@@ -247,10 +240,6 @@ void PairBrownianPolyOMP::eval(int iifrom, int iito, ThrData * const thr)
         // scalar resistances a_sq and a_sh
 
         h_sep = r - radi-radj;
-
-        // check for overlaps
-
-        if (h_sep < 0.0) overlaps++;
 
         // if less than minimum gap, use minimum gap instead
 

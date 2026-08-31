@@ -33,6 +33,7 @@
 #include <cmath>
 #include <complex>
 #include <cstring>
+#include <utility>
 
 #ifdef DBL_EPSILON
   #define MY_EPSILON (10.0*DBL_EPSILON)
@@ -46,8 +47,7 @@ using namespace MathConst;
 /* ---------------------------------------------------------------------- */
 
 ComputeHexOrderAtom::ComputeHexOrderAtom(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg),
-  distsq(nullptr), nearest(nullptr), qnarray(nullptr)
+    Compute(lmp, narg, arg), list(nullptr), distsq(nullptr), nearest(nullptr), qnarray(nullptr)
 {
   if (narg < 3 ) error->all(FLERR,"Illegal compute hexorder/atom command");
 
@@ -61,7 +61,7 @@ ComputeHexOrderAtom::ComputeHexOrderAtom(LAMMPS *lmp, int narg, char **arg) :
   while (iarg < narg) {
     if (strcmp(arg[iarg],"degree") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal compute hexorder/atom command");
-      ndegree = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      ndegree = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
       if (ndegree < 0)
         error->all(FLERR,"Illegal compute hexorder/atom command");
       iarg += 2;
@@ -70,7 +70,7 @@ ComputeHexOrderAtom::ComputeHexOrderAtom(LAMMPS *lmp, int narg, char **arg) :
       if (strcmp(arg[iarg+1],"NULL") == 0)
         nnn = 0;
       else {
-        nnn = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        nnn = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
         if (nnn < 0)
           error->all(FLERR,"Illegal compute hexorder/atom command");
       }
@@ -147,10 +147,8 @@ void ComputeHexOrderAtom::compute_peratom()
   }
 
   // invoke full neighbor list (will copy or build if necessary)
-  // on the first step of a run, set preflag to one in neighbor->build_one(...)
 
-  if (update->firststep == update->ntimestep) neighbor->build_one(list,1);
-  else neighbor->build_one(list);
+  neighbor->build_one(list);
 
   inum = list->inum;
   ilist = list->ilist;
@@ -173,7 +171,7 @@ void ComputeHexOrderAtom::compute_peratom()
       jlist = firstneigh[i];
       jnum = numneigh[i];
 
-      // insure distsq and nearest arrays are long enough
+      // ensure distsq and nearest arrays are long enough
 
       if (jnum > maxneigh) {
         memory->destroy(distsq);
@@ -238,7 +236,7 @@ void ComputeHexOrderAtom::compute_peratom()
 
 // calculate order parameter using std::complex::pow function
 
-inline void ComputeHexOrderAtom::calc_qn_complex(double delx, double dely, double &u, double &v) {
+void ComputeHexOrderAtom::calc_qn_complex(double delx, double dely, double &u, double &v) {
   double rinv = 1.0/sqrt(delx*delx+dely*dely);
   double x = delx*rinv;
   double y = dely*rinv;
@@ -251,7 +249,7 @@ inline void ComputeHexOrderAtom::calc_qn_complex(double delx, double dely, doubl
 // calculate order parameter using trig functions
 // this is usually slower, but can be used if <complex> not available
 
-inline void ComputeHexOrderAtom::calc_qn_trig(double delx, double dely, double &u, double &v) {
+void ComputeHexOrderAtom::calc_qn_trig(double delx, double dely, double &u, double &v) {
   double ntheta;
   if (fabs(delx) <= MY_EPSILON) {
     if (dely > 0.0) ntheta = ndegree * MY_PI / 2.0;
@@ -267,53 +265,50 @@ inline void ComputeHexOrderAtom::calc_qn_trig(double delx, double dely, double &
    sort auxiliary array at same time
 ------------------------------------------------------------------------- */
 
-#define SWAP(a,b)   tmp = a; (a) = b; (b) = tmp;
-#define ISWAP(a,b) itmp = a; (a) = b; (b) = itmp;
-
 /* ---------------------------------------------------------------------- */
 
 void ComputeHexOrderAtom::select2(int k, int n, double *arr, int *iarr)
 {
-  int i,ir,j,l,mid,ia,itmp;
-  double a,tmp;
+  int i,ir,j,l,mid,ia;
+  double a;
 
   arr--;
   iarr--;
   l = 1;
   ir = n;
-  for (;;) {
+  while (true) {
     if (ir <= l+1) {
       if (ir == l+1 && arr[ir] < arr[l]) {
-        SWAP(arr[l],arr[ir])
-        ISWAP(iarr[l],iarr[ir])
+        std::swap(arr[l],arr[ir]);
+        std::swap(iarr[l],iarr[ir]);
       }
       return;
     } else {
       mid=(l+ir) >> 1;
-      SWAP(arr[mid],arr[l+1])
-      ISWAP(iarr[mid],iarr[l+1])
+      std::swap(arr[mid],arr[l+1]);
+      std::swap(iarr[mid],iarr[l+1]);
       if (arr[l] > arr[ir]) {
-        SWAP(arr[l],arr[ir])
-        ISWAP(iarr[l],iarr[ir])
+        std::swap(arr[l],arr[ir]);
+        std::swap(iarr[l],iarr[ir]);
       }
       if (arr[l+1] > arr[ir]) {
-        SWAP(arr[l+1],arr[ir])
-        ISWAP(iarr[l+1],iarr[ir])
+        std::swap(arr[l+1],arr[ir]);
+        std::swap(iarr[l+1],iarr[ir]);
       }
       if (arr[l] > arr[l+1]) {
-        SWAP(arr[l],arr[l+1])
-        ISWAP(iarr[l],iarr[l+1])
+        std::swap(arr[l],arr[l+1]);
+        std::swap(iarr[l],iarr[l+1]);
       }
       i = l+1;
       j = ir;
       a = arr[l+1];
       ia = iarr[l+1];
-      for (;;) {
+      while (true) {
         do i++; while (arr[i] < a);
         do j--; while (arr[j] > a);
         if (j < i) break;
-        SWAP(arr[i],arr[j])
-        ISWAP(iarr[i],iarr[j])
+        std::swap(arr[i],arr[j]);
+        std::swap(iarr[i],iarr[j]);
       }
       arr[l+1] = arr[j];
       arr[j] = a;

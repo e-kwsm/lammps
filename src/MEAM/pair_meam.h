@@ -14,7 +14,6 @@
 #ifdef PAIR_CLASS
 // clang-format off
 PairStyle(meam,PairMEAM);
-PairStyle(meam/c,PairMEAM);
 // clang-format on
 #else
 
@@ -47,15 +46,17 @@ class PairMEAM : public Pair {
   class MEAM *meam_inst;
   double cutmax;                           // max cutoff for all elements
   int nlibelements;                        // # of library elements
+  int msmeamflag;                          // 0 (default) for normal MEAM, 1 for MS-MEAM
+  std::string myname;                      // name of the pair style
   std::vector<std::string> libelements;    // names of library elements
   std::vector<double> mass;                // mass of library element
 
   double **scale;    // scaling factor for adapt
 
   void allocate();
-  void read_files(const std::string &, const std::string &);
+  void read_files(const std::string &, const std::string &, int);
   void read_global_meam_file(const std::string &);
-  void read_user_meam_file(const std::string &);
+  void read_user_meam_file(const std::string &, int);
   void neigh_strip(int, int *, int *, int **);
 };
 

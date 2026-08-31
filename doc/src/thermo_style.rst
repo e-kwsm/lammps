@@ -20,17 +20,23 @@ Syntax
        *yaml* args = none
        *custom* args = list of keywords
          possible keywords = step, elapsed, elaplong, dt, time,
-                             cpu, tpcpu, spcpu, cpuremain, part, timeremain,
+                             cpu, tpcpu, spcpu, cpuuse, cpuremain, part, timeremain,
                              atoms, temp, press, pe, ke, etotal,
                              evdwl, ecoul, epair, ebond, eangle, edihed, eimp,
                              emol, elong, etail,
                              enthalpy, ecouple, econserve,
-                             vol, density, lx, ly, lz, xlo, xhi, ylo, yhi, zlo, zhi,
-                             xy, xz, yz, xlat, ylat, zlat,
-                             bonds, angles, dihedrals, impropers,
-                             pxx, pyy, pzz, pxy, pxz, pyz,
-                             fmax, fnorm, nbuild, ndanger,
+                             vol, density,
+                             xlo, xhi, ylo, yhi, zlo, zhi,
+                             xy, xz, yz,
+                             avecx, avecy, avecz,
+                             bvecx, bvecy, bvecz,
+                             cvecx, cvecy, cvecz,
+                             lx, ly, lz,
+                             xlat, ylat, zlat,
                              cella, cellb, cellc, cellalpha, cellbeta, cellgamma,
+                             pxx, pyy, pzz, pxy, pxz, pyz,
+                             bonds, angles, dihedrals, impropers,
+                             fmax, fnorm, nbuild, ndanger,
                              c_ID, c_ID[I], c_ID[I][J],
                              f_ID, f_ID[I], f_ID[I][J],
                              v_name, v_name[I]
@@ -42,6 +48,7 @@ Syntax
            cpu = elapsed CPU time in seconds since start of this run
            tpcpu = time per CPU second
            spcpu = timesteps per CPU second
+           cpuuse = CPU utilization in percent (can be > 100% with multi-threading)
            cpuremain = estimated CPU time remaining in run
            part = which partition (0 to Npartition-1) this is
            timeremain = remaining time in seconds on timer timeout.
@@ -66,18 +73,21 @@ Syntax
            econserve = pe + ke + ecouple = etotal + ecouple
            vol = volume
            density = mass density of system
-           lx,ly,lz = box lengths in x,y,z
            xlo,xhi,ylo,yhi,zlo,zhi = box boundaries
-           xy,xz,yz = box tilt for triclinic (non-orthogonal) simulation boxes
+           xy,xz,yz = box tilt for restricted triclinic (non-orthogonal) simulation boxes
+           avecx,avecy,avecz = components of edge vector A of the simulation box
+           bvecx,bvecy,bvecz = components of edge vector B of the simulation box
+           cvecx,cvecy,cvecz = components of edge vector C of the simulation box
+           lx,ly,lz = box lengths in x,y,z
            xlat,ylat,zlat = lattice spacings as calculated by :doc:`lattice <lattice>` command
-           bonds,angles,dihedrals,impropers = # of these interactions defined
+           cella,cellb,cellc = periodic cell lattice constants a,b,c
+           cellalpha, cellbeta, cellgamma = periodic cell angles alpha,beta,gamma
            pxx,pyy,pzz,pxy,pxz,pyz = 6 components of pressure tensor
+           bonds,angles,dihedrals,impropers = # of these interactions defined
            fmax = max component of force on any atom in any dimension
            fnorm = length of force vector for all atoms
            nbuild = # of neighbor list builds
            ndanger = # of dangerous neighbor list builds
-           cella,cellb,cellc = periodic cell lattice constants a,b,c
-           cellalpha, cellbeta, cellgamma = periodic cell angles alpha,beta,gamma
            c_ID = global scalar value calculated by a compute with ID
            c_ID[I] = Ith component of global vector calculated by a compute with ID, I can include wildcard (see below)
            c_ID[I][J] = I,J component of global array calculated by a compute with ID
@@ -102,8 +112,11 @@ Examples
 Description
 """""""""""
 
-Set the style and content for printing thermodynamic data to the screen
-and log files.
+Set the style and content for printing thermodynamic data to the
+screen and log files.  The units for each column of output
+corresponding to the list of keywords is determined by the :doc:`units
+<units>` command for the simulation.  E.g. energies will be in energy
+units, temperature in temperature units, pressure in pressure units.
 
 Style *one* prints a single line of thermodynamic info that is the
 equivalent of "thermo_style custom step temp epair emol etotal press".
@@ -245,7 +258,7 @@ and *pxx*, *pyy*, etc.
 ----------
 
 Here is more information on other keywords whose meaning may not be
-clear:
+clear.
 
 The *step*, *elapsed*, and *elaplong* keywords refer to timestep
 count.  *Step* is the current timestep, or iteration count when a
@@ -279,6 +292,16 @@ will continually output the time and timestep rate for the last 100
 steps.  The *tpcpu* keyword does not attempt to track any changes in
 timestep size, e.g. due to using the :doc:`fix dt/reset <fix_dt_reset>`
 command.
+
+The *cpuuse* keyword represents the CPU utilization in percent on
+MPI rank 0 for the current run.  This should typically be around 100%
+for single-threaded runs.  Smaller values indicate that LAMMPS may be
+stalling on file I/O, or some other process is competing with LAMMPS
+for the same CPU.  When using multi-threading through the KOKKOS,
+INTEL, or OPENMP packages the value can be larger than 100% and
+ideally should be close to *nthreads* x 100%.  How close depends
+on how much of the execution time is spent in multi-threaded parts
+of the code versus the non-accelerated parts.
 
 The *cpuremain* keyword estimates the CPU time remaining in the
 current run, based on the time elapsed thus far.  It will only be a
@@ -314,10 +337,67 @@ explanation of why this sign choice makes sense.
 
 The *econserve* keyword is the sum of the potential and kinetic energy
 of the system as well as the energy that has been transferred by
-thermostatting or barostatting to their coupling reservoirs.  I.e. it
-is *pe* + *ke* + *econserve*\ .  Ideally, for a simulation in the NVE,
-NPH, or NPT ensembles, the *econserve* quantity should remain constant
-over time.
+thermostatting or barostatting to their coupling reservoirs -- that is,
+*econserve* = *pe* + *ke* + *ecouple*\ .  Ideally, for a simulation in
+the NVT, NPH, or NPT ensembles, the *econserve* quantity should remain
+constant over time even though *etotal* may change.
+
+In LAMMPS, the simulation box can be defined as orthogonal or
+triclinic (non-orthogonal).  See the :doc:`Howto_triclinic
+<Howto_triclinic>` doc page for a detailed explanation of orthogonal,
+restricted triclinic, and general triclinic simulation boxes and how
+LAMMPS rotates a general triclinic box to be restricted triclinic
+internally.
+
+The *lx*, *ly*, *lz* keywords are the extent of the simulation box in
+each dimension.  The *xlo*, *xhi*, *ylo*, *yhi*, *zlo*, *zhi* keywords
+are the lower and upper bounds of the simulation box in each dimension.
+I.e. *lx* = *xhi* - *xlo*).  These 9 values are the same for all 3 kinds
+of boxes.  I.e. for a restricted triclinic box, they are the values as
+if the box were not tilted.  For a general triclinic box, they are the
+values after it is internally rotated to be a restricted triclinic box.
+
+The *xy*, *xz*, *yz* are the current tilt factors for a triclinic box.
+They are the same for restricted and general triclinic boxes.
+
+The *avecx*, *avecy*, *avecz*, *bvecx*, *bvecy*, *bvecz*, *cvecx*,
+*cvecy*, *cvecz* are the components of the 3 edge vectors of the
+current general simulation box.  If it is an orthogonal box the
+vectors are along the x, y, z coordinate axes.  If it is a restricted
+triclinic box, the **A** vector is along the x axis, the **B** vector
+is in the xy plane with a +y coordinate, and the **C** vector has a +z
+coordinate, as explained on the :doc:`Howto_triclinic
+<Howto_triclinic>` doc page.  If the :doc:`thermo_modify
+triclinic/general <thermo_modify>` option is set then they are the
+**A**, **B**, **C** vector which define the general triclinic box.
+
+The *cella*, *cellb*, *cellc*, *cellalpha*, *cellbeta*, *cellgamma*
+keywords correspond to the usual crystallographic quantities that
+define the periodic simulation box of a crystalline system.  See the
+:doc:`Howto triclinic <Howto_triclinic>` page for a precise definition
+of these quantities in terms of the LAMMPS representation of a
+restricted triclinic simulation box via *lx*, *ly*, *lz*, *yz*, *xz*,
+*xy*\ .
+
+The *pxx,pyy,pzz,pxy,pxz,pyz* keywords are the 6 components of the
+symmetric pressure tensor for the system.  See the :doc:`compute
+pressure <compute_pressure>` command doc page for details of how it is
+calculated.
+
+If the :doc:`thermo_modify triclinic/general <thermo_modify>` option
+is set then the 6 components will be output as values consistent with
+the orientation of the general triclinic box relative to the standard
+xyz coordinate axes.  If this keyword is not used, the values will be
+consistent with the orientation of the restricted triclinic box (which
+aligns with the xyz coordinate axes).  As explained on the
+:doc:`Howto_triclinic <Howto_triclinic>` doc page, even if the
+simulation box is created as a general triclinic box, internally
+LAMMPS uses a restricted triclinic box.
+
+Note that because the pressure tensor components are computed using
+force vectors and atom coordinates, both of which are rotated in the
+general versus restricted triclinic representation, the values will
+typically be different for the two cases.
 
 The *fmax* and *fnorm* keywords are useful for monitoring the progress
 of an :doc:`energy minimization <minimize>`.  The *fmax* keyword
@@ -334,17 +414,9 @@ the number of re-builds that LAMMPS considered potentially
 the :doc:`neigh_modify <neigh_modify>` command), then dangerous
 reneighborings are those that were triggered on the first timestep
 atom movement was checked for.  If this count is non-zero you may wish
-to reduce the delay factor to insure no force interactions are missed
+to reduce the delay factor to ensure no force interactions are missed
 by atoms moving beyond the neighbor skin distance before a rebuild
 takes place.
-
-The keywords *cella*, *cellb*, *cellc*, *cellalpha*,
-*cellbeta*, *cellgamma*, correspond to the usual crystallographic
-quantities that define the periodic unit cell of a crystal.  See the
-:doc:`Howto triclinic <Howto_triclinic>` page for a geometric
-description of triclinic periodic cells, including a precise
-definition of these quantities in terms of the internal LAMMPS cell
-dimensions *lx*, *ly*, *lz*, *yz*, *xz*, *xy*\ .
 
 ----------
 
@@ -385,19 +457,20 @@ creates a global vector with 6 values.
 The *c_ID* and *c_ID[I]* and *c_ID[I][J]* keywords allow global values
 calculated by a compute to be output.  As discussed on the
 :doc:`compute <compute>` doc page, computes can calculate global,
-per-atom, or local values.  Only global values can be referenced by
-this command.  However, per-atom compute values for an individual atom
-can be referenced in a :doc:`variable <variable>` and the variable
-referenced by thermo_style custom, as discussed below.  See the
-discussion above for how the I in *c_ID[I]* can be specified with a
-wildcard asterisk to effectively specify multiple values from a global
-compute vector.
+per-atom, local, and per-grid values.  Only global values can be
+referenced by this command.  However, per-atom compute values for an
+individual atom can be referenced in a :doc:`equal-style variable
+<variable>` and the variable referenced by thermo_style custom, as
+discussed below.  See the discussion above for how the I in *c_ID[I]*
+can be specified with a wildcard asterisk to effectively specify
+multiple values from a global compute vector.
 
 The ID in the keyword should be replaced by the actual ID of a compute
 that has been defined elsewhere in the input script.  See the
-:doc:`compute <compute>` command for details.  If the compute calculates
-a global scalar, vector, or array, then the keyword formats with 0, 1,
-or 2 brackets will reference a scalar value from the compute.
+:doc:`compute <compute>` command for details.  If the compute
+calculates a global scalar, vector, or array, then the keyword formats
+with 0, 1, or 2 brackets will reference a scalar value from the
+compute.
 
 Note that some computes calculate "intensive" global quantities like
 temperature; others calculate "extensive" global quantities like
@@ -410,13 +483,14 @@ norm <thermo_modify>` option being used.
 
 The *f_ID* and *f_ID[I]* and *f_ID[I][J]* keywords allow global values
 calculated by a fix to be output.  As discussed on the :doc:`fix
-<fix>` doc page, fixes can calculate global, per-atom, or local
-values.  Only global values can be referenced by this command.
-However, per-atom fix values can be referenced for an individual atom
-in a :doc:`variable <variable>` and the variable referenced by
-thermo_style custom, as discussed below.  See the discussion above for
-how the I in *f_ID[I]* can be specified with a wildcard asterisk to
-effectively specify multiple values from a global fix vector.
+<fix>` doc page, fixes can calculate global, per-atom, local, and
+per-grid values.  Only global values can be referenced by this
+command.  However, per-atom fix values can be referenced for an
+individual atom in a :doc:`equal-style variable <variable>` and the
+variable referenced by thermo_style custom, as discussed below.  See
+the discussion above for how the I in *f_ID[I]* can be specified with
+a wildcard asterisk to effectively specify multiple values from a
+global fix vector.
 
 The ID in the keyword should be replaced by the actual ID of a fix
 that has been defined elsewhere in the input script.  See the
@@ -438,14 +512,15 @@ output.  The name in the keyword should be replaced by the variable
 name that has been defined elsewhere in the input script.  Only
 equal-style and vector-style variables can be referenced; the latter
 requires a bracketed term to specify the Ith element of the vector
-calculated by the variable.  However, an atom-style variable can be
-referenced for an individual atom by an equal-style variable and that
-variable referenced.  See the :doc:`variable <variable>` command for
-details.  Variables of style *equal* and *vector* and *atom* define a
-formula which can reference per-atom properties or thermodynamic
-keywords, or they can invoke other computes, fixes, or variables when
-evaluated, so this is a very general means of creating thermodynamic
-output.
+calculated by the variable.  However, an equal-style variable can use
+an atom-style variable in its formula indexed by the ID of an
+individual atom.  This is a way to output a specific atom's per-atom
+coordinates or other per-atom properties in thermo output.  See the
+:doc:`variable <variable>` command for details.  Note that variables
+of style *equal* and *vector* and *atom* define a formula which can
+reference per-atom properties or thermodynamic keywords, or they can
+invoke other computes, fixes, or variables when evaluated, so this is
+a very general means of creating thermodynamic output.
 
 Note that equal-style and vector-style variables are assumed to
 produce "intensive" global quantities, which are thus printed as-is,

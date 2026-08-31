@@ -24,13 +24,17 @@
 #include "memory.h"
 #include "neighbor.h"
 
+#include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-BondGromos::BondGromos(LAMMPS *_lmp) : Bond(_lmp) {}
+BondGromos::BondGromos(LAMMPS *_lmp) : Bond(_lmp), k(nullptr), r0(nullptr)
+{
+  born_matrix_enable = 1;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -116,7 +120,7 @@ void BondGromos::allocate()
 
 void BondGromos::coeff(int narg, char **arg)
 {
-  if (narg != 3) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 3) error->all(FLERR, "Incorrect args for bond coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -133,7 +137,7 @@ void BondGromos::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -189,6 +193,16 @@ double BondGromos::single(int type, double rsq, int /*i*/, int /*j*/, double &ff
   double dr = rsq - r0[type] * r0[type];
   fforce = -4.0 * k[type] * dr;
   return k[type] * dr * dr;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void BondGromos::born_matrix(int type, double rsq, int /*i*/, int /*j*/, double &du, double &du2)
+{
+  double r = sqrt(rsq);
+  du = 0.0;
+  du2 = 4 * k[type] * (3 * rsq - r0[type] * r0[type]);
+  if (r > 0.0) du = 4 * k[type] * r * (rsq - r0[type] * r0[type]);
 }
 
 /* ----------------------------------------------------------------------

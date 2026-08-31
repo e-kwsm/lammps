@@ -54,8 +54,8 @@ using namespace user_manifold;
 
 enum { CONST, EQUAL }; // For treating the variables.
 
-static const char* cite_fix_nve_manifold_rattle =
-  "fix nve/manifold/rattle command: doi:10.1016/j.bpj.2016.02.017\n\n"
+static const char cite_fix_nve_manifold_rattle[] =
+  "fix nve/manifold/rattle command: https://doi.org/10.1016/j.bpj.2016.02.017\n\n"
   "@article{paquay-2016,\n"
   "   author        = {Paquay, Stefan and Kusters, Remy},\n"
   "   doi           = {10.1016/j.bpj.2016.02.017},\n"
@@ -68,7 +68,6 @@ static const char* cite_fix_nve_manifold_rattle =
   "   volume        = {110},\n"
   "   year          = {2016}\n"
   "}\n\n";
-
 
 /* -----------------------------------------------------------------------------
    ---------------------------------------------------------------------------*/
@@ -90,10 +89,10 @@ FixNVEManifoldRattle::FixNVEManifoldRattle( LAMMPS *lmp, int &narg, char **arg,
   dtv = dtf = 0;
 
   tolerance = utils::numeric( FLERR, arg[3] ,false,lmp);
-  max_iter  = utils::numeric( FLERR, arg[4] ,false,lmp);
+  max_iter  = utils::inumeric( FLERR, arg[4] ,false,lmp);
 
   ptr_m = create_manifold(arg[5], lmp, narg, arg);
-  if (!ptr_m) error->all(FLERR,"Error creating manifold pointer");
+  if (!ptr_m) error->all(FLERR, 5, "Error creating manifold pointer");
 
   nvars = ptr_m->nparams();
   tstrs  = new char*[nvars];
@@ -159,12 +158,12 @@ FixNVEManifoldRattle::~FixNVEManifoldRattle()
 {
   if (tstrs) {
     for (int i = 0; i < nvars; ++i) {
-      delete [] tstrs[i];
+      delete[] tstrs[i];
     }
-    delete [] tstrs;
+    delete[] tstrs;
   }
 
-  if (tvars ) delete [] tvars;
+  delete[] tvars;
   delete[] tstyle;
   delete[] is_var;
 }
@@ -287,21 +286,21 @@ void FixNVEManifoldRattle::update_var_params()
 
 /* -----------------------------------------------------------------------------
    ---------------------------------------------------------------------------*/
-int FixNVEManifoldRattle::dof(int /*igroup*/)
+bigint FixNVEManifoldRattle::dof(int /*igroup*/)
 {
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
-  int natoms = 0;
+  bigint natoms = 0;
   for (int i = 0; i < nlocal; ++i) {
     if (mask[i] & groupbit) ++natoms;
   }
 
-  int dofs;
-  MPI_Allreduce( &natoms, &dofs, 1, MPI_INT, MPI_SUM, world );
+  bigint dofs;
+  MPI_Allreduce( &natoms, &dofs, 1, MPI_LMP_BIGINT, MPI_SUM, world );
 
   // Make sure that, if there is just no or one atom, no dofs are subtracted,
   // since for the first atom already 3 dofs are subtracted because of the
-  // centre of mass corrections:
+  // center of mass corrections:
   if (dofs <= 1) dofs = 0;
   stats.dofs_removed = dofs;
 
@@ -316,10 +315,10 @@ double FixNVEManifoldRattle::memory_usage()
 {
   double bytes = 0.0;
 
-  bytes += (double)sizeof(statistics);
-  bytes += (double)sizeof(*ptr_m) + sizeof(ptr_m);
-  bytes += (double)nvars*sizeof(double) + sizeof(double*);
-  bytes += (double)nvars*( sizeof(char*) + 3*sizeof(int) );
+  bytes += (double) sizeof(statistics);
+  bytes += (double) sizeof(*ptr_m) + sizeof(double *);
+  bytes += (double) nvars * sizeof(double) + sizeof(double *);
+  bytes += (double) nvars * (sizeof(char*) + 3 * sizeof(int));
   return bytes;
 }
 

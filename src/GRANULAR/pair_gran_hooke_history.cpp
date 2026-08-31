@@ -27,7 +27,6 @@
 #include "memory.h"
 #include "modify.h"
 #include "neigh_list.h"
-#include "neigh_request.h"
 #include "neighbor.h"
 #include "update.h"
 
@@ -38,7 +37,9 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-PairGranHookeHistory::PairGranHookeHistory(LAMMPS *lmp) : Pair(lmp)
+PairGranHookeHistory::PairGranHookeHistory(LAMMPS *lmp) :
+    Pair(lmp), onerad_dynamic(nullptr), onerad_frozen(nullptr), maxrad_dynamic(nullptr),
+    maxrad_frozen(nullptr), fix_rigid(nullptr)
 {
   single_enable = 1;
   no_virial_fdotr_compute = 1;
@@ -126,7 +127,7 @@ void PairGranHookeHistory::compute(int eflag, int vflag)
   if (fix_rigid && neighbor->ago == 0) {
     int tmp;
     int *body = (int *) fix_rigid->extract("body", tmp);
-    auto mass_body = (double *) fix_rigid->extract("masstotal", tmp);
+    auto *mass_body = (double *) fix_rigid->extract("masstotal", tmp);
     if (atom->nmax > nmax) {
       memory->destroy(mass_rigid);
       nmax = atom->nmax;
@@ -408,7 +409,7 @@ void PairGranHookeHistory::settings(int narg, char **arg)
 
 void PairGranHookeHistory::coeff(int narg, char **arg)
 {
-  if (narg > 2) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg > 2) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi, jlo, jhi;
@@ -423,7 +424,7 @@ void PairGranHookeHistory::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -436,10 +437,10 @@ void PairGranHookeHistory::init_style()
 
   // error and warning checks
 
-  if (!atom->radius_flag || !atom->rmass_flag)
-    error->all(FLERR, "Pair granular requires atom attributes radius, rmass");
+  if (!atom->radius_flag || !atom->rmass_flag || !atom->omega_flag)
+    error->all(FLERR, "Pair gran/h* requires atom attributes radius, rmass, omega");
   if (comm->ghost_velocity == 0)
-    error->all(FLERR, "Pair granular requires ghost atoms store velocity");
+    error->all(FLERR, "Pair gran/h* requires ghost atoms store velocity");
 
   // need a granular neighbor list
 
@@ -464,7 +465,7 @@ void PairGranHookeHistory::init_style()
   // check for FixFreeze and set freeze_group_bit
 
   auto fixlist = modify->get_fix_by_style("^freeze");
-  if (fixlist.size() == 0)
+  if (fixlist.empty())
     freeze_group_bit = 0;
   else if (fixlist.size() > 1)
     error->all(FLERR, "Only one fix freeze command at a time allowed");
@@ -590,6 +591,7 @@ void PairGranHookeHistory::write_restart_settings(FILE *fp)
   fwrite(&gammat, sizeof(double), 1, fp);
   fwrite(&xmu, sizeof(double), 1, fp);
   fwrite(&dampflag, sizeof(int), 1, fp);
+  fwrite(&limit_damping, sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -605,6 +607,7 @@ void PairGranHookeHistory::read_restart_settings(FILE *fp)
     utils::sfread(FLERR, &gammat, sizeof(double), 1, fp, nullptr, error);
     utils::sfread(FLERR, &xmu, sizeof(double), 1, fp, nullptr, error);
     utils::sfread(FLERR, &dampflag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &limit_damping, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&kn, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&kt, 1, MPI_DOUBLE, 0, world);
@@ -612,6 +615,7 @@ void PairGranHookeHistory::read_restart_settings(FILE *fp)
   MPI_Bcast(&gammat, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&xmu, 1, MPI_DOUBLE, 0, world);
   MPI_Bcast(&dampflag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&limit_damping, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -690,7 +694,7 @@ double PairGranHookeHistory::single(int i, int j, int /*itype*/, int /*jtype*/, 
   mi = rmass[i];
   mj = rmass[j];
   if (fix_rigid) {
-    // NOTE: insure mass_rigid is current for owned+ghost atoms?
+    // NOTE: ensure mass_rigid is current for owned+ghost atoms?
     if (mass_rigid[i] > 0.0) mi = mass_rigid[i];
     if (mass_rigid[j] > 0.0) mj = mass_rigid[j];
   }
@@ -769,6 +773,11 @@ double PairGranHookeHistory::single(int i, int j, int /*itype*/, int /*jtype*/, 
   svector[7] = vt1;
   svector[8] = vt2;
   svector[9] = vt3;
+  // TODO to LAMMPS:
+  // doc says The last 3 (8-10) the components of the relative velocity in the tangential direction
+  // `vt` is the relative translational velocity only, i.e., it ignores the angular velocity.
+  // the total relative tangent velocity should be `vtr`.
+  // Should that be corrected? That would break backward compatibility, and this is "legacy code" anyway
 
   return 0.0;
 }
@@ -807,24 +816,4 @@ double PairGranHookeHistory::memory_usage()
 {
   double bytes = (double) nmax * sizeof(double);
   return bytes;
-}
-
-/* ----------------------------------------------------------------------
-   self-interaction range of particle
-------------------------------------------------------------------------- */
-
-double PairGranHookeHistory::atom2cut(int i)
-{
-  double cut = atom->radius[i] * 2;
-  return cut;
-}
-
-/* ----------------------------------------------------------------------
-   maximum interaction range for two finite particles
-------------------------------------------------------------------------- */
-
-double PairGranHookeHistory::radii2cut(double r1, double r2)
-{
-  double cut = r1 + r2;
-  return cut;
 }

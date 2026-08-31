@@ -18,30 +18,30 @@
 
 #include "compute_temp_asphere.h"
 
-#include <cstring>
-#include "math_extra.h"
 #include "atom.h"
 #include "atom_vec_ellipsoid.h"
-#include "update.h"
-#include "force.h"
 #include "domain.h"
-#include "modify.h"
-#include "group.h"
 #include "error.h"
+#include "force.h"
+#include "group.h"
+#include "math_extra.h"
+#include "modify.h"
+#include "update.h"
+
+#include <cstring>
 
 using namespace LAMMPS_NS;
 
-enum{ROTATE,ALL};
+enum { ROTATE, ALL };
+static constexpr double INERTIA = 0.2;    // moment of inertia prefactor for ellipsoid
 
-#define INERTIA 0.2          // moment of inertia prefactor for ellipsoid
 
 /* ---------------------------------------------------------------------- */
 
 ComputeTempAsphere::ComputeTempAsphere(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg),
-  id_bias(nullptr), tbias(nullptr), avec(nullptr)
+    Compute(lmp, narg, arg), id_bias(nullptr), tbias(nullptr), avec(nullptr)
 {
-  if (narg < 3) error->all(FLERR,"Illegal compute temp/asphere command");
+  if (narg < 3) utils::missing_cmd_args(FLERR, "compute temp/asphere", error);
 
   scalar_flag = vector_flag = 1;
   size_vector = 6;
@@ -56,19 +56,18 @@ ComputeTempAsphere::ComputeTempAsphere(LAMMPS *lmp, int narg, char **arg) :
   int iarg = 3;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"bias") == 0) {
-      if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute temp/asphere command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "compute temp/asphere bias", error);
       tempbias = 1;
+      delete[] id_bias;
       id_bias = utils::strdup(arg[iarg+1]);
       iarg += 2;
     } else if (strcmp(arg[iarg],"dof") == 0) {
-      if (iarg+2 > narg)
-        error->all(FLERR,"Illegal compute temp/asphere command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "compute temp/asphere dof", error);
       if (strcmp(arg[iarg+1],"rotate") == 0) mode = ROTATE;
       else if (strcmp(arg[iarg+1],"all") == 0) mode = ALL;
-      else error->all(FLERR,"Illegal compute temp/asphere command");
+      else error->all(FLERR,"Unknown compute temp/asphere dof keyword {}", arg[iarg+1]);
       iarg += 2;
-    } else error->all(FLERR,"Illegal compute temp/asphere command");
+    } else error->all(FLERR,"Unknown compute temp/asphere keyword {}", arg[iarg]);
   }
 
   // when computing only the rotational temperature,
@@ -84,8 +83,8 @@ ComputeTempAsphere::ComputeTempAsphere(LAMMPS *lmp, int narg, char **arg) :
 
 ComputeTempAsphere::~ComputeTempAsphere()
 {
-  delete [] id_bias;
-  delete [] vector;
+  delete[] id_bias;
+  delete[] vector;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -107,17 +106,17 @@ void ComputeTempAsphere::init()
   for (int i = 0; i < nlocal; i++)
     if (mask[i] & groupbit)
       if (ellipsoid[i] < 0)
-        error->one(FLERR,"Compute temp/asphere requires extended particles");
+        error->one(FLERR,"Compute temp/asphere requires all extended particles");
 
   if (tempbias) {
-    int i = modify->find_compute(id_bias);
-    if (i < 0)
-      error->all(FLERR,"Could not find compute ID for temperature bias");
-    tbias = modify->compute[i];
+    tbias = modify->get_compute_by_id(id_bias);
+    if (!tbias)
+      error->all(FLERR,"Could not find compute ID {} for temperature bias", id_bias);
+
     if (tbias->tempflag == 0)
-      error->all(FLERR,"Bias compute does not calculate temperature");
+      error->all(FLERR,"Bias compute {} does not calculate temperature", id_bias);
     if (tbias->tempbias == 0)
-      error->all(FLERR,"Bias compute does not calculate a velocity bias");
+      error->all(FLERR,"Bias compute {} does not calculate a velocity bias", id_bias);
     if (tbias->igroup != igroup)
       error->all(FLERR,"Bias compute group does not match compute group");
     if (strcmp(tbias->style,"temp/region") == 0) tempbias = 2;
@@ -188,6 +187,64 @@ void ComputeTempAsphere::dof_compute()
 }
 
 /* ---------------------------------------------------------------------- */
+template<bool is_super>
+void ComputeTempAsphere::compute_scalar_templated(double &t)
+{
+  AtomVecEllipsoid::Bonus *bonus = avec->bonus;
+  AtomVecEllipsoid::BonusSuper *bonus_super = avec->bonus_super;
+  double **v = atom->v;
+  double **angmom = atom->angmom;
+  double *rmass = atom->rmass;
+  int *ellipsoid = atom->ellipsoid;
+  int *mask = atom->mask;
+  int nlocal = atom->nlocal;
+
+  double *shape, *quat;
+  double wbody[3],inertia[3];
+  double rot[3][3];
+
+  // sum translational and rotational energy for each particle
+  // no point particles since divide by inertia
+  for (int i = 0; i < nlocal; i++) {
+    if (mask[i] & groupbit) {
+
+      if (mode == ALL) {
+        t += (v[i][0]*v[i][0] + v[i][1]*v[i][1] + v[i][2]*v[i][2]) * rmass[i];
+      }
+
+      int j = ellipsoid[i];
+
+      if (is_super) {
+        quat = bonus_super[j].quat;
+        // principal moments of inertia
+        inertia[0] = bonus_super[j].inertia[0];
+        inertia[1] = bonus_super[j].inertia[1];
+        inertia[2] = bonus_super[j].inertia[2];
+      } else {
+        quat = bonus[j].quat;
+        shape = bonus[j].shape;
+        // principal moments of inertia
+        inertia[0] = INERTIA*rmass[i] * (shape[1]*shape[1] + shape[2]*shape[2]);
+        inertia[1] = INERTIA*rmass[i] * (shape[0]*shape[0] + shape[2]*shape[2]);
+        inertia[2] = INERTIA*rmass[i] * (shape[0]*shape[0] + shape[1]*shape[1]);
+      }
+
+
+      MathExtra::quat_to_mat(quat, rot);
+      MathExtra::transpose_matvec(rot, angmom[i], wbody);
+      // wbody = angular velocity in body frame
+      wbody[0] /= inertia[0];
+      wbody[1] /= inertia[1];
+      wbody[2] /= inertia[2];
+
+      t += inertia[0]*wbody[0]*wbody[0] +
+           inertia[1]*wbody[1]*wbody[1] +
+           inertia[2]*wbody[2]*wbody[2];
+    }
+  }
+}
+
+
 
 double ComputeTempAsphere::compute_scalar()
 {
@@ -198,74 +255,10 @@ double ComputeTempAsphere::compute_scalar()
     tbias->remove_bias_all();
   }
 
-  AtomVecEllipsoid::Bonus *bonus = avec->bonus;
-  double **v = atom->v;
-  double **angmom = atom->angmom;
-  double *rmass = atom->rmass;
-  int *ellipsoid = atom->ellipsoid;
-  int *mask = atom->mask;
-  int nlocal = atom->nlocal;
-
-  double *shape,*quat;
-  double wbody[3],inertia[3];
-  double rot[3][3];
-
-  // sum translational and rotational energy for each particle
-  // no point particles since divide by inertia
-
   double t = 0.0;
 
-  if (mode == ALL) {
-    for (int i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-        t += (v[i][0]*v[i][0] + v[i][1]*v[i][1] + v[i][2]*v[i][2]) * rmass[i];
-
-        // principal moments of inertia
-
-        shape = bonus[ellipsoid[i]].shape;
-        quat = bonus[ellipsoid[i]].quat;
-
-        inertia[0] = INERTIA*rmass[i] * (shape[1]*shape[1]+shape[2]*shape[2]);
-        inertia[1] = INERTIA*rmass[i] * (shape[0]*shape[0]+shape[2]*shape[2]);
-        inertia[2] = INERTIA*rmass[i] * (shape[0]*shape[0]+shape[1]*shape[1]);
-
-        // wbody = angular velocity in body frame
-
-        MathExtra::quat_to_mat(quat,rot);
-        MathExtra::transpose_matvec(rot,angmom[i],wbody);
-        wbody[0] /= inertia[0];
-        wbody[1] /= inertia[1];
-        wbody[2] /= inertia[2];
-
-        t += inertia[0]*wbody[0]*wbody[0] +
-          inertia[1]*wbody[1]*wbody[1] + inertia[2]*wbody[2]*wbody[2];
-      }
-
-  } else {
-    for (int i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-
-        // principal moments of inertia
-
-        shape = bonus[ellipsoid[i]].shape;
-        quat = bonus[ellipsoid[i]].quat;
-
-        inertia[0] = INERTIA*rmass[i] * (shape[1]*shape[1]+shape[2]*shape[2]);
-        inertia[1] = INERTIA*rmass[i] * (shape[0]*shape[0]+shape[2]*shape[2]);
-        inertia[2] = INERTIA*rmass[i] * (shape[0]*shape[0]+shape[1]*shape[1]);
-
-        // wbody = angular velocity in body frame
-
-        MathExtra::quat_to_mat(quat,rot);
-        MathExtra::transpose_matvec(rot,angmom[i],wbody);
-        wbody[0] /= inertia[0];
-        wbody[1] /= inertia[1];
-        wbody[2] /= inertia[2];
-
-        t += inertia[0]*wbody[0]*wbody[0] +
-          inertia[1]*wbody[1]*wbody[1] + inertia[2]*wbody[2]*wbody[2];
-      }
-  }
+  if (atom->superellipsoid_flag) compute_scalar_templated<true>(t);
+  else compute_scalar_templated<false>(t);
 
   if (tempbias) tbias->restore_bias_all();
 
@@ -278,19 +271,11 @@ double ComputeTempAsphere::compute_scalar()
 }
 
 /* ---------------------------------------------------------------------- */
-
-void ComputeTempAsphere::compute_vector()
+template<bool is_super>
+void ComputeTempAsphere::compute_vector_templated(double *t)
 {
-  int i;
-
-  invoked_vector = update->ntimestep;
-
-  if (tempbias) {
-    if (tbias->invoked_vector != update->ntimestep) tbias->compute_vector();
-    tbias->remove_bias_all();
-  }
-
   AtomVecEllipsoid::Bonus *bonus = avec->bonus;
+  AtomVecEllipsoid::BonusSuper *bonus_super = avec->bonus_super;
   double **v = atom->v;
   double **angmom = atom->angmom;
   double *rmass = atom->rmass;
@@ -298,86 +283,81 @@ void ComputeTempAsphere::compute_vector()
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
-  double *shape,*quat;
-  double wbody[3],inertia[3],t[6];
+  double *shape, *quat;
+  double wbody[3],inertia[3];
   double rot[3][3];
   double massone;
 
+    for (int i = 0; i < nlocal; i++) {
+      if (mask[i] & groupbit) {
+         massone = rmass[i];
+
+        if (mode == ALL) {
+          t[0] += massone * v[i][0]*v[i][0];
+          t[1] += massone * v[i][1]*v[i][1];
+          t[2] += massone * v[i][2]*v[i][2];
+          t[3] += massone * v[i][0]*v[i][1];
+          t[4] += massone * v[i][0]*v[i][2];
+          t[5] += massone * v[i][1]*v[i][2];
+        }
+
+        int j = ellipsoid[i];
+
+        // principal moments of inertia
+        if (is_super) {
+          quat = bonus_super[j].quat;
+
+          inertia[0] = bonus_super[j].inertia[0];
+          inertia[1] = bonus_super[j].inertia[1];
+          inertia[2] = bonus_super[j].inertia[2];
+
+        } else {
+          quat = bonus[j].quat;
+          shape = bonus[j].shape;
+
+          inertia[0] = INERTIA*massone * (shape[1]*shape[1] + shape[2]*shape[2]);
+          inertia[1] = INERTIA*massone * (shape[0]*shape[0] + shape[2]*shape[2]);
+          inertia[2] = INERTIA*massone * (shape[0]*shape[0] + shape[1]*shape[1]);
+        }
+
+         // wbody = angular velocity in body frame
+
+        MathExtra::quat_to_mat(quat,rot);
+        MathExtra::transpose_matvec(rot,angmom[i],wbody);
+        wbody[0] /= inertia[0];
+        wbody[1] /= inertia[1];
+        wbody[2] /= inertia[2];
+
+        // rotational kinetic energy
+
+        t[0] += inertia[0]*wbody[0]*wbody[0];
+        t[1] += inertia[1]*wbody[1]*wbody[1];
+        t[2] += inertia[2]*wbody[2]*wbody[2];
+        t[3] += inertia[0]*wbody[0]*wbody[1];
+        t[4] += inertia[1]*wbody[0]*wbody[2];
+        t[5] += inertia[2]*wbody[1]*wbody[2];
+      }
+    }
+}
+
+
+void ComputeTempAsphere::compute_vector()
+{
+  int i;
+  invoked_vector = update->ntimestep;
+
+  if (tempbias) {
+    if (tbias->invoked_vector != update->ntimestep) tbias->compute_vector();
+    tbias->remove_bias_all();
+  }
+
   // sum translational and rotational energy for each particle
   // no point particles since divide by inertia
-
+  double t[6];
   for (i = 0; i < 6; i++) t[i] = 0.0;
 
-  if (mode == ALL) {
-    for (i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-        massone = rmass[i];
-        t[0] += massone * v[i][0]*v[i][0];
-        t[1] += massone * v[i][1]*v[i][1];
-        t[2] += massone * v[i][2]*v[i][2];
-        t[3] += massone * v[i][0]*v[i][1];
-        t[4] += massone * v[i][0]*v[i][2];
-        t[5] += massone * v[i][1]*v[i][2];
-
-        // principal moments of inertia
-
-        shape = bonus[ellipsoid[i]].shape;
-        quat = bonus[ellipsoid[i]].quat;
-
-        inertia[0] = INERTIA*massone * (shape[1]*shape[1]+shape[2]*shape[2]);
-        inertia[1] = INERTIA*massone * (shape[0]*shape[0]+shape[2]*shape[2]);
-        inertia[2] = INERTIA*massone * (shape[0]*shape[0]+shape[1]*shape[1]);
-
-        // wbody = angular velocity in body frame
-
-        MathExtra::quat_to_mat(quat,rot);
-        MathExtra::transpose_matvec(rot,angmom[i],wbody);
-        wbody[0] /= inertia[0];
-        wbody[1] /= inertia[1];
-        wbody[2] /= inertia[2];
-
-        // rotational kinetic energy
-
-        t[0] += inertia[0]*wbody[0]*wbody[0];
-        t[1] += inertia[1]*wbody[1]*wbody[1];
-        t[2] += inertia[2]*wbody[2]*wbody[2];
-        t[3] += inertia[0]*wbody[0]*wbody[1];
-        t[4] += inertia[1]*wbody[0]*wbody[2];
-        t[5] += inertia[2]*wbody[1]*wbody[2];
-      }
-
-  } else {
-    for (i = 0; i < nlocal; i++)
-      if (mask[i] & groupbit) {
-
-        // principal moments of inertia
-
-        shape = bonus[ellipsoid[i]].shape;
-        quat = bonus[ellipsoid[i]].quat;
-        massone = rmass[i];
-
-        inertia[0] = INERTIA*massone * (shape[1]*shape[1]+shape[2]*shape[2]);
-        inertia[1] = INERTIA*massone * (shape[0]*shape[0]+shape[2]*shape[2]);
-        inertia[2] = INERTIA*massone * (shape[0]*shape[0]+shape[1]*shape[1]);
-
-        // wbody = angular velocity in body frame
-
-        MathExtra::quat_to_mat(quat,rot);
-        MathExtra::transpose_matvec(rot,angmom[i],wbody);
-        wbody[0] /= inertia[0];
-        wbody[1] /= inertia[1];
-        wbody[2] /= inertia[2];
-
-        // rotational kinetic energy
-
-        t[0] += inertia[0]*wbody[0]*wbody[0];
-        t[1] += inertia[1]*wbody[1]*wbody[1];
-        t[2] += inertia[2]*wbody[2]*wbody[2];
-        t[3] += inertia[0]*wbody[0]*wbody[1];
-        t[4] += inertia[1]*wbody[0]*wbody[2];
-        t[5] += inertia[2]*wbody[1]*wbody[2];
-      }
-  }
+  if (atom->superellipsoid_flag) compute_vector_templated<true>(t);
+  else compute_vector_templated<false>(t);
 
   if (tempbias) tbias->restore_bias_all();
 

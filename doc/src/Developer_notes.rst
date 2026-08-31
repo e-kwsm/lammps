@@ -7,19 +7,15 @@ typically document what a variable stores, what a small section of
 code does, or what a function does and its input/outputs.  The topics
 on this page are intended to document code functionality at a higher level.
 
-Available topics are:
-
-- `Reading and parsing of text and text files`_
-- `Requesting and accessing neighbor lists`_
-- `Fix contributions to instantaneous energy, virial, and cumulative energy`_
-- `KSpace PPPM FFT grids`_
+.. contents:: Available notes
+   :local:
 
 ----
 
 Reading and parsing of text and text files
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-It is frequently required for a class in LAMMPS to read in additional
+Classes in LAMMPS frequently need to read in additional
 data from a file, e.g. potential parameters from a potential file for
 manybody potentials.  LAMMPS provides several custom classes and
 convenience functions to simplify the process.  They offer the
@@ -73,6 +69,8 @@ when converting "12.5", while the ValueTokenizer class will throw an
 :cpp:func:`ValueTokenizer::next_int()
 <LAMMPS_NS::ValueTokenizer::next_int>` is called on the same string.
 
+.. _request-neighbor-list:
+
 Requesting and accessing neighbor lists
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -102,10 +100,10 @@ build is then :doc:`processed in parallel <Developer_par_neigh>`.
 The most commonly required neighbor list is a so-called "half" neighbor
 list, where each pair of atoms is listed only once (except when the
 :doc:`newton command setting <newton>` for pair is off; in that case
-pairs straddling sub-domains or periodic boundaries will be listed twice).
+pairs straddling subdomains or periodic boundaries will be listed twice).
 Thus these are the default settings when a neighbor list request is created in:
 
-.. code-block:: C++
+.. code-block:: c++
 
    void Pair::init_style()
    {
@@ -125,11 +123,10 @@ that determines the kind of neighbor list requested.  The default value
 used here asks for a perpetual "half" neighbor list.
 
 Non-default values of the second argument need to be used to adjust a
-neighbor list request to the specific needs of a style an additional
-request flag is needed.  The :doc:`tersoff <pair_tersoff>` pair style,
-for example, needs a "full" neighbor list:
+neighbor list request to the specific needs of a style.  The :doc:`tersoff
+<pair_tersoff>` pair style, for example, needs a "full" neighbor list:
 
-.. code-block:: C++
+.. code-block:: c++
 
    void PairTersoff::init_style()
    {
@@ -138,10 +135,10 @@ for example, needs a "full" neighbor list:
    }
 
 When a pair style supports r-RESPA time integration with different cutoff regions,
-the request flag may depend on the corresponding r-RESPA settings. Here an example
-from pair style lj/cut:
+the request flag may depend on the corresponding r-RESPA settings. Here is an
+example from pair style lj/cut:
 
-.. code-block:: C++
+.. code-block:: c++
 
    void PairLJCut::init_style()
    {
@@ -157,20 +154,20 @@ from pair style lj/cut:
    }
 
 Granular pair styles need neighbor lists based on particle sizes and not cutoff
-and also may require to have the list of previous neighbors available ("history").
+and also may need to store data across timesteps ("history").
 For example with:
 
-.. code-block:: C++
+.. code-block:: c++
 
    if (use_history) neighbor->add_request(this, NeighConst::REQ_SIZE | NeighConst::REQ_HISTORY);
    else neighbor->add_request(this, NeighConst::REQ_SIZE);
 
 In case a class would need to make multiple neighbor list requests with different
-settings each request can set an id which is then used in the corresponding
+settings, each request can set an id which is then used in the corresponding
 ``init_list()`` function to assign it to the suitable pointer variable. This is
 done for example by the :doc:`pair style meam <pair_meam>`:
 
-.. code-block:: C++
+.. code-block:: c++
 
    void PairMEAM::init_style()
    {
@@ -189,19 +186,39 @@ just once) and this can also be indicated by a flag.  As an example here
 is the request from the ``FixPeriNeigh`` class which is created
 internally by :doc:`Peridynamics pair styles <pair_peri>`:
 
-.. code-block:: C++
+.. code-block:: c++
 
    neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
 
 It is also possible to request a neighbor list that uses a different cutoff
 than what is usually inferred from the pair style settings (largest cutoff of
-all pair styles plus neighbor list skin).  The following is used in the
-:doc:`compute rdf <compute_rdf>` command implementation:
+all pair styles plus neighbor list skin).  Since the default neighbor list is
+built with a cutoff *per pair of atom types*, such a request must also state
+how its cutoff is to be interpreted, by calling exactly one of:
 
-.. code-block:: C++
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Function
+     - Interpretation of the requested cutoff
+   * - ``set_cutoff_max(cutoff)``
+     - the maximum across atom types, individual type pairs may use a shorter
+       cutoff.  This is the typical case for pair styles.
+   * - ``set_cutoff_fixed(cutoff)``
+     - applies uniformly to every pair of atom types.  This is the typical
+       case for a fix or compute analyzing a fixed range, e.g. an RDF.
+
+Using ``set_cutoff_max()`` where a uniform cutoff is meant will silently
+truncate the list for those type pairs that use a shorter pair style cutoff.
+
+The following is used in the :doc:`compute rdf <compute_rdf>` command
+implementation, where the requested cutoff applies to all atom types:
+
+.. code-block:: c++
 
   if (cutflag)
-    neighbor->add_request(this, NeighConst::REQ_OCCASIONAL)->set_cutoff(mycutneigh);
+    neighbor->add_request(this, NeighConst::REQ_OCCASIONAL)->set_cutoff_fixed(mycutneigh);
   else
     neighbor->add_request(this, NeighConst::REQ_OCCASIONAL);
 
@@ -212,9 +229,185 @@ for printing the neighbor list summary the name of the requesting command
 should be set.  Below is the request from the :doc:`delete atoms <delete_atoms>`
 command:
 
-.. code-block:: C++
+.. code-block:: c++
 
    neighbor->add_request(this, "delete_atoms", NeighConst::REQ_FULL);
+
+.. _error-messages:
+
+Errors, warnings, and informational messages
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+LAMMPS has specialized functionality to handle errors (which should
+terminate LAMMPS), warning messages (which should indicate possible
+problems *without* terminating LAMMPS), and informational text for
+messages about the progress and chosen settings.  We *strongly*
+encourage using these facilities and to *stay away* from using
+``printf()`` or ``fprintf()`` or ``std::cout`` or ``std::cerr`` and
+calling ``MPI_Abort()`` or ``exit()`` directly.  Warnings and
+informational messages should be printed only on MPI rank 0 to avoid
+flooding the output when running in parallel with many MPI processes.
+
+**Errors**
+
+When LAMMPS encounters an error, for example a syntax error in the
+input, then a suitable error message should be printed giving a brief,
+one line remark about the reason and then call either ``Error::all()``
+or ``Error::one()``.  ``Error::all()`` must be called when the failing
+code path is executed by *all* MPI processes and the error condition
+will appear for *all* MPI processes the same.  If desired, each MPI
+process may set a flag to either 0 or 1 and then MPI_Allreduce()
+searching for the maximum can be used to determine if there was an error
+on *any* of the MPI processes and make this information available to
+*all*.  ``Error::one()`` in contrast needs to be called when only one or
+a few MPI processes execute the code path or can have the error
+condition.  ``Error::all()`` is generally the preferred option.
+
+Calling these functions does not abort LAMMPS directly, but rather
+throws either a ``LAMMPSException`` (from ``Error::all()``) or a
+``LAMMPSAbortException`` (from ``Error::one()``).  These exceptions are
+caught by the LAMMPS ``main()`` program and then handled accordingly.
+The reason for this approach is to support applications, especially
+graphical applications like :ref:`LAMMPS-GUI <lammps_gui>`, that are
+linked to the LAMMPS library and have a mechanism to avoid that an error
+in LAMMPS terminates the application.  By catching the exceptions, the
+application can delete the failing LAMMPS class instance and create a
+new one to try again.  In a similar fashion, the :doc:`LAMMPS Python
+module <Python_module>` checks for this and then re-throws a
+corresponding Python exception, which in turn can be caught by the
+calling Python code.
+
+There are multiple "signatures" that can be called:
+
+- ``Error::all(FLERR, "Error message")``: this will abort LAMMPS with
+  the error message "Error message", followed by the last line of input
+  that was read and processed before the error condition happened.
+
+- ``Error::all(FLERR, Error::NOLASTLINE, "Error message")``: this is the
+  same as before but without the last line of input.  This is preferred
+  for errors that would happen *during* a :doc:`run <run>` or
+  :doc:`minimization <minimize>`, since the last line would be showing
+  the "run" or "minimize" command yet those are unrelated to the command
+  *causing* the error.
+
+- ``Error::all(FLERR, idx, "Error message")``: this is for argument
+  parsing where "idx" is the index (starting at 0) of the argument for a
+  LAMMPS command that is causing the failure (use ``Error::COMMAND`` for
+  the command itself).  For index 0, i.e. the first command argument,
+  you need to use the constant ``Error::ARGZERO`` to work around the
+  inability of some compilers to disambiguate between a NULL pointer and
+  an integer constant 0, even with an added type cast.  The output may
+  also include the last input line *before* and *after* substituting
+  variables, if they differ.  A textual indicator is pointing to the
+  specific word that failed.  Using the constant ``Error::NOPOINTER`` in
+  place of the *idx* argument will suppress the marker and then the
+  behavior is like the *idx* argument is not provided.
+
+FLERR is a macro containing the filename and line where the Error class
+is called and that information is appended to the error message.  This
+allows to quickly find the relevant source code causing the error.  For
+all three signatures, the single string "Error message" may be replaced
+with a format string using '{}' placeholders and followed by a variable
+number of arguments, one for each placeholder. This format string and
+the arguments are then handed for formatting to the `{fmt} library
+<https://fmt.dev>`_ (which is bundled with LAMMPS) or the `C++ format
+library <https://cppreference.com/cpp/utility/format>`_ (for
+C++20 and later) and thus allow processing similar to the "format()"
+functionality in Python.
+
+.. note::
+
+   Commands that accept wildcard arguments, for example
+   :doc:`fix ave/time <fix_ave_time>`, use
+   :cpp:func:`utils::expand_args() <LAMMPS_NS::utils::expand_args>`
+   to convert the wildcards into a list of explicit arguments.
+   This function accepts a pointer address as an optional argument,
+   which will be set to a map to the original arguments from the
+   expanded argument indices.  Please see the corresponding source
+   code for details on how to apply this map in error messages.
+
+For complex errors, that can have multiple causes and which cannot be
+explained in a single line, you can append to the error message, the
+string created by :cpp:func:`utils::errorurl()
+<LAMMPS_NS::utils::errorurl>`, which then provides a URL pointing to a
+paragraph of the :doc:`Errors_details` that corresponds to the number
+provided. Example:
+
+.. code-block:: c++
+
+   error->all(FLERR, "Unknown identifier in data file: {}{}", keyword, utils::errorurl(1));
+
+This will output something like this:
+
+.. parsed-literal::
+
+   ERROR: Unknown identifier in data file: Massess
+   For more information see https://docs.lammps.org/err0001 (src/read_data.cpp:1482)
+   Last input line: read_data       data.peptide
+
+Where the URL points to the first paragraph with explanations on
+the :doc:`Errors_details` page in the manual.
+
+**Warnings**
+
+To print warnings, the ``Errors::warning()`` function should be used.
+It also requires the FLERR macros as first argument to easily identify
+the location of the warning in the source code.  Same as with the error
+functions above, the function has two variants: one just taking a single
+string as final argument and a second that uses the `{fmt} library
+<https://fmt.dev>`_ to make it similar to, say, ``fprintf()``.  One
+motivation to use this function is that it will output warnings with
+always the same capitalization of the leading "WARNING" string.  A
+second is that it has a built in rate limiter.  After a given number (by
+default 100), that can be set via the :doc:`thermo_modify command
+<thermo_modify>` no more warnings are printed.  Also, warnings are
+written consistently to both screen and logfile or not, depending on the
+settings for :ref:`screen <screen>` or :doc:`logfile <log>` output.
+
+.. note::
+
+   Unlike ``Error::all()``, the warning function will produce output on
+   *every* MPI process, so it typically would be prefixed with an if
+   statement testing for ``comm->me == 0``, i.e. limiting output to MPI
+   rank 0.
+
+**Informational messages**
+
+Finally, for informational message LAMMPS has the
+:cpp:func:`utils::logmesg() convenience function
+<LAMMPS_NS::utils::logmesg>`.  It also uses the `{fmt} library
+<https://fmt.dev>`_ to support using a format string followed by a
+matching number of arguments.  It will output the resulting formatted
+text to both, the screen and the logfile and will honor the
+corresponding settings about whether this output is active and to which
+file it should be send.  Same as for ``Error::warning()``, it would
+produce output for every MPI process and thus should usually be called
+only on MPI rank 0 to avoid flooding the output when running with many
+parallel processes.
+
+Choosing between a custom atom style, fix property/atom, and fix STORE/ATOM
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There are multiple ways to manage per-atom data within LAMMPS.  Often
+the per-atom storage is only used locally and managed by the class that
+uses it.  If the data has to persist between multiple time steps and
+migrate with atoms when they move from sub-domain to sub-domain or
+across periodic boundaries, then using a custom atom style, or :doc:`fix
+property/atom <fix_property_atom>`, or the internal fix STORE/ATOM are
+possible options.
+
+- Using the atom style is usually the most programming effort and mostly
+  needed when the per-atom data is an integral part of the model like a
+  per-atom charge or diameter and thus should be part of the Atoms
+  section of a :doc:`data file <read_data>`.
+
+- Fix property/atom is useful if the data is optional or should be
+  entered by the user, or accessed as a (named) custom property. In this
+  case the fix should be entered as part of the input (and not
+  internally) which allows to enter and store its content with data files.
+
+- Fix STORE/ATOM should be used when the data should be accessed internally
+  only and thus the fix can be created internally.
 
 Fix contributions to instantaneous energy, virial, and cumulative energy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -252,8 +445,8 @@ And here is how the code operates:
 * The :doc:`thermo_style custom <thermo_style>` command defines
   *ecouple* and *econserve* keywords.
 * These keywords sum the energy contributions from all the
-  *ecouple_flag* = 1 fixes by invoking the energy_couple() method in
-  the Modify class, which calls the compute_scalar() method of each
+  *ecouple_flag* = 1 fixes by invoking the *energy_couple()* method in
+  the Modify class, which calls the *compute_scalar()* method of each
   fix in the list.
 
 ------------------
@@ -293,19 +486,19 @@ The fix must also do the following:
 
    The ev_init() and ev_tally() methods also account for global and
    peratom virial contributions.  Thus you do not need to invoke the
-   v_init() and v_tally() methods, if the fix also calculates peratom
+   v_init() and v_tally() methods if the fix also calculates peratom
    energies.
 
 The fix must also specify whether (by default) to include or exclude
 these contributions to the global/peratom energy/virial of the system.
-For the fix to include the contributions, set either of both of these
+For the fix to include the contributions, set either or both of these
 variables in the constructor:
 
 * *thermo_energy* = 1, for global and peratom energy
 * *thermo_virial* = 1, for global and peratom virial
 
 Note that these variables are zeroed in fix.cpp.  Thus if you don't
-set the variables, the contributions will be excluded (by default)
+set the variables, the contributions will be excluded (by default).
 
 However, the user has ultimate control over whether to include or
 exclude the contributions of the fix via the :doc:`fix modify
@@ -361,7 +554,7 @@ allocated as a 1d vector or 3d array.  Either way, the ordering of
 values within contiguous memory x fastest, then y, z slowest.
 
 For the ``3d decomposition`` of the grid, the global grid is
-partitioned into bricks that correspond to the sub-domains of the
+partitioned into bricks that correspond to the subdomains of the
 simulation box that each processor owns.  Often, this is a regular 3d
 array (Px by Py by Pz) of bricks, where P = number of processors =
 Px * Py * Pz.  More generally it can be a tiled decomposition, where
@@ -379,9 +572,11 @@ processor owns, within the global grid:
 
 .. parsed-literal::
 
-   nxlo_in,nxhi_in,nylo_in,nyhi_in,nzlo_in,nzhi_in = 3d decomposition brick
-   nxlo_fft,nxhi_fft,nylo_fft,nyhi_fft,nzlo_fft,nzhi_fft = FFT decomposition brick
-   nxlo_out,nxhi_out,nylo_out,nyhi_out,nzlo_out,nzhi_out = 3d decomposition brick + ghost cells
+   nFOO_in = 3d decomposition brick
+   nFOO_fft = FFT decomposition brick
+   nFOO_out = 3d decomposition brick + ghost cells
+
+where ``FOO`` corresponds to ``xlo, xhi, ylo, yhi, zlo,`` or ``zhi``.
 
 The ``in`` and ``fft`` indices are from 0 to N-1 inclusive in each
 dimension, where N is the grid size.

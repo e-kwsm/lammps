@@ -14,6 +14,7 @@
 #ifdef PAIR_CLASS
 // clang-format off
 PairStyle(hybrid,PairHybrid);
+PairStyle(hybrid/omp,PairHybrid);
 // clang-format on
 #else
 
@@ -27,6 +28,7 @@ namespace LAMMPS_NS {
 class PairHybrid : public Pair {
   friend class AtomVecDielectric;
   friend class ComputeSpin;
+  friend class FixAtomSwap;
   friend class FixGPU;
   friend class FixIntel;
   friend class FixNVESpin;
@@ -66,8 +68,6 @@ class PairHybrid : public Pair {
 
   void add_tally_callback(class Compute *) override;
   void del_tally_callback(class Compute *) override;
-  double atom2cut(int) override;
-  double radii2cut(double, double) override;
 
  protected:
   int nstyles;             // # of sub-styles

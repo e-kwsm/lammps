@@ -23,6 +23,7 @@
 #include "neighbor.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using MathConst::DEG2RAD;
@@ -32,10 +33,9 @@ static constexpr double SMALL = 0.001;
 
 /* ---------------------------------------------------------------------- */
 
-AngleHarmonic::AngleHarmonic(LAMMPS *_lmp) : Angle(_lmp)
+AngleHarmonic::AngleHarmonic(LAMMPS *_lmp) : Angle(_lmp), k(nullptr), theta0(nullptr)
 {
-  k = nullptr;
-  theta0 = nullptr;
+  born_matrix_enable = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -170,7 +170,7 @@ void AngleHarmonic::allocate()
 
 void AngleHarmonic::coeff(int narg, char **arg)
 {
-  if (narg != 3) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (narg != 3) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -189,7 +189,7 @@ void AngleHarmonic::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -246,13 +246,13 @@ double AngleHarmonic::single(int type, int i1, int i2, int i3)
   double delx1 = x[i1][0] - x[i2][0];
   double dely1 = x[i1][1] - x[i2][1];
   double delz1 = x[i1][2] - x[i2][2];
-  domain->minimum_image(delx1, dely1, delz1);
+  domain->minimum_image(FLERR, delx1, dely1, delz1);
   double r1 = sqrt(delx1 * delx1 + dely1 * dely1 + delz1 * delz1);
 
   double delx2 = x[i3][0] - x[i2][0];
   double dely2 = x[i3][1] - x[i2][1];
   double delz2 = x[i3][2] - x[i2][2];
-  domain->minimum_image(delx2, dely2, delz2);
+  domain->minimum_image(FLERR, delx2, dely2, delz2);
   double r2 = sqrt(delx2 * delx2 + dely2 * dely2 + delz2 * delz2);
 
   double c = delx1 * delx2 + dely1 * dely2 + delz1 * delz2;
@@ -263,6 +263,35 @@ double AngleHarmonic::single(int type, int i1, int i2, int i3)
   double dtheta = acos(c) - theta0[type];
   double tk = k[type] * dtheta;
   return tk * dtheta;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void AngleHarmonic::born_matrix(int type, int i1, int i2, int i3, double &du, double &du2)
+{
+  double **x = atom->x;
+
+  double delx1 = x[i1][0] - x[i2][0];
+  double dely1 = x[i1][1] - x[i2][1];
+  double delz1 = x[i1][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx1, dely1, delz1);
+  double r1 = sqrt(delx1 * delx1 + dely1 * dely1 + delz1 * delz1);
+
+  double delx2 = x[i3][0] - x[i2][0];
+  double dely2 = x[i3][1] - x[i2][1];
+  double delz2 = x[i3][2] - x[i2][2];
+  domain->minimum_image(FLERR, delx2, dely2, delz2);
+  double r2 = sqrt(delx2 * delx2 + dely2 * dely2 + delz2 * delz2);
+
+  double c = delx1 * delx2 + dely1 * dely2 + delz1 * delz2;
+  c /= r1 * r2;
+  if (c > 1.0) c = 1.0;
+  if (c < -1.0) c = -1.0;
+  double theta = acos(c);
+
+  double dtheta = theta - theta0[type];
+  du = -2 * k[type] * dtheta / sin(theta);
+  du2 = 2 * k[type] * (sin(theta) - dtheta * cos(theta)) / pow(sin(theta), 3);
 }
 
 /* ----------------------------------------------------------------------

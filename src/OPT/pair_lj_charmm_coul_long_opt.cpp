@@ -20,21 +20,16 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_lj_charmm_coul_long_opt.h"
-#include <cmath>
 
 #include "atom.h"
+#include "ewald_const.h"
 #include "force.h"
 #include "neigh_list.h"
 
-using namespace LAMMPS_NS;
+#include <cmath>
 
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define EWALD_A1  0.254829592
-#define EWALD_A2 -0.284496736
-#define EWALD_A3  1.421413741
-#define EWALD_A4 -1.453152027
-#define EWALD_A5  1.061405429
+using namespace LAMMPS_NS;
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
@@ -66,13 +61,14 @@ void PairLJCharmmCoulLongOpt::compute(int eflag, int vflag)
 template < int EVFLAG, int EFLAG, int NEWTON_PAIR >
 void PairLJCharmmCoulLongOpt::eval()
 {
+// NOLINTBEGIN
   typedef struct { double x,y,z; } vec3_t;
 
   typedef struct {
     double cutsq,lj1,lj2,lj3,lj4,offset;
     double _pad[2];
   } fast_alpha_t;
-
+// NOLINTEND
   int i,j,ii,jj,inum,jnum,itype,jtype,itable,sbindex;
   double fraction,table;
   double r,r2inv,r6inv,forcecoul,forcelj,factor_coul,factor_lj;
@@ -158,9 +154,7 @@ void PairLJCharmmCoulLongOpt::eval()
               grij = g_ewald * r;
               expm2 = exp(-grij*grij);
               t = 1.0 / (1.0 + EWALD_P*grij);
-              erfc = t *
-                (EWALD_A1+t*(EWALD_A2+t*(EWALD_A3+t*(EWALD_A4+t*EWALD_A5)))) *
-                expm2;
+              erfc = t * (A1 + t*(A2 + t*(A3 + t*(A4 + t*A5)))) * expm2;
               prefactor = qqrd2e * tmp_coef3/r;
               forcecoul = prefactor * (erfc + EWALD_F*grij*expm2);
             } else {
@@ -168,7 +162,7 @@ void PairLJCharmmCoulLongOpt::eval()
               rsq_lookup.f = rsq;
               itable = rsq_lookup.i & ncoulmask;
               itable >>= ncoulshiftbits;
-              fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+              fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
               table = ftable[itable] + fraction*dftable[itable];
               forcecoul = tmp_coef3 * table;
             }
@@ -247,9 +241,7 @@ void PairLJCharmmCoulLongOpt::eval()
               grij = g_ewald * r;
               expm2 = exp(-grij*grij);
               t = 1.0 / (1.0 + EWALD_P*grij);
-              erfc = t *
-                (EWALD_A1+t*(EWALD_A2+t*(EWALD_A3+t*(EWALD_A4+t*EWALD_A5)))) *
-                expm2;
+              erfc = t * (A1 + t*(A2 + t*(A3 + t*(A4 + t*A5)))) * expm2;
               prefactor = qqrd2e * tmp_coef3/r;
               forcecoul = prefactor * (erfc + EWALD_F*grij*expm2);
               if (factor_coul < 1.0) {
@@ -260,7 +252,7 @@ void PairLJCharmmCoulLongOpt::eval()
               rsq_lookup.f = rsq;
               itable = rsq_lookup.i & ncoulmask;
               itable >>= ncoulshiftbits;
-              fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+              fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
               table = ftable[itable] + fraction*dftable[itable];
               forcecoul = tmp_coef3 * table;
               if (factor_coul < 1.0) {

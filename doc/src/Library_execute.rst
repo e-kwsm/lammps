@@ -7,6 +7,7 @@ This section documents the following functions:
 - :cpp:func:`lammps_command`
 - :cpp:func:`lammps_commands_list`
 - :cpp:func:`lammps_commands_string`
+- :cpp:func:`lammps_expand`
 
 --------------------
 
@@ -30,7 +31,7 @@ be included in the file or strings, and expansion of variables with
 ``${name}`` or ``$(expression)`` syntax is performed.
 Below is a short example using some of these functions.
 
-.. code-block:: C
+.. code-block:: c
 
    /* define to make the otherwise hidden prototype for "lammps_open()" visible */
    #define LAMMPS_LIB_MPI
@@ -77,5 +78,10 @@ Below is a short example using some of these functions.
 -----------------------
 
 .. doxygenfunction:: lammps_commands_string
+   :project: progguide
+
+-----------------------
+
+.. doxygenfunction:: lammps_expand
    :project: progguide
 

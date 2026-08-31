@@ -1,28 +1,34 @@
 .. index:: pair_style nm/cut
+.. index:: pair_style nm/cut/kk
 .. index:: pair_style nm/cut/split
 .. index:: pair_style nm/cut/coul/cut
+.. index:: pair_style nm/cut/coul/cut/kk
 .. index:: pair_style nm/cut/coul/long
+.. index:: pair_style nm/cut/coul/long/kk
 .. index:: pair_style nm/cut/omp
+.. index:: pair_style nm/cut/split/omp
 .. index:: pair_style nm/cut/coul/cut/omp
 .. index:: pair_style nm/cut/coul/long/omp
 
 pair_style nm/cut command
 =========================
 
-Accelerator Variants: *nm/cut/omp*
+Accelerator Variants: *nm/cut/kk*, *nm/cut/omp*
 
 pair_style nm/cut/split command
 ===============================
 
+Accelerator Variants: *nm/cut/split/omp*
+
 pair_style nm/cut/coul/cut command
 ==================================
 
-Accelerator Variants: *nm/cut/coul/cut/omp*
+Accelerator Variants: *nm/cut/coul/cut/kk*, *nm/cut/coul/cut/omp*
 
 pair_style nm/cut/coul/long command
-===================================
+====================================
 
-Accelerator Variants: *nm/cut/coul/long/omp*
+Accelerator Variants: *nm/cut/coul/long/kk*, *nm/cut/coul/long/omp*
 
 Syntax
 """"""
@@ -98,7 +104,7 @@ Style *nm/cut/coul/cut* adds a Coulombic pairwise interaction given by
    E = \frac{C q_i q_j}{\epsilon  r} \qquad r < r_c
 
 where :math:`C` is an energy-conversion constant, :math:`q_i` and :math:`q_j`
-are the charges on the 2 atoms, and epsilon is the dielectric constant which can
+are the charges on the two atoms, and epsilon is the dielectric constant which can
 be set by the :doc:`dielectric <dielectric>` command.  If one cutoff is
 specified in the pair_style command, it is used for both the N-M and Coulombic
 terms.  If two cutoffs are specified, they are used as cutoffs for the N-M and

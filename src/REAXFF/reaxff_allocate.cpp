@@ -11,7 +11,7 @@
   Please cite the related publication:
   H. M. Aktulga, J. C. Fogarty, S. A. Pandit, A. Y. Grama,
   "Parallel Reactive Molecular Dynamics: Numerical Methods and
-  Algorithmic Techniques", Parallel Computing, in press.
+  Algorithmic Techniques", Parallel Computing, 38 (4-5), 245-259.
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License as
@@ -62,11 +62,10 @@ namespace ReaxFF {
 
   void DeAllocate_System(reax_system *system)
   {
-    auto error = system->error_ptr;
-    auto memory = system->mem_ptr;
+    auto *memory = system->mem_ptr;
 
     // deallocate the atom list
-    sfree(error, system->my_atoms, "system->my_atoms");
+    sfree(system->my_atoms);
 
     // deallocate the ffield parameters storage
     memory->destroy(system->reax_param.gp.l);
@@ -78,51 +77,50 @@ namespace ReaxFF {
   }
 
   /*************       workspace        *************/
-  void DeAllocate_Workspace(control_params *control, storage *workspace)
+  void DeAllocate_Workspace(storage *workspace)
   {
     if (!workspace->allocated)
       return;
 
     workspace->allocated = 0;
-    auto error = control->error_ptr;
 
     /* bond order storage */
-    sfree(error, workspace->total_bond_order, "total_bo");
-    sfree(error, workspace->Deltap, "Deltap");
-    sfree(error, workspace->Deltap_boc, "Deltap_boc");
-    sfree(error, workspace->dDeltap_self, "dDeltap_self");
-    sfree(error, workspace->Delta, "Delta");
-    sfree(error, workspace->Delta_lp, "Delta_lp");
-    sfree(error, workspace->Delta_lp_temp, "Delta_lp_temp");
-    sfree(error, workspace->dDelta_lp, "dDelta_lp");
-    sfree(error, workspace->dDelta_lp_temp, "dDelta_lp_temp");
-    sfree(error, workspace->Delta_e, "Delta_e");
-    sfree(error, workspace->Delta_boc, "Delta_boc");
-    sfree(error, workspace->Delta_val, "Delta_val");
-    sfree(error, workspace->nlp, "nlp");
-    sfree(error, workspace->nlp_temp, "nlp_temp");
-    sfree(error, workspace->Clp, "Clp");
-    sfree(error, workspace->vlpex, "vlpex");
-    sfree(error, workspace->bond_mark, "bond_mark");
+    sfree(workspace->total_bond_order);
+    sfree(workspace->Deltap);
+    sfree(workspace->Deltap_boc);
+    sfree(workspace->dDeltap_self);
+    sfree(workspace->Delta);
+    sfree(workspace->Delta_lp);
+    sfree(workspace->Delta_lp_temp);
+    sfree(workspace->dDelta_lp);
+    sfree(workspace->dDelta_lp_temp);
+    sfree(workspace->Delta_e);
+    sfree(workspace->Delta_boc);
+    sfree(workspace->Delta_val);
+    sfree(workspace->nlp);
+    sfree(workspace->nlp_temp);
+    sfree(workspace->Clp);
+    sfree(workspace->vlpex);
+    sfree(workspace->bond_mark);
 
     /* force related storage */
-    sfree(error, workspace->f, "f");
-    sfree(error, workspace->CdDelta, "CdDelta");
+    sfree(workspace->f);
+    sfree(workspace->CdDelta);
 
     /* reductions */
 
     if (workspace->CdDeltaReduction)
-      sfree(error, workspace->CdDeltaReduction, "cddelta_reduce");
+      sfree(workspace->CdDeltaReduction);
     if (workspace->forceReduction)
-      sfree(error, workspace->forceReduction, "f_reduce");
+      sfree(workspace->forceReduction);
     if (workspace->valence_angle_atom_myoffset)
-      sfree(error, workspace->valence_angle_atom_myoffset, "valence_angle_atom_myoffset");
+      sfree(workspace->valence_angle_atom_myoffset);
   }
 
   void Allocate_Workspace(control_params *control, storage *workspace, int total_cap)
   {
     int total_real, total_rvec;
-    auto error = control->error_ptr;
+    auto *error = control->error_ptr;
 
     workspace->allocated = 1;
     total_real = total_cap * sizeof(double);
@@ -171,16 +169,23 @@ namespace ReaxFF {
   static int Reallocate_HBonds_List(reax_system *system, reax_list *hbonds)
   {
     int i, total_hbonds;
+    LAMMPS_NS::bigint total_hbonds_big;
 
     int mincap = system->mincap;
     double saferzone = system->saferzone;
 
-    total_hbonds = 0;
+    total_hbonds_big = 0;
     for (i = 0; i < system->n; ++i)
       if ((system->my_atoms[i].Hindex) >= 0) {
-        total_hbonds += system->my_atoms[i].num_hbonds;
+        total_hbonds_big += system->my_atoms[i].num_hbonds;
       }
-    total_hbonds = (int)(MAX(total_hbonds*saferzone, mincap*system->minhbonds));
+    total_hbonds_big = (LAMMPS_NS::bigint)(MAX(total_hbonds_big*saferzone, mincap*system->minhbonds));
+
+    auto *error = system->error_ptr;
+    if (total_hbonds_big > MAXSMALLINT)
+      error->one(FLERR,"Too many hydrogen bonds in pair reaxff");
+
+    total_hbonds = total_hbonds_big;
 
     Delete_List(hbonds);
     Make_List(system->Hcap, total_hbonds, TYP_HBOND, hbonds);
@@ -192,21 +197,28 @@ namespace ReaxFF {
                                     reax_list *bonds, int *total_bonds, int *est_3body)
   {
     int i;
+    LAMMPS_NS::bigint total_bonds_big;
 
     int mincap = system->mincap;
     double safezone = system->safezone;
 
-    *total_bonds = 0;
+    total_bonds_big = 0;
     *est_3body = 0;
     for (i = 0; i < system->N; ++i) {
       *est_3body += SQR(system->my_atoms[i].num_bonds);
-      *total_bonds += system->my_atoms[i].num_bonds;
+      total_bonds_big += system->my_atoms[i].num_bonds;
     }
-    *total_bonds = (int)(MAX(*total_bonds * safezone, mincap*MIN_BONDS));
+    total_bonds_big = (LAMMPS_NS::bigint)(MAX(total_bonds_big * safezone, mincap*MIN_BONDS));
+
+    auto *error = system->error_ptr;
+    if (total_bonds_big > MAXSMALLINT)
+      error->one(FLERR,"Too many bonds in pair reaxff");
+
+    *total_bonds = total_bonds_big;
 
     if (system->omp_active)
       for (i = 0; i < bonds->num_intrs; ++i)
-        sfree(system->error_ptr, bonds->select.bond_list[i].bo_data.CdboReduction, "CdboReduction");
+        sfree(bonds->select.bond_list[i].bo_data.CdboReduction);
 
     Delete_List(bonds);
     Make_List(system->total_cap, *total_bonds, TYP_BOND, bonds);
@@ -228,7 +240,7 @@ namespace ReaxFF {
     double safezone = system->safezone;
     double saferzone = system->saferzone;
 
-    auto error = system->error_ptr;
+    auto *error = system->error_ptr;
     reallocate_data *wsr = &(workspace->realloc);
 
     if (system->n >= DANGER_ZONE * system->local_cap)
@@ -245,7 +257,7 @@ namespace ReaxFF {
       system->my_atoms = (reax_atom *)::realloc(system->my_atoms,
         system->total_cap*sizeof(reax_atom));
       /* workspace */
-      DeAllocate_Workspace(control, workspace);
+      DeAllocate_Workspace(workspace);
       Allocate_Workspace(control, workspace, system->total_cap);
     }
 
@@ -255,8 +267,8 @@ namespace ReaxFF {
 
     if (Nflag || wsr->num_far >= far_nbrs->num_intrs * DANGER_ZONE) {
       if (wsr->num_far > far_nbrs->num_intrs)
-        error->one(FLERR,fmt::format("step{}: ran out of space on far_nbrs: top={}, max={}",
-                                   data->step, wsr->num_far, far_nbrs->num_intrs));
+        error->one(FLERR, "step{}: ran out of space on far_nbrs: top={}, max={}",
+                   data->step, wsr->num_far, far_nbrs->num_intrs);
 
       newsize = static_cast<int>
         (MAX(wsr->num_far*safezone, mincap*REAX_MIN_NBRS));
@@ -292,8 +304,7 @@ namespace ReaxFF {
         reax_list *bonds = (*lists)+BONDS;
 
         for (int i = 0; i < bonds->num_intrs; ++i) {
-          sfree(error, bonds->select.bond_list[i].bo_data.CdboReduction,
-                "CdboReduction");
+          sfree(bonds->select.bond_list[i].bo_data.CdboReduction);
 
           bonds->select.bond_list[i].bo_data.CdboReduction =
             (double*) smalloc(error, sizeof(double)*nthreads, "CdboReduction");

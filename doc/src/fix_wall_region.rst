@@ -1,12 +1,15 @@
 .. index:: fix wall/region
+.. index:: fix wall/region/kk
 
 fix wall/region command
 =======================
 
+Accelerator Variants: *wall/region/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID wall/region region-ID style args ... cutoff
 
@@ -77,7 +80,7 @@ region surface will move over time in the corresponding manner.
 
    As discussed on the :doc:`region <region>` command doc page,
    regions in LAMMPS do not get wrapped across periodic boundaries.  It
-   is up to you to insure that periodic or non-periodic boundaries are
+   is up to you to ensure that periodic or non-periodic boundaries are
    specified appropriately via the :doc:`boundary <boundary>` command when
    using a region as a wall that bounds particle motion.  This also means
    that if you embed a region in your simulation box and want it to
@@ -234,9 +237,22 @@ invoked by the :doc:`minimize <minimize>` command.
    minimized), you MUST enable the :doc:`fix_modify <fix_modify>`
    *energy* option for this fix.
 
+Dump image info
+"""""""""""""""
+
+This fix does **not** support the *fix* keyword of the :doc:`dump image
+<dump_image>` command.  Instead the region used by the fix can be
+visualized using the *region* keyword of *dump image*.
+
+----------
+
+.. include:: accel_styles.rst
+
+----------
+
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

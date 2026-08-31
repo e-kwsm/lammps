@@ -28,7 +28,10 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-BondFENENM::BondFENENM(LAMMPS *lmp) : BondFENE(lmp), nn(nullptr), mm(nullptr) {}
+BondFENENM::BondFENENM(LAMMPS *lmp) : BondFENE(lmp), nn(nullptr), mm(nullptr)
+{
+  born_matrix_enable = 1;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -81,7 +84,7 @@ void BondFENENM::compute(int eflag, int vflag)
     // and crash the run if rlogarg < -.21 rather than < -3
     // Don't print out warnings, only errors
     if (rlogarg < .02) {
-      error->warning(FLERR, "fene/nm/split bond too long: {} {} {} {}", update->ntimestep,
+      error->warning(FLERR, "fene/nm bond too long: {} {} {} {}", update->ntimestep,
                      atom->tag[i1], atom->tag[i2], sqrt(rsq));
       if (rlogarg <= -.21) error->one(FLERR, "Bad FENE bond");
       rlogarg = 0.02;
@@ -136,7 +139,7 @@ void BondFENENM::allocate()
 
 void BondFENENM::coeff(int narg, char **arg)
 {
-  if (narg != 7) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 7) error->all(FLERR, "Incorrect args for bond coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -161,7 +164,7 @@ void BondFENENM::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -173,7 +176,7 @@ void BondFENENM::init_style()
   // special bonds should be 0 1 1
 
   if (force->special_lj[1] != 0.0 || force->special_lj[2] != 1.0 || force->special_lj[3] != 1.0) {
-    if (comm->me == 0) error->warning(FLERR, "Use special bonds = 0,1,1 with bond style fene");
+    if (comm->me == 0) error->warning(FLERR, "Use special bonds = 0,1,1 with bond style fene/nm");
   }
 }
 
@@ -266,6 +269,27 @@ double BondFENENM::single(int type, double rsq, int /*i*/, int /*j*/, double &ff
   }
 
   return eng;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void BondFENENM::born_matrix(int type, double rsq, int /*i*/, int /*j*/, double &du, double &du2)
+{
+  double r = sqrt(rsq);
+  double r0sq = r0[type] * r0[type];
+  double rlogarg = 1.0 - rsq / r0sq;
+
+  // Contribution from the attractive term
+  du = k[type] * r / rlogarg;
+  du2 = k[type] * (1.0 + rsq / r0sq) / (rlogarg * rlogarg);
+
+  // Contribution from the repulsive Lennard-Jones term
+  if (rsq < sigma[type] * sigma[type]) {
+    double prefactor = epsilon[type] * nn[type] * mm[type] / (nn[type] - mm[type]);
+    du += prefactor * (pow(sigma[type] / r, mm[type]) - pow(sigma[type] / r, nn[type])) / r;
+    du2 += prefactor * ((nn[type] + 1.0) * pow(sigma[type] / r, nn[type]) -
+                    (mm[type] + 1.0) * pow(sigma[type] / r, mm[type])) / rsq;
+  }
 }
 
 /* ---------------------------------------------------------------------- */

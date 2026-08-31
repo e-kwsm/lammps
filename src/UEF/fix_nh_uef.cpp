@@ -44,7 +44,7 @@ enum{ISO,ANISO,TRICLINIC};
 // citation info
 
 static const char cite_user_uef_package[] =
-  "UEF package: doi:10.1063/1.4972894\n\n"
+  "UEF package: https://doi.org/10.1063/1.4972894\n\n"
   "@Article{NicholsonRutledge16,\n"
   "author = {David A. Nicholson and Gregory C. Rutledge},\n"
   "title = {Molecular Simulation of Flow-Enhanced Nucleation in\n"
@@ -228,28 +228,28 @@ void FixNHUef::init()
 
 
   // find conflict with fix/deform or other box chaging fixes
-  for (int i=0; i < modify->nfix; i++)
-  {
-    if (strcmp(modify->fix[i]->id,id) != 0)
-      if ((modify->fix[i]->box_change & BOX_CHANGE_SHAPE) != 0)
-        error->all(FLERR,"Can't use another fix which changes box shape with fix/nvt/npt/uef");
+  for (const auto &ifix : modify->get_fix_list()) {
+    if (strcmp(ifix->id, id) != 0)
+      if ((ifix->box_change & BOX_CHANGE_SHAPE) != 0)
+        error->all(FLERR,"Can't use another fix which changes box shape with fix {}", style);
   }
 
 
   // this will make the pressure compute for nvt
   if (!pstat_flag)
     if (pcomputeflag) {
-      int icomp = modify->find_compute(id_press);
-      if (icomp<0)
-        error->all(FLERR,"Pressure ID for fix/nvt/uef doesn't exist");
-      pressure = modify->compute[icomp];
-
-      if (strcmp(pressure->style,"pressure/uef") != 0)
-        error->all(FLERR,"Using fix nvt/npt/uef without a compute pressure/uef");
+      pressure = modify->get_compute_by_id(id_press);
+      if (!pressure) {
+        error->all(FLERR,"Pressure ID {} for {} doesn't exist", id_press, style);
+      } else {
+        if (strcmp(pressure->style,"pressure/uef") != 0)
+          error->all(FLERR,"Compute ID {} for fix {} must be compute pressure/uef",
+                     id_press, style);
+      }
     }
 
   if (strcmp(temperature->style,"temp/uef") != 0)
-    error->all(FLERR,"Using fix nvt/npt/uef without a compute temp/uef");
+    error->all(FLERR,"Compute ID {} for fix {} must be compute temp/uef", id_temp, style);
 }
 
 /* ----------------------------------------------------------------------
@@ -710,7 +710,7 @@ void FixNHUef::restart(char *buf)
 {
   int n = size_restart_global();
   FixNH::restart(buf);
-  auto list = (double *) buf;
+  auto *list = (double *) buf;
   strain[0] = list[n-2];
   strain[1] = list[n-1];
   uefbox->set_strain(strain[0],strain[1]);

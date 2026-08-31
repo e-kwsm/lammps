@@ -35,6 +35,7 @@ Please contact Timothy Sirk for questions (tim.sirk@us.army.mil).
 #include "error.h"
 #include "fix_srp.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "modify.h"
 #include "neigh_list.h"
@@ -47,12 +48,12 @@ Please contact Timothy Sirk for questions (tim.sirk@us.army.mil).
 
 using namespace LAMMPS_NS;
 
-#define SMALL 1.0e-10
-#define BIG 1e10
+static constexpr double SMALL = 1.0e-10;
+static constexpr double BIG = 1e10;
 #define ONETWOBIT 0x40000000
 
 static const char cite_srp[] =
-  "pair srp command: doi:10.1063/1.3698476\n\n"
+  "pair srp command: https://doi.org/10.1063/1.3698476\n\n"
   "@Article{Sirk2012\n"
   " author = {T. W. Sirk and Y. R. Sliozberg and J. K. Brennan and M. Lisal and J. W. Andzelm},\n"
   " title = {An Enhanced Entangled Polymer Model for Dissipative Particle Dynamics},\n"
@@ -62,13 +63,15 @@ static const char cite_srp[] =
   " pages =   {134903}\n"
   "}\n\n";
 
-static int srp_instance = 0;
+namespace {
+int srp_instance = 0;
+}
 
 /* ----------------------------------------------------------------------
  set size of pair comms in constructor
  ---------------------------------------------------------------------- */
 
-PairSRP::PairSRP(LAMMPS *lmp) : Pair(lmp), fix_id(nullptr)
+PairSRP::PairSRP(LAMMPS *lmp) : Pair(lmp), cut(nullptr), a0(nullptr), srp(nullptr)
 {
   writedata = 1;
   single_enable = 0;
@@ -83,8 +86,8 @@ PairSRP::PairSRP(LAMMPS *lmp) : Pair(lmp), fix_id(nullptr)
   //   this should be early enough that FixSRP::pre_exchange()
   //   will be invoked before other fixes that migrate atoms
   //   this is checked for in FixSRP
-
-  f_srp = dynamic_cast<FixSRP *>(modify->add_fix(fmt::format("{:02d}_FIX_SRP all SRP", srp_instance)));
+  fix_id = fmt::format("{:02d}_FIX_SRP", srp_instance);
+  f_srp = modify->add_fix(fix_id + "_FIX_SRP all SRP");
   ++srp_instance;
 }
 
@@ -125,8 +128,7 @@ PairSRP::~PairSRP()
     memory->destroy(segment);
   }
 
-  // check nfix in case all fixes have already been deleted
-  if (modify->nfix && modify->get_fix_by_id(f_srp->id)!=nullptr) modify->delete_fix(f_srp->id);
+  modify->delete_fix(f_srp->id);
 }
 
 /* ----------------------------------------------------------------------
@@ -348,14 +350,12 @@ void PairSRP::settings(int narg, char **arg)
   if (atom->tag_enable == 0)
     error->all(FLERR,"Pair_style srp requires atom IDs");
 
-  cut_global = utils::numeric(FLERR,arg[0],false,lmp);
+  cut_global = utils::numeric(FLERR, arg[0], false, lmp);
   // wildcard
   if (strcmp(arg[1],"*") == 0) {
     btype = 0;
   } else {
-    btype = utils::inumeric(FLERR,arg[1],false,lmp);
-    if ((btype > atom->nbondtypes) || (btype <= 0))
-      error->all(FLERR,"Illegal pair_style command");
+    btype_str = arg[1];
   }
 
   // settings
@@ -383,19 +383,9 @@ void PairSRP::settings(int narg, char **arg)
       iarg += 2;
     } else if (strcmp(arg[iarg],"bptype") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal pair srp command");
-      bptype = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
-      if ((bptype < 1) || (bptype > atom->ntypes))
-        error->all(FLERR,"Illegal bond particle type for srp");
+      bptype_str = arg[iarg+1];
       iarg += 2;
     } else error->all(FLERR,"Illegal pair srp command");
-  }
-
-  // reset cutoffs if explicitly set
-  if (allocated) {
-    int i,j;
-    for (i = 1; i <= bptype; i++)
-      for (j = i; j <= bptype; j++)
-        if (setflag[i][j]) cut[i][j] = cut_global;
   }
 }
 
@@ -406,8 +396,27 @@ void PairSRP::settings(int narg, char **arg)
 void PairSRP::coeff(int narg, char **arg)
 {
   if (narg < 3 || narg > 4)
-    error->all(FLERR,"PairSRP: Incorrect args for pair coeff");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
+
+  if (!btype_str.empty()) {
+    btype = utils::expand_type_int(FLERR, btype_str, Atom::BOND, lmp);
+    if ((btype > atom->nbondtypes) || (btype <= 0))
+      error->all(FLERR, Error::NOLASTLINE, "Invalid bond type {} for pair style srp", btype);
+  }
+
+  if (!bptype_str.empty())
+    bptype = utils::expand_type_int(FLERR, bptype_str, Atom::ATOM, lmp);
+  if ((bptype < 1) || (bptype > atom->ntypes))
+    error->all(FLERR, Error::NOLASTLINE, "Invalid bond particle type {} for pair style srp", bptype);
+
+  // reset cutoffs if explicitly set
+  if (allocated) {
+    int i,j;
+    for (i = 1; i <= bptype; i++)
+      for (j = i; j <= bptype; j++)
+        if (setflag[i][j]) cut[i][j] = cut_global;
+  }
 
   // set ij bond-bond cutoffs
   int ilo, ihi, jlo, jhi;
@@ -454,17 +463,14 @@ void PairSRP::init_style()
   // if bond type is 0, then all bonds have bond particles
   // btype = bond type
 
-  char c0[20];
-  char* arg0[2];
-  sprintf(c0, "%d", btype);
-  arg0[0] = (char *) "btype";
-  arg0[1] = c0;
+  std::string bval = std::to_string(btype);
+  char *arg0[2] = {(char *) "btype", bval.data()};
   f_srp->modify_params(2, arg0);
 
   // bptype = bond particle type
-  sprintf(c0, "%d", bptype);
+  std::string bpval = std::to_string(bptype);
   arg0[0] = (char *) "bptype";
-  arg0[1] = c0;
+  arg0[1] = bpval.data();
   f_srp->modify_params(2, arg0);
 
   // bond particles do not contribute to energy or virial
@@ -475,7 +481,7 @@ void PairSRP::init_style()
   arg1[0] = (char *) "norm";
   arg1[1] = (char *) "no";
   output->thermo->modify_params(2, arg1);
-  if (comm->me == 0) error->message(FLERR,"Thermo normalization turned off by pair srp");
+  if (comm->me == 0) utils::logmesg(lmp, "Thermo normalization turned off by pair srp\n");
 
   neighbor->add_request(this);
 }
@@ -486,7 +492,9 @@ void PairSRP::init_style()
 
 double PairSRP::init_one(int i, int j)
 {
- if (setflag[i][j] == 0) error->all(FLERR,"PairSRP: All pair coeffs are not set");
+ if (setflag[i][j] == 0)
+   error->all(FLERR, Error::NOLASTLINE,
+              "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   cut[j][i] = cut[i][j];
   a0[j][i] = a0[i][j];
@@ -719,4 +727,13 @@ void PairSRP::read_restart_settings(FILE *fp)
     utils::sfread(FLERR,&exclude,sizeof(int),1,fp,nullptr,error);
   }
   MPI_Bcast(&cut_global,1,MPI_DOUBLE,0,world);
+}
+
+/* ---------------------------------------------------------------------- */
+
+double PairSRP::memory_usage()
+{
+  double bytes = Pair::memory_usage();
+  bytes += (double) maxcount * 2 * sizeof(int);    // segment[maxcount][2]
+  return bytes;
 }

@@ -9,7 +9,7 @@
 
 
 CVSCRIPT(bias_bin,
-         "Get the current grid bin index (1D ABF only for now)\n"
+         "Get the current grid bin index (flattened if more than 1d)\n"
          "bin : integer - Bin index",
          0, 0,
          "",
@@ -17,6 +17,8 @@ CVSCRIPT(bias_bin,
          return COLVARS_OK;
          )
 
+/// This is deprecated in the context of mwABF; no other known uses
+/// But removing it may break user scripts
 CVSCRIPT(bias_bincount,
          "Get the number of samples at the given grid bin (1D ABF only for now)\n"
          "samples : integer - Number of samples",
@@ -33,6 +35,25 @@ CVSCRIPT(bias_bincount,
            }
          }
          script->set_result_int(this_bias->bin_count(index));
+         return COLVARS_OK;
+         )
+
+CVSCRIPT(bias_local_sample_count,
+         "Get the number of samples around the current bin"
+         "samples : integer - Number of samples",
+         0, 1,
+         "radius : integer - Sum over radius bins around current bin",
+        int radius = 0;
+        char const *arg =
+           script->obj_to_str(script->get_bias_cmd_arg(0, objc, objv));
+         if (arg) {
+           std::string const param(arg);
+           if (!(std::istringstream(param) >> radius)) {
+             script->add_error_msg("local_sample_count: error parsing radius");
+             return COLVARSCRIPT_ERROR;
+           }
+         }
+         script->set_result_str(cvm::to_str(this_bias->local_sample_count(radius)));
          return COLVARS_OK;
          )
 
@@ -99,7 +120,7 @@ CVSCRIPT(bias_help,
            if (cmdstr.size()) {
              script->set_result_str(script->get_command_cmdline_help(colvarscript::use_bias,
                                                                      cmdstr));
-             return cvm::get_error();
+             return cvmodule->get_error();
            } else {
              return COLVARSCRIPT_ERROR;
            }
@@ -131,7 +152,7 @@ CVSCRIPT(bias_save,
          1, 1,
          "prefix : string - Prefix for the state file of this bias",
          std::string const prefix =
-           cvm::state_file_prefix(script->obj_to_str(script->get_bias_cmd_arg(0, objc, objv)));
+           cvmodule->state_file_prefix(script->obj_to_str(script->get_bias_cmd_arg(0, objc, objv)));
          return this_bias->write_state_prefix(prefix);
          )
 

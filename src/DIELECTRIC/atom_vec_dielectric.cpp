@@ -15,17 +15,20 @@
 
 #include "atom.h"
 #include "citeme.h"
+#include "domain.h"
 #include "error.h"
 #include "force.h"
+#include "memory.h"
 #include "pair.h"
 #include "pair_hybrid.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 
 static const char cite_user_dielectric_package[] =
-    "DIELECTRIC package: doi:10.1016/j.cpc.2019.03.006\n\n"
+    "DIELECTRIC package: https://doi.org/10.1016/j.cpc.2019.03.006\n\n"
     "@Article{TrungCPC19,\n"
     " author = {Trung Dac Nguyen and Honghao Li and Debarshee Bagchi and"
     "   Francisco J. Solis and Olvera de la Cruz, Monica}\n"
@@ -50,6 +53,8 @@ AtomVecDielectric::AtomVecDielectric(LAMMPS *_lmp) : AtomVec(_lmp)
   atom->molecule_flag = atom->q_flag = atom->mu_flag = 1;
   atom->dielectric_flag = 1;
 
+  mu_hold = nullptr;
+
   // strings with peratom variables to include in each AtomVec method
   // strings cannot contain fields in corresponding AtomVec default strings
   // order of fields in a string does not matter
@@ -60,28 +65,28 @@ AtomVecDielectric::AtomVecDielectric(LAMMPS *_lmp) : AtomVec(_lmp)
     "angle_atom1", "angle_atom2", "angle_atom3", "num_dihedral", "dihedral_type", "dihedral_atom1",
     "dihedral_atom2", "dihedral_atom3", "dihedral_atom4", "num_improper", "improper_type",
     "improper_atom1", "improper_atom2", "improper_atom3", "improper_atom4", "nspecial", "special",
-    "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
+    "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
   fields_copy = {"q", "molecule", "num_bond", "bond_type", "bond_atom", "num_angle", "angle_type",
     "angle_atom1", "angle_atom2", "angle_atom3", "num_dihedral", "dihedral_type", "dihedral_atom1",
     "dihedral_atom2", "dihedral_atom3", "dihedral_atom4", "num_improper", "improper_type",
     "improper_atom1", "improper_atom2", "improper_atom3", "improper_atom4", "nspecial", "special",
-    "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
-  fields_comm = {"q", "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
-  fields_border = {"q", "molecule", "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
+    "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
+  fields_comm = {"q", "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
+  fields_border = {"q", "molecule", "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
   fields_border_vel = {"q", "molecule", "mu", "area", "ed", "em", "epsilon", "curvature",
-    "q_unscaled"};
+    "q_scaled"};
   fields_exchange = {"q", "molecule", "num_bond", "bond_type", "bond_atom", "num_angle",
     "angle_type", "angle_atom1", "angle_atom2", "angle_atom3", "num_dihedral", "dihedral_type",
     "dihedral_atom1", "dihedral_atom2", "dihedral_atom3", "dihedral_atom4", "num_improper",
     "improper_type", "improper_atom1", "improper_atom2", "improper_atom3", "improper_atom4",
-    "nspecial", "special", "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
+    "nspecial", "special", "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
   fields_restart = {"q", "molecule", "num_bond", "bond_type", "bond_atom", "num_angle",
     "angle_type", "angle_atom1", "angle_atom2", "angle_atom3", "num_dihedral", "dihedral_type",
     "dihedral_atom1", "dihedral_atom2", "dihedral_atom3", "dihedral_atom4", "num_improper",
     "improper_type", "improper_atom1", "improper_atom2", "improper_atom3", "improper_atom4",
-    "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
+    "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
   fields_create = {"q", "molecule", "num_bond", "num_angle", "num_dihedral", "num_improper",
-    "nspecial", "mu", "area", "ed", "em", "epsilon", "curvature", "q_unscaled"};
+    "nspecial", "mu", "area", "ed", "em", "epsilon", "curvature", "q_scaled"};
   fields_data_atom = {"id", "molecule", "type", "q", "x", "mu3", "area", "ed", "em", "epsilon",
     "curvature"};
   fields_data_vel = {"id", "v"};
@@ -111,7 +116,7 @@ void AtomVecDielectric::init()
     if (utils::strmatch(force->pair_style, "dipole")) mismatch = true;
 
     if (utils::strmatch(force->pair_style, "^hybrid")) {
-      auto hybrid = dynamic_cast<PairHybrid *>(force->pair);
+      auto *hybrid = dynamic_cast<PairHybrid *>(force->pair);
       if (hybrid) {
         for (int i = 0; i < hybrid->nstyles; i++) {
           if (utils::strmatch(hybrid->keywords[i], "^reaxff")) mismatch = true;
@@ -151,7 +156,7 @@ void AtomVecDielectric::grow_pointers()
   em = atom->em;
   epsilon = atom->epsilon;
   curvature = atom->curvature;
-  q_unscaled = atom->q_unscaled;
+  q_scaled = atom->q_scaled;
 }
 
 /* ----------------------------------------------------------------------
@@ -181,29 +186,62 @@ void AtomVecDielectric::data_atom_post(int ilocal)
   nspecial[ilocal][2] = 0;
 
   double *q = atom->q;
-  q_unscaled[ilocal] = q[ilocal];
-  q[ilocal] /= epsilon[ilocal];
+  q_scaled[ilocal] = q[ilocal]/epsilon[ilocal];
 
   double *mu_one = mu[ilocal];
   mu_one[3] = sqrt(mu_one[0] * mu_one[0] + mu_one[1] * mu_one[1] + mu_one[2] * mu_one[2]);
 }
 
 /* ----------------------------------------------------------------------
-   restore original data for writing the data file
+   convert read_data file info from general to restricted triclinic
+   parent class operates on data from Velocities section of data file
+   child class operates on dipole moment mu
 ------------------------------------------------------------------------- */
 
-void AtomVecDielectric::pack_data_pre(int ilocal)
+void AtomVecDielectric::read_data_general_to_restricted(int nlocal_previous, int nlocal)
 {
-  atom->q[ilocal] = q_unscaled[ilocal];
+  AtomVec::read_data_general_to_restricted(nlocal_previous, nlocal);
+
+  for (int i = nlocal_previous; i < nlocal; i++)
+    domain->general_to_restricted_vector(mu[i]);
 }
 
 /* ----------------------------------------------------------------------
-   undo restore and get back to post read data state
+   convert info output by write_data from restricted to general triclinic
+   parent class operates on x and data from Velocities section of data file
+   child class operates on dipole momemt mu which has 4 values per atom
 ------------------------------------------------------------------------- */
 
-void AtomVecDielectric::pack_data_post(int ilocal)
+void AtomVecDielectric::write_data_restricted_to_general()
 {
-  atom->q[ilocal] /= epsilon[ilocal];
+  AtomVec::write_data_restricted_to_general();
+
+  int nlocal = atom->nlocal;
+  memory->create(mu_hold,nlocal,3,"atomvec:mu_hold");
+  for (int i = 0; i < nlocal; i++) {
+    memcpy(&mu_hold[i][0],&mu[i][0],3*sizeof(double));
+    domain->restricted_to_general_vector(mu[i]);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   restore info output by write_data to restricted triclinic
+   original data is in "hold" arrays
+   parent class operates on x and data from Velocities section of data file
+   child class operates on dipole moment mu which has 4 values per atom
+------------------------------------------------------------------------- */
+
+void AtomVecDielectric::write_data_restore_restricted()
+{
+  AtomVec::write_data_restore_restricted();
+
+  if (!mu_hold) return;
+
+  int nlocal = atom->nlocal;
+  for (int i = 0; i < nlocal; i++)
+    memcpy(&mu[i][0],&mu_hold[i][0],3*sizeof(double));
+  memory->destroy(mu_hold);
+  mu_hold = nullptr;
 }
 
 /* ----------------------------------------------------------------------
@@ -229,7 +267,7 @@ int AtomVecDielectric::property_atom(const std::string &name)
   if (name == "em") return 2;
   if (name == "epsilon") return 3;
   if (name == "curvature") return 4;
-  if (name == "q_unscaled") return 5;
+  if (name == "q_scaled") return 5;
   return -1;
 }
 
@@ -240,7 +278,6 @@ int AtomVecDielectric::property_atom(const std::string &name)
 
 void AtomVecDielectric::pack_property_atom(int index, double *buf, int nvalues, int groupbit)
 {
-  int *mask = atom->mask;
   int nlocal = atom->nlocal;
   int n = 0;
 
@@ -287,7 +324,7 @@ void AtomVecDielectric::pack_property_atom(int index, double *buf, int nvalues, 
   } else if (index == 5) {
     for (int i = 0; i < nlocal; i++) {
       if (mask[i] & groupbit)
-        buf[n] = q_unscaled[i];
+        buf[n] = q_scaled[i];
       else
         buf[n] = 0.0;
       n += nvalues;

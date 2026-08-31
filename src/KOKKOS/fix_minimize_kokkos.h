@@ -25,10 +25,11 @@ FixStyle(MINIMIZE/kk/host,FixMinimizeKokkos);
 
 #include "fix_minimize.h"
 #include "kokkos_type.h"
+#include "kokkos_base.h"
 
 namespace LAMMPS_NS {
 
-class FixMinimizeKokkos : public FixMinimize {
+class FixMinimizeKokkos : public FixMinimize, public KokkosBase {
   friend class MinLineSearchKokkos;
 
  public:
@@ -42,12 +43,12 @@ class FixMinimizeKokkos : public FixMinimize {
   int unpack_exchange(int, double *) override;
 
   void add_vector_kokkos();
-  DAT::t_float_1d request_vector_kokkos(int);
+  DAT::t_kkfloat_1d request_vector_kokkos(int);
   void reset_coords();
 
-  DAT::tdual_float_2d k_vectors;
-  DAT::t_float_2d d_vectors;
-  HAT::t_float_2d h_vectors;
+  DAT::ttransform_kkfloat_2d_lr k_vectors;
+  DAT::t_kkfloat_2d_lr d_vectors;
+  HAT::t_double_2d_lr h_vectors;
 };
 
 }

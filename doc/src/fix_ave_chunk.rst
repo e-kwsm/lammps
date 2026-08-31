@@ -31,7 +31,7 @@ Syntax
        v_name = per-atom vector calculated by an atom-style variable with name
 
 * zero or more keyword/arg pairs may be appended
-* keyword = *norm* or *ave* or *bias* or *adof* or *cdof* or *file* or *overwrite* or *format* or *title1* or *title2* or *title3*
+* keyword = *norm* or *ave* or *bias* or *adof* or *cdof* or *file* or *append* or *overwrite* or *format* or *title1* or *title2* or *title3*
 
   .. parsed-literal::
 
@@ -51,6 +51,8 @@ Syntax
          dof_per_chunk = define this many degrees-of-freedom per chunk for temperature calculation
        *file* arg = filename
          filename = file to write results to
+       *append* arg = filename
+         filename = file to append results to
        *overwrite* arg = none = overwrite output file with only latest output
        *format* arg = string
          string = C-style format string
@@ -112,6 +114,17 @@ or atoms in a spatial bin.  See the :doc:`compute chunk/atom
 page for details of how chunks can be defined and examples of how they
 can be used to measure properties of a system.
 
+Note that if the :doc:`compute chunk/atom <compute_chunk_atom>`
+command defines spatial bins, the fix ave/chunk command performs a
+similar computation as the :doc:`fix ave/grid <fix_ave_grid>` command.
+However, the per-bin outputs from the fix ave/chunk command are
+global; each processor stores a copy of the entire set of bin data.
+By contrast, the :doc:`fix ave/grid <fix_ave_grid>` command uses a
+distributed grid where each processor owns a subset of the bins.  Thus
+it is more efficient to use the :doc:`fix ave/grid <fix_ave_grid>`
+command when the grid is large and a simulation is run on many
+processors.
+
 Note that only atoms in the specified group contribute to the summing
 and averaging calculations.  The :doc:`compute chunk/atom
 <compute_chunk_atom>` command defines its own group as well as an
@@ -141,10 +154,11 @@ quantities.  :doc:`Variables <variable>` of style *atom* are the only
 ones that can be used with this fix since all other styles of variable
 produce global quantities.
 
-Note that for values from a compute or fix, the bracketed index I can
-be specified using a wildcard asterisk with the index to effectively
-specify multiple values.  This takes the form "\*" or "\*n" or "m\*" or
-"m\*n".  If :math:`N` is the size of the vector (for *mode* = scalar) or the
+Note that for values from a compute or fix that produces a per-atom
+array (multiple values per atom), the bracketed index I can be
+specified using a wildcard asterisk with the index to effectively
+specify multiple values.  This takes the form "\*" or "\*n" or "n\*"
+or "m\*n".  If :math:`N` = the size of the vector (for *mode* = scalar) or the
 number of columns in the array (for *mode* = vector), then an asterisk
 with no numeric values means all indices from 1 to :math:`N`.  A leading
 asterisk means all indices from 1 to n (inclusive).  A trailing
@@ -187,7 +201,7 @@ simulation every :math:`N_\text{every}` time steps.  :math:`N_\text{freq}`
 must be a multiple of :math:`N_\text{every}` and :math:`N_\text{every}` must be
 non-zero even if :math:`N_\text{repeat} = 1`\ .  Also, the time steps
 contributing to the average value cannot overlap (i.e.,
-:math:`N_\text{repeat}N_\text{every}` cannot exceed :math:`N_\text{freq}`).
+:math:`N_\text{repeat} \times N_\text{every}` cannot exceed :math:`N_\text{freq}`).
 
 For example, if :math:`N_\text{every}=2`, :math:`N_\text{repeat}=6`, and
 :math:`N_\text{freq}=100`, then values on
@@ -359,6 +373,8 @@ For the *density/number* and *density/mass* values, the
 volume (bin volume or system volume) used in the per-sample sum
 normalization will be the current volume at each sampling step.
 
+----------
+
 The *ave* keyword determines how the per-chunk values produced every
 :math:`N_\text{freq}` steps are averaged with values produced on previous steps
 that were multiples of :math:`N_\text{freq}`, before they are accessed by
@@ -384,6 +400,8 @@ same chunk are used to produce the output.  For example, if :math:`M = 3` and
 of the individual chunk values on time steps 8000, 9000, and 10000.  Outputs on
 early steps will average over less than :math:`M` values if they are not
 available.
+
+----------
 
 The *bias* keyword specifies the ID of a temperature compute that
 removes a "bias" velocity from each atom, specified as *bias-ID*\ .
@@ -415,15 +433,23 @@ set to the remaining degrees of freedom for the entire molecule
 (entire chunk in this case), that is, 6 for 3d or 3 for 2d for a rigid
 molecule.
 
-The *file* keyword allows a filename to be specified.  Every
-:math:`N_\text{freq}` timesteps, a section of chunk info will be written to a
-text file in the following format.  A line with the timestep and number of
-chunks is written.  Then one line per chunk is written, containing the chunk
-ID :math:`(1-N_\text{chunk}),` an optional original ID value, optional
-coordinate values for chunks that represent spatial bins, the number of atoms
-in the chunk, and one or more calculated values.  More explanation of the
-optional values is given below.  The number of values in each line
-corresponds to the number of values specified in the fix ave/chunk
+----------
+
+.. versionadded:: 17Apr2024
+   new keyword *append*
+
+The *file* or *append* keywords allow a filename to be specified.  If
+*file* is used, then the filename is overwritten if it already exists.
+If *append* is used, then the filename is appended to if it already
+exists, or created if it does not exist.  Every :math:`N_\text{freq}`
+timesteps, a section of chunk info will be written to a text file in the
+following format.  A line with the timestep and number of chunks is
+written.  Then one line per chunk is written, containing the chunk ID
+:math:`(1-N_\text{chunk}),` an optional original ID value, optional
+coordinate values for chunks that represent spatial bins, the number of
+atoms in the chunk, and one or more calculated values.  More explanation
+of the optional values is given below.  The number of values in each
+line corresponds to the number of values specified in the fix ave/chunk
 command.  The number of atoms and the value(s) are summed or average
 quantities, as explained above.
 
@@ -433,8 +459,8 @@ output.  This option can only be used with the *ave running* setting.
 
 The *format* keyword sets the numeric format of each value when it is
 printed to a file via the *file* keyword.  Note that all values are
-floating point quantities.  The default format is %g.  You can specify
-a higher precision if desired (e.g., %20.16g).
+floating point quantities.  The default format is " %g".  You can specify
+a higher precision if desired (e.g., " %20.16g").
 
 The *title1* and *title2* and *title3* keywords allow specification of
 the strings that will be printed as the first three lines of the output
@@ -518,17 +544,19 @@ the :doc:`run <run>` command.  This fix is not invoked during
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""
 
 :doc:`compute <compute>`, :doc:`fix ave/atom <fix_ave_atom>`,
 :doc:`fix ave/histo <fix_ave_histo>`, :doc:`fix ave/time <fix_ave_time>`,
-:doc:`variable <variable>`, :doc:`fix ave/correlate <fix_ave_correlate>`
+:doc:`variable <variable>`, :doc:`fix ave/correlate <fix_ave_correlate>`,
+:doc:`fix ave/grid <fix_ave_grid>`
+
 
 Default
 """""""
 
-The option defaults are norm = all, ave = one, bias = none, no file output, and
-title 1,2,3 = strings as described above.
+The option defaults are norm = all, ave = one, bias = none, no file
+output, and title 1,2,3 = strings as described above.

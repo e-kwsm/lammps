@@ -14,7 +14,14 @@
 #ifdef PAIR_CLASS
 // clang-format off
 PairStyle(DEPRECATED,PairDeprecated);
+PairStyle(meam/c,PairDeprecated);
 PairStyle(reax,PairDeprecated);
+PairStyle(reax/c,PairDeprecated);
+PairStyle(mesont/tpm,PairDeprecated);
+PairStyle(awpmd/cut,PairDeprecated);
+PairStyle(agni,PairDeprecated);
+PairStyle(agni/omp,PairDeprecated);
+PairStyle(rann,PairDeprecated);
 // clang-format on
 #else
 

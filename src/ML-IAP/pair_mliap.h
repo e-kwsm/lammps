@@ -36,7 +36,6 @@ class PairMLIAP : public Pair {
   void init_style() override;
   double init_one(int, int) override;
   double memory_usage() override;
-  int *map;    // mapping from atom types to elements
 
  protected:
   virtual void allocate();
@@ -44,6 +43,7 @@ class PairMLIAP : public Pair {
   class MLIAPModel *model;
   class MLIAPDescriptor *descriptor;
   class MLIAPData *data;
+  bool is_child;
 };
 
 }    // namespace LAMMPS_NS

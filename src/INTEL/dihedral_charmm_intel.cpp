@@ -62,12 +62,6 @@ DihedralCharmmIntel::DihedralCharmmIntel(class LAMMPS *lmp)
 
 void DihedralCharmmIntel::compute(int eflag, int vflag)
 {
-  #ifdef _LMP_INTEL_OFFLOAD
-  if (_use_base) {
-    DihedralCharmm::compute(eflag, vflag);
-    return;
-  }
-  #endif
 
   if (fix->precision() == FixIntel::PREC_MODE_MIXED)
     compute<float,double>(eflag, vflag, fix->get_mixed_buffers(),
@@ -91,7 +85,7 @@ void DihedralCharmmIntel::compute(int eflag, int vflag,
   if (vflag_atom)
     error->all(FLERR,"INTEL package does not support per-atom stress");
 
-  // insure pair->ev_tally() will use 1-4 virial contribution
+  // ensure pair->ev_tally() will use 1-4 virial contribution
 
   if (weightflag && vflag_global == VIRIAL_FDOTR)
     force->pair->vflag_either = force->pair->vflag_global = 1;
@@ -127,8 +121,8 @@ void DihedralCharmmIntel::eval(const int vflag,
   const int inum = neighbor->ndihedrallist;
   if (inum == 0) return;
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
-  flt_t * _noalias const q = buffers->get_q(0);
+  ATOM_T * _noalias const x = buffers->get_x();
+  flt_t * _noalias const q = buffers->get_q();
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
 
@@ -139,7 +133,7 @@ void DihedralCharmmIntel::eval(const int vflag,
   int tc;
   FORCE_T * _noalias f_start;
   acc_t * _noalias ev_global;
-  IP_PRE_get_buffers(0, buffers, fix, tc, f_start, ev_global);
+  IP_PRE_get_buffers(buffers, fix, tc, f_start, ev_global);
   const int nthreads = tc;
 
   acc_t oedihedral, ov0, ov1, ov2, ov3, ov4, ov5;
@@ -240,14 +234,14 @@ void DihedralCharmmIntel::eval(const int vflag,
       const flt_t rasq = ax*ax + ay*ay + az*az;
       const flt_t rbsq = bx*bx + by*by + bz*bz;
       const flt_t rgsq = vb2xm*vb2xm + vb2ym*vb2ym + vb2zm*vb2zm;
-      const flt_t rg = sqrt(rgsq);
+      const flt_t rg = std::sqrt(rgsq);
 
       flt_t rginv, ra2inv, rb2inv;
       rginv = ra2inv = rb2inv = (flt_t)0.0;
       if (rg > 0) rginv = (flt_t)1.0/rg;
       if (rasq > 0) ra2inv = (flt_t)1.0/rasq;
       if (rbsq > 0) rb2inv = (flt_t)1.0/rbsq;
-      const flt_t rabinv = sqrt(ra2inv*rb2inv);
+      const flt_t rabinv = std::sqrt(ra2inv*rb2inv);
 
       flt_t c = (ax*bx + ay*by + az*bz)*rabinv;
       const flt_t s = rg*rabinv*(ax*vb3x + ay*vb3y + az*vb3z);
@@ -367,7 +361,7 @@ void DihedralCharmmIntel::eval(const int vflag,
 
       flt_t forcecoul;
       if (implicit) forcecoul = qqrd2e * q[i1]*q[i4]*r2inv;
-      else forcecoul = qqrd2e * q[i1]*q[i4]*sqrt(r2inv);
+      else forcecoul = qqrd2e * q[i1]*q[i4]*std::sqrt(r2inv);
       const flt_t forcelj = r6inv * (fc.ljp[itype][jtype].lj1*r6inv -
                                      fc.ljp[itype][jtype].lj2);
       const flt_t fpair = tweight * (forcelj+forcecoul)*r2inv;
@@ -497,8 +491,8 @@ void DihedralCharmmIntel::eval(const int vflag,
   const int inum = neighbor->ndihedrallist;
   if (inum == 0) return;
 
-  ATOM_T * _noalias const x = buffers->get_x(0);
-  flt_t * _noalias const q = buffers->get_q(0);
+  ATOM_T * _noalias const x = buffers->get_x();
+  flt_t * _noalias const q = buffers->get_q();
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
 
@@ -509,7 +503,7 @@ void DihedralCharmmIntel::eval(const int vflag,
   int tc;
   FORCE_T * _noalias f_start;
   acc_t * _noalias ev_global;
-  IP_PRE_get_buffers(0, buffers, fix, tc, f_start, ev_global);
+  IP_PRE_get_buffers(buffers, fix, tc, f_start, ev_global);
   const int nthreads = tc;
 
   acc_t oedihedral, ov0, ov1, ov2, ov3, ov4, ov5;
@@ -908,13 +902,6 @@ void DihedralCharmmIntel::init_style()
   fix = static_cast<FixIntel *>(modify->get_fix_by_id("package_intel"));
   if (!fix) error->all(FLERR, "The 'package intel' command is required for /intel styles");
 
-  #ifdef _LMP_INTEL_OFFLOAD
-  _use_base = 0;
-  if (fix->offload_balance() != 0.0) {
-    _use_base = 1;
-    return;
-  }
-  #endif
 
   fix->bond_init_check();
 

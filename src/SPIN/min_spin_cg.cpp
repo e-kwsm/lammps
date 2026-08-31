@@ -17,7 +17,7 @@
                          Julien Tranchida (SNL)
 
    Please cite the related publication:
-   Ivanov, A. V., Uzdin, V. M., & Jónsson, H. (2019). Fast and Robust
+   Ivanov, A. V., Uzdin, V. M., & Jonsson, H. (2019). Fast and Robust
    Algorithm for the Minimisation of the Energy of Spin Systems. arXiv
    preprint arXiv:1904.02669.
 ------------------------------------------------------------------------- */
@@ -43,7 +43,7 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 
 static const char cite_minstyle_spin_cg[] =
-  "min_style spin/cg command: doi:10.48550/arXiv.1904.02669\n\n"
+  "min_style spin/cg command: https://doi.org/10.48550/arXiv.1904.02669\n\n"
   "@article{ivanov2019fast,\n"
   "title={Fast and Robust Algorithm for the Minimisation of the Energy of "
   "Spin Systems},\n"
@@ -54,14 +54,14 @@ static const char cite_minstyle_spin_cg[] =
 
 // EPS_ENERGY = minimum normalization for energy tolerance
 
-#define EPS_ENERGY 1.0e-8
-
-#define DELAYSTEP 5
+static constexpr double EPS_ENERGY = 1.0e-8;
+static constexpr int DELAYSTEP = 5;
 
 /* ---------------------------------------------------------------------- */
 
 MinSpinCG::MinSpinCG(LAMMPS *lmp) :
-  Min(lmp), g_old(nullptr), g_cur(nullptr), p_s(nullptr), sp_copy(nullptr)
+    Min(lmp), spvec(nullptr), fmvec(nullptr), g_old(nullptr), g_cur(nullptr), p_s(nullptr),
+    sp_copy(nullptr)
 {
   if (lmp->citeme) lmp->citeme->add(cite_minstyle_spin_cg);
   nlocal_max = 0;
@@ -99,12 +99,12 @@ void MinSpinCG::init()
 
   // warning if line_search combined to gneb
 
-  if ((nreplica >= 1) && (linestyle != 4) && (comm->me == 0))
-    error->warning(FLERR,"Line search incompatible gneb");
+  if ((nreplica >= 1) && (linestyle != SPIN_NONE) && (comm->me == 0))
+    error->warning(FLERR,"Line search incompatible with gneb");
 
   // set back use_line_search to 0 if more than one replica
 
-  if (linestyle == 3 && nreplica == 1) {
+  if (linestyle == SPIN_CUBIC && nreplica == 1) {
     use_line_search = 1;
   }
   else{
@@ -567,7 +567,7 @@ int MinSpinCG::calc_and_make_step(double a, double b, int index)
     df1 = der_e_cur;
 
     c1 = -2.0*(f1-f0)/(r*r*r)+(df1+df0)/(r*r);
-    c2 = 3.0*(f1-f0)/(r*r)-(df1+2.0*df0)/(r);
+    c2 = 3.0*(f1-f0)/(r*r)-(df1+2.0*df0)/r;
     c3 = df0;
 
     // f(x) = c1 x^3 + c2 x^2 + c3 x^1 + c4
@@ -599,6 +599,15 @@ int MinSpinCG::adescent(double phi_0, double phi_j) {
     return 1;
   else
     return 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+double MinSpinCG::memory_usage()
+{
+  double bytes = (double) 3 * nlocal_max * 3 * sizeof(double);     // g_old + g_cur + p_s [3*nlocal_max]
+  if (sp_copy) bytes += (double) nlocal_max * 3 * sizeof(double);  // sp_copy[nlocal_max][3]
+  return bytes;
 }
 
 /* ----------------------------------------------------------------------

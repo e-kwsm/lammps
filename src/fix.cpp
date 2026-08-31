@@ -48,8 +48,8 @@ Fix::Fix(LAMMPS *lmp, int /*narg*/, char **arg) :
     error->all(FLERR,"Fix ID must be alphanumeric or underscore characters");
 
   igroup = group->find(arg[1]);
-  if (igroup == -1) error->all(FLERR,"Could not find fix group ID");
-  groupbit = group->bitmask[igroup];
+  if (igroup == -1) error->all(FLERR,"Could not find fix {} group ID {}", arg[2], arg[1]);
+  groupbit = group->get_bitmask_by_id(FLERR, arg[1], fmt::format("fix {}",arg[2]));
 
   style = utils::strdup(arg[2]);
 
@@ -58,6 +58,7 @@ Fix::Fix(LAMMPS *lmp, int /*narg*/, char **arg) :
   box_change = NO_BOX_CHANGE;
   thermo_energy = 0;
   thermo_virial = 0;
+  thermo_modify_colname = 0;
   energy_global_flag = energy_peratom_flag = 0;
   virial_global_flag = virial_peratom_flag = 0;
   ecouple_flag = 0;
@@ -72,17 +73,18 @@ Fix::Fix(LAMMPS *lmp, int /*narg*/, char **arg) :
   dynamic = 0;
   dof_flag = 0;
   special_alter_flag = 0;
-  enforce2d_flag = 0;
   respa_level_support = 0;
   respa_level = -1;
   maxexchange = 0;
   maxexchange_dynamic = 0;
   pre_exchange_migrate = 0;
   stores_ids = 0;
+  diam_flag = 0;
 
   scalar_flag = vector_flag = array_flag = 0;
-  peratom_flag = local_flag = 0;
-  global_freq = local_freq = peratom_freq = -1;
+  extscalar = extvector = extarray = -1;
+  peratom_flag = local_flag = pergrid_flag = 0;
+  local_freq = peratom_freq = pergrid_freq = -1;
   size_vector_variable = size_array_rows_variable = 0;
 
   comm_forward = comm_reverse = comm_border = 0;
@@ -102,15 +104,15 @@ Fix::Fix(LAMMPS *lmp, int /*narg*/, char **arg) :
   vflag_atom = cvflag_atom = 0;
   centroidstressflag = CENTROID_SAME;
 
-  // KOKKOS per-fix data masks
+  // KOKKOS package
 
   execution_space = Host;
   datamask_read = ALL_MASK;
   datamask_modify = ALL_MASK;
 
-  kokkosable = 0;
-  forward_comm_device = 0;
-  copymode = 0;
+  kokkosable = copymode = 0;
+  forward_comm_device = reverse_comm_device = exchange_comm_device = sort_device = 0;
+  fuse_integrate_flag = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -119,11 +121,26 @@ Fix::~Fix()
 {
   if (copymode) return;
 
-  delete [] id;
-  delete [] style;
+  delete[] id;
+  delete[] style;
   memory->destroy(eatom);
   memory->destroy(vatom);
   memory->destroy(cvatom);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void Fix::init_flags()
+{
+   if (scalar_flag && (extscalar < 0))
+    error->all(FLERR, "Must set 'extscalar' when setting 'scalar_flag' for fix {}.  "
+               "Please contact the LAMMPS developers.{}", style, utils::errorurl(35));
+  if (vector_flag && (extvector < 0) && !extlist)
+    error->all(FLERR, "Must set 'extvector' or 'extlist' when setting 'vector_flag' for fix {}.  "
+               "Please contact the LAMMPS developers.{}", style, utils::errorurl(35));
+  if (array_flag && (extarray < 0))
+    error->all(FLERR, "Must set 'extarray' when setting 'array_flag' for fix {}.  "
+               "Please contact the LAMMPS developers.{}", style, utils::errorurl(35));
 }
 
 /* ----------------------------------------------------------------------
@@ -133,42 +150,43 @@ Fix::~Fix()
 
 void Fix::modify_params(int narg, char **arg)
 {
-  if (narg == 0) error->all(FLERR,"Illegal fix_modify command");
+  if (narg == 0) utils::missing_cmd_args(FLERR, "fix_modify", error);
 
   int iarg = 0;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"dynamic/dof") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix_modify command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "fix_modify dynamic/dof", error);
       dynamic = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg],"energy") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix_modify command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "fix_modify energy", error);
       thermo_energy = utils::logical(FLERR,arg[iarg+1],false,lmp);
       if (thermo_energy && !energy_global_flag && !energy_peratom_flag)
-          error->all(FLERR,"Illegal fix_modify command");
+        error->all(FLERR,"Fix {} {} does not support fix_modify energy command", id, style);
       iarg += 2;
     } else if (strcmp(arg[iarg],"virial") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix_modify command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "fix_modify virial", error);
       thermo_virial = utils::logical(FLERR,arg[iarg+1],false,lmp);
       if (thermo_virial && !virial_global_flag && !virial_peratom_flag)
-        error->all(FLERR,"Illegal fix_modify command");
+        error->all(FLERR,"Fix {} {} does not support fix_modify virial command", id, style);
       iarg += 2;
     } else if (strcmp(arg[iarg],"respa") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix_modify command");
-      if (!respa_level_support) error->all(FLERR,"Illegal fix_modify command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "fix_modify respa", error);
+      if (!respa_level_support) error->all(FLERR,"Illegal fix_modify respa command");
       int lvl = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
-      if (lvl < 0) error->all(FLERR,"Illegal fix_modify command");
+      if (lvl < 0) error->all(FLERR,"Illegal fix_modify respa command");
       respa_level = lvl-1;
       iarg += 2;
     } else {
       int n = modify_param(narg-iarg,&arg[iarg]);
-      if (n == 0) error->all(FLERR,"Illegal fix_modify command");
+      if (n == 0)
+        error->all(FLERR,"Fix {} {} does not support fix_modify {} command", id, style, arg[iarg]);
       iarg += n;
     }
   }
 }
 
-void::Fix::set_molecule(int, tagint, int, double *, double *, double *)
+void Fix::set_molecule(int, tagint, int, double *, double *, double *)
 {
   error->all(FLERR,"Molecule update not implemented for fix {}", style);
 }
@@ -180,6 +198,9 @@ void::Fix::set_molecule(int, tagint, int, double *, double *, double *)
    if thermo_energy is not set, energy tallying is disabled
    if thermo_virial is not set, virial tallying is disabled
    global energy is tallied separately, output by compute_scalar() method
+   ENERGY_ONLY flag should only be set manually and may be ignored
+   it is meant to be used for cases where computation of only the
+   energy is *much* faster.
 ------------------------------------------------------------------------- */
 
 void Fix::ev_setup(int eflag, int vflag)
@@ -188,11 +209,12 @@ void Fix::ev_setup(int eflag, int vflag)
 
   evflag = 1;
 
-  if (!thermo_energy) eflag_either = eflag_global = eflag_atom = 0;
+  if (!thermo_energy) eflag_either = eflag_global = eflag_atom = eflag_only = 0;
   else {
-    eflag_either = eflag;
+    eflag_either = eflag & (ENERGY_GLOBAL | ENERGY_ATOM);
     eflag_global = eflag & ENERGY_GLOBAL;
     eflag_atom = eflag & ENERGY_ATOM;
+    eflag_only = eflag_global ? (eflag & ENERGY_ONLY) : 0;
   }
 
   if (!thermo_virial) vflag_either = vflag_global = vflag_atom = 0;
@@ -274,6 +296,7 @@ void Fix::v_setup(int vflag)
   int i,n;
 
   evflag = 1;
+  vflag_either = vflag;
   vflag_global = vflag & (VIRIAL_PAIR | VIRIAL_FDOTR);
   if (centroidstressflag != CENTROID_AVAIL) {
     vflag_atom = vflag & (VIRIAL_ATOM | VIRIAL_CENTROID);

@@ -30,7 +30,7 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define INERTIA 0.2          // moment of inertia prefactor for ellipsoid
+static constexpr double INERTIA = 0.2;          // moment of inertia prefactor for ellipsoid
 
 /* ---------------------------------------------------------------------- */
 
@@ -53,6 +53,8 @@ void FixNVEAsphereIntel::init()
   if (!avec)
     error->all(FLERR,"Compute nve/asphere requires atom style ellipsoid");
 
+  if (atom->superellipsoid_flag)
+    error->all(FLERR, "Fix nve/asphere_intel does not support superellipsoids");
   // check that all particles are finite-size ellipsoids
   // no point particles allowed, spherical is OK
 

@@ -36,7 +36,7 @@ using MathSpecial::powint;
 /* ---------------------------------------------------------------------- */
 
 FixWallRegionEES::FixWallRegionEES(LAMMPS *lmp, int narg, char **arg) :
-    Fix(lmp, narg, arg), idregion(nullptr), region(nullptr)
+    Fix(lmp, narg, arg), avec(nullptr), idregion(nullptr), region(nullptr)
 {
   if (narg != 7) error->all(FLERR, "Illegal fix wall/region/ees command");
 
@@ -124,7 +124,7 @@ void FixWallRegionEES::init()
 void FixWallRegionEES::setup(int vflag)
 {
   if (utils::strmatch(update->integrate_style, "^respa")) {
-    auto respa = dynamic_cast<Respa *>(update->integrate);
+    auto *respa = dynamic_cast<Respa *>(update->integrate);
     respa->copy_flevel_f(nlevels_respa - 1);
     post_force_respa(vflag, nlevels_respa - 1, 0);
     respa->copy_f_flevel(nlevels_respa - 1);
@@ -167,7 +167,7 @@ void FixWallRegionEES::post_force(int /*vflag*/)
 
   int onflag = 0;
 
-  // region->match() insures particle is in region or on surface, else error
+  // region->match() ensures particle is in region or on surface, else error
   // if returned contact dist r = 0, is on surface, also an error
   // in COLLOID case, r <= radius is an error
 

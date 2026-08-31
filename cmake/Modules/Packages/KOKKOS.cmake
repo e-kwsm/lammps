@@ -1,24 +1,69 @@
 ########################################################################
-# As of version 3.3.0 Kokkos requires C++14
-if(CMAKE_CXX_STANDARD LESS 14)
-  message(FATAL_ERROR "The KOKKOS package requires the C++ standard to be set to at least C++14")
+# As of version 5.0.0 Kokkos requires C++20
+if(CMAKE_CXX_STANDARD LESS 20)
+  message(FATAL_ERROR "The KOKKOS package requires the C++ standard to
+be set to at least C++20")
 endif()
+
+# Set Kokkos Precision
+set(KOKKOS_PREC "double" CACHE STRING "LAMMPS KOKKOS precision")
+set(KOKKOS_PREC_VALUES double mixed single)
+set_property(CACHE KOKKOS_PREC PROPERTY STRINGS ${KOKKOS_PREC_VALUES})
+validate_option(KOKKOS_PREC KOKKOS_PREC_VALUES)
+string(TOLOWER ${KOKKOS_PREC} KOKKOS_PREC_LOWER)
+string(TOUPPER ${KOKKOS_PREC} KOKKOS_PREC)
+
+if(KOKKOS_PREC STREQUAL "DOUBLE")
+  set(KOKKOS_PREC_SETTING "DOUBLE_DOUBLE")
+elseif(KOKKOS_PREC STREQUAL "MIXED")
+  set(KOKKOS_PREC_SETTING "SINGLE_DOUBLE")
+elseif(KOKKOS_PREC STREQUAL "SINGLE")
+  set(KOKKOS_PREC_SETTING "SINGLE_SINGLE")
+endif()
+
+target_compile_definitions(lammps PRIVATE -DLMP_KOKKOS_${KOKKOS_PREC_SETTING})
+
+# Set Kokkos View Layout
+set(KOKKOS_LAYOUT "legacy" CACHE STRING "LAMMPS KOKKOS view layout")
+set(KOKKOS_LAYOUT_VALUES legacy default)
+set_property(CACHE KOKKOS_LAYOUT PROPERTY STRINGS ${KOKKOS_LAYOUT_VALUES})
+validate_option(KOKKOS_LAYOUT KOKKOS_LAYOUT_VALUES)
+string(TOLOWER ${KOKKOS_LAYOUT} KOKKOS_LAYOUT_LOWER)
+string(TOUPPER ${KOKKOS_LAYOUT} KOKKOS_LAYOUT)
+
+target_compile_definitions(lammps PRIVATE -DLMP_KOKKOS_LAYOUT_${KOKKOS_LAYOUT})
+
+message(STATUS "Using " ${KOKKOS_PREC_LOWER} " precision for KOKKOS package")
+message(STATUS "Using " ${KOKKOS_LAYOUT_LOWER} " view layout for KOKKOS package")
+
 ########################################################################
 # consistency checks and Kokkos options/settings required by LAMMPS
-if(Kokkos_ENABLE_CUDA)
-  message(STATUS "KOKKOS: Enabling CUDA LAMBDA function support")
-  set(Kokkos_ENABLE_CUDA_LAMBDA ON CACHE BOOL "" FORCE)
+
+# temporarily enable Kokkos legacy view implementation to prevent integer overflows when indexing neighborlist views
+option(Kokkos_ENABLE_IMPL_VIEW_LEGACY "Enable legacy Kokkos view implementation" ON)
+mark_as_advanced(Kokkos_ENABLE_IMPL_VIEW_LEGACY)
+
+if(Kokkos_ENABLE_HIP)
+  option(Kokkos_ENABLE_HIP_MULTIPLE_KERNEL_INSTANTIATIONS "Enable multiple kernel instantiations with HIP" ON)
+  mark_as_advanced(Kokkos_ENABLE_HIP_MULTIPLE_KERNEL_INSTANTIATIONS)
+  option(Kokkos_ENABLE_ROCTHRUST "Use RoCThrust library" ON)
+  mark_as_advanced(Kokkos_ENABLE_ROCTHRUST)
 endif()
+
 # Adding OpenMP compiler flags without the checks done for
 # BUILD_OMP can result in compile failures. Enforce consistency.
 if(Kokkos_ENABLE_OPENMP)
   if(NOT BUILD_OMP)
     message(FATAL_ERROR "Must enable BUILD_OMP with Kokkos_ENABLE_OPENMP")
-  else()
-    # NVHPC does not seem to provide a detectable OpenMP version, but is far beyond version 3.1
-    if((OpenMP_CXX_VERSION VERSION_LESS 3.1) AND NOT (CMAKE_CXX_COMPILER_ID STREQUAL "NVHPC"))
-      message(FATAL_ERROR "Compiler must support OpenMP 3.1 or later with Kokkos_ENABLE_OPENMP")
-    endif()
+  endif()
+endif()
+
+if(Kokkos_ENABLE_SERIAL)
+  if(NOT (Kokkos_ENABLE_OPENMP OR Kokkos_ENABLE_THREADS OR
+    Kokkos_ENABLE_CUDA OR Kokkos_ENABLE_HIP OR Kokkos_ENABLE_SYCL
+    OR Kokkos_ENABLE_OPENMPTARGET))
+  option(Kokkos_ENABLE_ATOMICS_BYPASS "Disable atomics for Kokkos Serial Backend" ON)
+  mark_as_advanced(Kokkos_ENABLE_ATOMICS_BYPASS)
   endif()
 endif()
 ########################################################################
@@ -48,13 +93,15 @@ if(DOWNLOAD_KOKKOS)
   list(APPEND KOKKOS_LIB_BUILD_ARGS "-DCMAKE_CXX_EXTENSIONS=${CMAKE_CXX_EXTENSIONS}")
   list(APPEND KOKKOS_LIB_BUILD_ARGS "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}")
   include(ExternalProject)
-  set(KOKKOS_URL "https://github.com/kokkos/kokkos/archive/3.7.00.tar.gz" CACHE STRING "URL for KOKKOS tarball")
-  set(KOKKOS_MD5 "84991eca9f066383abe119a5bc7a11c4" CACHE STRING "MD5 checksum of KOKKOS tarball")
+  set(KOKKOS_URL "https://github.com/kokkos/kokkos/archive/5.1.0.tar.gz" CACHE STRING "URL for KOKKOS tarball")
+  set(KOKKOS_SHA256 "66b2526569a70a21b2aeaed8dbb1cbe8b475f3c33719eac13bc7eed02e8c6590" CACHE STRING "SHA256 checksum of KOKKOS tarball")
   mark_as_advanced(KOKKOS_URL)
-  mark_as_advanced(KOKKOS_MD5)
+  mark_as_advanced(KOKKOS_SHA256)
+  GetFallbackURL(KOKKOS_URL KOKKOS_FALLBACK)
+
   ExternalProject_Add(kokkos_build
-    URL     ${KOKKOS_URL}
-    URL_MD5 ${KOKKOS_MD5}
+    URL     ${KOKKOS_URL} ${KOKKOS_FALLBACK}
+    URL_HASH SHA256=${KOKKOS_SHA256}
     CMAKE_ARGS ${KOKKOS_LIB_BUILD_ARGS}
     BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libkokkoscore.a <INSTALL_DIR>/lib/libkokkoscontainers.a
   )
@@ -69,13 +116,11 @@ if(DOWNLOAD_KOKKOS)
   set_target_properties(LAMMPS::KOKKOSCONTAINERS PROPERTIES
     IMPORTED_LOCATION "${INSTALL_DIR}/lib/libkokkoscontainers.a")
   target_link_libraries(lammps PRIVATE LAMMPS::KOKKOSCORE LAMMPS::KOKKOSCONTAINERS)
-  target_link_libraries(lmp PRIVATE LAMMPS::KOKKOSCORE LAMMPS::KOKKOSCONTAINERS)
   add_dependencies(LAMMPS::KOKKOSCORE kokkos_build)
   add_dependencies(LAMMPS::KOKKOSCONTAINERS kokkos_build)
 elseif(EXTERNAL_KOKKOS)
-  find_package(Kokkos 3.7.00 REQUIRED CONFIG)
+  find_package(Kokkos 5.1.0 REQUIRED CONFIG)
   target_link_libraries(lammps PRIVATE Kokkos::kokkos)
-  target_link_libraries(lmp PRIVATE Kokkos::kokkos)
 else()
   set(LAMMPS_LIB_KOKKOS_SRC_DIR ${LAMMPS_LIB_SOURCE_DIR}/kokkos)
   set(LAMMPS_LIB_KOKKOS_BIN_DIR ${LAMMPS_LIB_BINARY_DIR}/kokkos)
@@ -87,8 +132,7 @@ else()
   if(CMAKE_REQUEST_PIC)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   endif()
-  add_subdirectory(${LAMMPS_LIB_KOKKOS_SRC_DIR} ${LAMMPS_LIB_KOKKOS_BIN_DIR})
-
+  add_subdirectory(${LAMMPS_LIB_KOKKOS_SRC_DIR} ${LAMMPS_LIB_KOKKOS_BIN_DIR} EXCLUDE_FROM_ALL)
 
   set(Kokkos_INCLUDE_DIRS ${LAMMPS_LIB_KOKKOS_SRC_DIR}/core/src
                           ${LAMMPS_LIB_KOKKOS_SRC_DIR}/containers/src
@@ -96,12 +140,21 @@ else()
                           ${LAMMPS_LIB_KOKKOS_BIN_DIR})
   target_include_directories(lammps PRIVATE ${Kokkos_INCLUDE_DIRS})
   target_link_libraries(lammps PRIVATE kokkos)
-  target_link_libraries(lmp PRIVATE kokkos)
   if(BUILD_SHARED_LIBS_WAS_ON)
     set(BUILD_SHARED_LIBS ON)
   endif()
 endif()
 target_compile_definitions(lammps PUBLIC $<BUILD_INTERFACE:LMP_KOKKOS>)
+
+# In a GPU-enabled Kokkos build every translation unit is processed by the
+# device compiler, so expose LMP_KOKKOS_GPU to all of LAMMPS -- not only files
+# that include kokkos_type.h.  This lets non-KOKKOS host code avoid constructs
+# that only work on the host, e.g. file-scope "const" tables of host function
+# pointers, which clang implicitly shadows into device memory and then fails to
+# link (see src/BOCS/ldd_indicator_register.cpp).
+if(Kokkos_ENABLE_CUDA OR Kokkos_ENABLE_HIP OR Kokkos_ENABLE_SYCL OR Kokkos_ENABLE_OPENMPTARGET)
+  target_compile_definitions(lammps PUBLIC $<BUILD_INTERFACE:LMP_KOKKOS_GPU>)
+endif()
 
 set(KOKKOS_PKG_SOURCES_DIR ${LAMMPS_SOURCE_DIR}/KOKKOS)
 set(KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/kokkos.cpp
@@ -116,34 +169,109 @@ set(KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/neigh_list_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/neigh_bond_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/fix_nh_kokkos.cpp
+                       ${KOKKOS_PKG_SOURCES_DIR}/fix_nh_sphere_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/nbin_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/npair_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/npair_halffull_kokkos.cpp
                        ${KOKKOS_PKG_SOURCES_DIR}/domain_kokkos.cpp
-                       ${KOKKOS_PKG_SOURCES_DIR}/modify_kokkos.cpp)
+                       ${KOKKOS_PKG_SOURCES_DIR}/modify_kokkos.cpp
+                       ${KOKKOS_PKG_SOURCES_DIR}/rand_pool_wrap_kokkos.cpp
+                       ${KOKKOS_PKG_SOURCES_DIR}/tune_kokkos.cpp
+                       ${KOKKOS_PKG_SOURCES_DIR}/variable_kokkos.cpp)
+
+
+# fix wall/gran has been refactored in an incompatible way. Use old version of base class for now
+if(PKG_GRANULAR)
+  list(APPEND KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/fix_wall_gran_old.cpp)
+endif()
+
+# fix rigid/nh/small/kk is an abstract base class (no style header) and must be
+# listed explicitly, like fix_nh_kokkos.cpp; its concrete nve/nvt/npt/nph styles
+# are picked up by the generic style detection
+if(PKG_RIGID)
+  list(APPEND KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/fix_rigid_nh_small_kokkos.cpp)
+endif()
 
 if(PKG_KSPACE)
   list(APPEND KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/fft3d_kokkos.cpp
-                                 ${KOKKOS_PKG_SOURCES_DIR}/gridcomm_kokkos.cpp
+                                 ${KOKKOS_PKG_SOURCES_DIR}/grid3d_kokkos.cpp
                                  ${KOKKOS_PKG_SOURCES_DIR}/remap_kokkos.cpp)
+  set(FFT_KOKKOS "KISS" CACHE STRING "FFT library for Kokkos-enabled KSPACE package")
+  set(FFT_KOKKOS_VALUES KISS FFTW3 MKL NVPL HIPFFT CUFFT MKL_GPU)
+  set_property(CACHE FFT_KOKKOS PROPERTY STRINGS ${FFT_KOKKOS_VALUES})
+  validate_option(FFT_KOKKOS FFT_KOKKOS_VALUES)
+  string(TOUPPER ${FFT_KOKKOS} FFT_KOKKOS)
+
   if(Kokkos_ENABLE_CUDA)
-    if(NOT (FFT STREQUAL "KISS"))
-      target_compile_definitions(lammps PRIVATE -DFFT_CUFFT)
-      target_link_libraries(lammps PRIVATE cufft)
+    if(NOT ((FFT_KOKKOS STREQUAL "KISS") OR (FFT_KOKKOS STREQUAL "CUFFT")))
+      message(FATAL_ERROR "The CUDA backend of Kokkos requires either KISS FFT or CUFFT.")
+    elseif(FFT_KOKKOS STREQUAL "KISS")
+      message(WARNING "Using KISS FFT with the CUDA backend of Kokkos may be sub-optimal.")
+    elseif(FFT_KOKKOS STREQUAL "CUFFT")
+      find_package(CUDAToolkit REQUIRED)
+      target_link_libraries(lammps PRIVATE CUDA::cufft)
     endif()
   elseif(Kokkos_ENABLE_HIP)
-    if(NOT (FFT STREQUAL "KISS"))
-      target_compile_definitions(lammps PRIVATE -DFFT_HIPFFT)
-      target_link_libraries(lammps PRIVATE hipfft)
+    if(NOT ((FFT_KOKKOS STREQUAL "KISS") OR (FFT_KOKKOS STREQUAL "HIPFFT")))
+      message(FATAL_ERROR "The HIP backend of Kokkos requires either KISS FFT or HIPFFT.")
+    elseif(FFT_KOKKOS STREQUAL "KISS")
+      message(WARNING "Using KISS FFT with the HIP backend of Kokkos may be sub-optimal.")
+      target_compile_definitions(lammps PRIVATE -DFFT_KOKKOS_KISS)
+    elseif(FFT_KOKKOS STREQUAL "HIPFFT")
+      include(DetectHIPInstallation)
+      find_package(hipfft REQUIRED)
+      target_link_libraries(lammps PRIVATE hip::hipfft)
+    endif()
+  elseif(FFT_KOKKOS STREQUAL "MKL_GPU")
+    if(NOT Kokkos_ENABLE_SYCL)
+      message(FATAL_ERROR "Using MKL_GPU FFT currently requires the SYCL backend of Kokkos.")
+    endif()
+    find_package(MKL REQUIRED)
+    target_link_libraries(lammps PRIVATE mkl_sycl_dft mkl_intel_ilp64 mkl_tbb_thread mkl_core tbb)
+  elseif(FFT_KOKKOS STREQUAL "MKL")
+    find_package(MKL REQUIRED)
+  elseif(FFT_KOKKOS STREQUAL "NVPL")
+      find_package(nvpl_fft REQUIRED)
+      target_link_libraries(lammps PRIVATE nvpl::fftw)
+  endif()
+  target_compile_definitions(lammps PRIVATE -DFFT_KOKKOS_${FFT_KOKKOS})
+  if((FFT_KOKKOS STREQUAL "FFTW3") OR (FFT_KOKKOS STREQUAL "NVPL"))
+    if(FFT_FFTW_THREADS)
+      target_compile_definitions(lammps PRIVATE -DFFT_KOKKOS_FFTW_THREADS)
     endif()
   endif()
 endif()
 
 if(PKG_ML-IAP)
+  if(NOT (KOKKOS_PREC STREQUAL "DOUBLE"))
+    message(FATAL_ERROR "Must use KOKKOS_PREC=double with package ML-IAP")
+  endif()
+
+  if(NOT (KOKKOS_LAYOUT STREQUAL "LEGACY"))
+    message(FATAL_ERROR "Must use KOKKOS_LAYOUT=legacy with package ML-IAP")
+  endif()
+
   list(APPEND KOKKOS_PKG_SOURCES ${KOKKOS_PKG_SOURCES_DIR}/mliap_data_kokkos.cpp
                                  ${KOKKOS_PKG_SOURCES_DIR}/mliap_descriptor_so3_kokkos.cpp
                                  ${KOKKOS_PKG_SOURCES_DIR}/mliap_model_linear_kokkos.cpp
+                                 ${KOKKOS_PKG_SOURCES_DIR}/mliap_model_python_kokkos.cpp
+                                 ${KOKKOS_PKG_SOURCES_DIR}/mliap_unified_kokkos.cpp
                                  ${KOKKOS_PKG_SOURCES_DIR}/mliap_so3_kokkos.cpp)
+
+  # Add KOKKOS version of ML-IAP Python coupling if non-KOKKOS version is included
+  if(MLIAP_ENABLE_PYTHON AND Cythonize_EXECUTABLE)
+    file(GLOB MLIAP_KOKKOS_CYTHON_SRC CONFIGURE_DEPENDS ${LAMMPS_SOURCE_DIR}/KOKKOS/*.pyx)
+    foreach(MLIAP_CYTHON_FILE ${MLIAP_KOKKOS_CYTHON_SRC})
+      get_filename_component(MLIAP_CYTHON_BASE ${MLIAP_CYTHON_FILE} NAME_WE)
+      add_custom_command(OUTPUT  ${MLIAP_BINARY_DIR}/${MLIAP_CYTHON_BASE}.cpp ${MLIAP_BINARY_DIR}/${MLIAP_CYTHON_BASE}.h
+              COMMAND            ${CMAKE_COMMAND} -E copy_if_different ${MLIAP_CYTHON_FILE} ${MLIAP_BINARY_DIR}/${MLIAP_CYTHON_BASE}.pyx
+              COMMAND            ${Cythonize_EXECUTABLE} -3 ${MLIAP_BINARY_DIR}/${MLIAP_CYTHON_BASE}.pyx
+              WORKING_DIRECTORY  ${MLIAP_BINARY_DIR}
+              MAIN_DEPENDENCY    ${MLIAP_CYTHON_FILE}
+              COMMENT "Generating C++ sources with cythonize...")
+      list(APPEND KOKKOS_PKG_SOURCES ${MLIAP_BINARY_DIR}/${MLIAP_CYTHON_BASE}.cpp)
+    endforeach()
+  endif()
 endif()
 
 if(PKG_PHONON)

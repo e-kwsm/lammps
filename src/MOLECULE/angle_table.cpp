@@ -38,12 +38,12 @@ using MathConst::RAD2DEG;
 
 enum { LINEAR, SPLINE };
 
-#define SMALL 0.001
-#define TINY 1.E-10
+static constexpr double SMALL = 0.001;
+static constexpr double TINY = 1.E-10;
 
 /* ---------------------------------------------------------------------- */
 
-AngleTable::AngleTable(LAMMPS *_lmp) : Angle(_lmp)
+AngleTable::AngleTable(LAMMPS *_lmp) : Angle(_lmp), theta0(nullptr), tabindex(nullptr)
 {
   writedata = 0;
   ntables = 0;
@@ -185,17 +185,17 @@ void AngleTable::allocate()
 
 void AngleTable::settings(int narg, char **arg)
 {
-  if (narg != 2) error->all(FLERR, "Illegal angle_style command");
+  if (narg != 2) error->all(FLERR, "Illegal angle_style command: must have 2 arguments");
 
   if (strcmp(arg[0], "linear") == 0)
     tabstyle = LINEAR;
   else if (strcmp(arg[0], "spline") == 0)
     tabstyle = SPLINE;
   else
-    error->all(FLERR, "Unknown table style in angle style table");
+    error->all(FLERR, "Unknown table style {} in angle style table", arg[0]);
 
   tablength = utils::inumeric(FLERR, arg[1], false, lmp);
-  if (tablength < 2) error->all(FLERR, "Illegal number of angle table entries");
+  if (tablength < 2) error->all(FLERR, "Illegal number of angle table entries: {}", arg[1]);
 
   // delete old tables, since cannot just change settings
 
@@ -218,7 +218,7 @@ void AngleTable::settings(int narg, char **arg)
 
 void AngleTable::coeff(int narg, char **arg)
 {
-  if (narg != 3) error->all(FLERR, "Illegal angle_coeff command");
+  if (narg != 3) error->all(FLERR, "Illegal angle_coeff command: must have 3 arguments");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -234,7 +234,7 @@ void AngleTable::coeff(int narg, char **arg)
 
   // error check on table parameters
 
-  if (tb->ninput <= 1) error->one(FLERR, "Invalid angle table length");
+  if (tb->ninput <= 1) error->one(FLERR, "Invalid angle table length: {}", tb->ninput);
 
   double alo, ahi;
   alo = tb->afile[0];
@@ -330,13 +330,13 @@ double AngleTable::single(int type, int i1, int i2, int i3)
   double delx1 = x[i1][0] - x[i2][0];
   double dely1 = x[i1][1] - x[i2][1];
   double delz1 = x[i1][2] - x[i2][2];
-  domain->minimum_image(delx1, dely1, delz1);
+  domain->minimum_image(FLERR, delx1, dely1, delz1);
   double r1 = sqrt(delx1 * delx1 + dely1 * dely1 + delz1 * delz1);
 
   double delx2 = x[i3][0] - x[i2][0];
   double dely2 = x[i3][1] - x[i2][1];
   double delz2 = x[i3][2] - x[i2][2];
-  domain->minimum_image(delx2, dely2, delz2);
+  domain->minimum_image(FLERR, delx2, dely2, delz2);
   double r2 = sqrt(delx2 * delx2 + dely2 * dely2 + delz2 * delz2);
 
   double c = delx1 * delx2 + dely1 * dely2 + delz1 * delz2;
@@ -389,7 +389,7 @@ void AngleTable::read_table(Table *tb, char *file, char *keyword)
 
   char *line = reader.find_section_start(keyword);
 
-  if (!line) { error->one(FLERR, "Did not find keyword in table file"); }
+  if (!line) error->one(FLERR, "Did not find keyword {} in table file", keyword);
 
   // read args on 2nd line of section
   // allocate table arrays for file values
@@ -405,6 +405,9 @@ void AngleTable::read_table(Table *tb, char *file, char *keyword)
   reader.skip_line();
   for (int i = 0; i < tb->ninput; i++) {
     line = reader.next_line();
+    if (!line)
+      error->one(FLERR, "Data missing when parsing angle table '{}' line {} of {}.", keyword, i + 1,
+                 tb->ninput);
     try {
       ValueTokenizer values(line);
       values.next_int();
@@ -520,7 +523,7 @@ void AngleTable::param_extract(Table *tb, char *line)
       } else if (word == "EQ") {
         tb->theta0 = DEG2RAD * values.next_double();
       } else {
-        error->one(FLERR, "Invalid keyword in angle table parameters");
+        error->one(FLERR, "Unknown keyword {} in angle table parameters", word);
       }
     }
   } catch (TokenizerException &e) {
@@ -568,7 +571,7 @@ void AngleTable::spline(double *x, double *y, int n, double yp1, double ypn, dou
 {
   int i, k;
   double p, qn, sig, un;
-  auto u = new double[n];
+  auto *u = new double[n];
 
   if (yp1 > 0.99e300)
     y2[0] = u[0] = 0.0;

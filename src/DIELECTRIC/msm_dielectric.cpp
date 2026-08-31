@@ -20,25 +20,18 @@
 
 #include "atom.h"
 #include "atom_vec_dielectric.h"
-#include "comm.h"
 #include "domain.h"
 #include "error.h"
-#include "gridcomm.h"
+#include "grid3d.h"
 #include "math_const.h"
 #include "memory.h"
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-enum{REVERSE_RHO,REVERSE_AD,REVERSE_AD_PERATOM};
-enum{FORWARD_RHO,FORWARD_AD,FORWARD_AD_PERATOM};
 /* ---------------------------------------------------------------------- */
 
-MSMDielectric::MSMDielectric(LAMMPS *_lmp) : MSM(_lmp)
-{
-  efield = nullptr;
-  phi = nullptr;
-}
+MSMDielectric::MSMDielectric(LAMMPS *_lmp) : MSM(_lmp), efield(nullptr) {}
 
 /* ----------------------------------------------------------------------
    free all memory
@@ -47,7 +40,6 @@ MSMDielectric::MSMDielectric(LAMMPS *_lmp) : MSM(_lmp)
 MSMDielectric::~MSMDielectric()
 {
   memory->destroy(efield);
-  memory->destroy(phi);
 }
 
 /* ----------------------------------------------------------------------
@@ -130,7 +122,7 @@ void MSMDielectric::compute(int eflag, int vflag)
   // to fully sum contribution in their 3d grid
 
   current_level = 0;
-  gcall->reverse_comm(GridComm::KSPACE,this,1,sizeof(double),REVERSE_RHO,
+  gcall->reverse_comm(Grid3d::KSPACE,this,REVERSE_RHO,1,sizeof(double),
                       gcall_buf1,gcall_buf2,MPI_DOUBLE);
 
   // forward communicate charge density values to fill ghost grid points
@@ -139,7 +131,7 @@ void MSMDielectric::compute(int eflag, int vflag)
   for (int n=0; n<=levels-2; n++) {
     if (!active_flag[n]) continue;
     current_level = n;
-    gc[n]->forward_comm(GridComm::KSPACE,this,1,sizeof(double),FORWARD_RHO,
+    gc[n]->forward_comm(Grid3d::KSPACE,this,FORWARD_RHO,1,sizeof(double),
                         gc_buf1[n],gc_buf2[n],MPI_DOUBLE);
     direct(n);
     restriction(n);
@@ -152,15 +144,15 @@ void MSMDielectric::compute(int eflag, int vflag)
     if (domain->nonperiodic) {
       current_level = levels-1;
       gc[levels-1]->
-        forward_comm(GridComm::KSPACE,this,1,sizeof(double),FORWARD_RHO,
+        forward_comm(Grid3d::KSPACE,this,FORWARD_RHO,1,sizeof(double),
                      gc_buf1[levels-1],gc_buf2[levels-1],MPI_DOUBLE);
       direct_top(levels-1);
       gc[levels-1]->
-        reverse_comm(GridComm::KSPACE,this,1,sizeof(double),REVERSE_AD,
+        reverse_comm(Grid3d::KSPACE,this,REVERSE_AD,1,sizeof(double),
                      gc_buf1[levels-1],gc_buf2[levels-1],MPI_DOUBLE);
       if (vflag_atom)
         gc[levels-1]->
-          reverse_comm(GridComm::KSPACE,this,6,sizeof(double),REVERSE_AD_PERATOM,
+          reverse_comm(Grid3d::KSPACE,this,REVERSE_AD_PERATOM,6,sizeof(double),
                        gc_buf1[levels-1],gc_buf2[levels-1],MPI_DOUBLE);
 
     } else {
@@ -171,7 +163,7 @@ void MSMDielectric::compute(int eflag, int vflag)
       current_level = levels-1;
       if (vflag_atom)
         gc[levels-1]->
-          reverse_comm(GridComm::KSPACE,this,6,sizeof(double),REVERSE_AD_PERATOM,
+          reverse_comm(Grid3d::KSPACE,this,REVERSE_AD_PERATOM,6,sizeof(double),
                        gc_buf1[levels-1],gc_buf2[levels-1],MPI_DOUBLE);
     }
   }
@@ -184,27 +176,27 @@ void MSMDielectric::compute(int eflag, int vflag)
     prolongation(n);
 
     current_level = n;
-    gc[n]->reverse_comm(GridComm::KSPACE,this,1,sizeof(double),REVERSE_AD,
+    gc[n]->reverse_comm(Grid3d::KSPACE,this,REVERSE_AD,1,sizeof(double),
                         gc_buf1[n],gc_buf2[n],MPI_DOUBLE);
 
     // extra per-atom virial communication
 
     if (vflag_atom)
-      gc[n]->reverse_comm(GridComm::KSPACE,this,6,sizeof(double),
-                          REVERSE_AD_PERATOM,gc_buf1[n],gc_buf2[n],MPI_DOUBLE);
+      gc[n]->reverse_comm(Grid3d::KSPACE,this,REVERSE_AD_PERATOM,6,sizeof(double),
+                          gc_buf1[n],gc_buf2[n],MPI_DOUBLE);
   }
 
   // all procs communicate E-field values
   // to fill ghost cells surrounding their 3d bricks
 
   current_level = 0;
-  gcall->forward_comm(GridComm::KSPACE,this,1,sizeof(double),FORWARD_AD,
+  gcall->forward_comm(Grid3d::KSPACE,this,FORWARD_AD,1,sizeof(double),
                       gcall_buf1,gcall_buf2,MPI_DOUBLE);
 
   // extra per-atom energy/virial communication
 
   if (vflag_atom)
-    gcall->forward_comm(GridComm::KSPACE,this,6,sizeof(double),FORWARD_AD_PERATOM,
+    gcall->forward_comm(Grid3d::KSPACE,this,FORWARD_AD_PERATOM,6,sizeof(double),
                         gcall_buf1,gcall_buf2,MPI_DOUBLE);
 
   // calculate the force on my particles (interpolation)
@@ -246,7 +238,7 @@ void MSMDielectric::compute(int eflag, int vflag)
   // energy includes self-energy correction
 
   if (evflag_atom) {
-    double *q = atom->q;
+    double *q = atom->q_scaled;
     int nlocal = atom->nlocal;
 
     if (eflag_atom) {
@@ -277,7 +269,7 @@ void MSMDielectric::fieldforce()
 
   int i,l,m,n,nx,ny,nz,mx,my,mz;
   double dx,dy,dz;
-  double phi_x,phi_y,phi_z,u;
+  double phi_x,phi_y,phi_z;
   double dphi_x,dphi_y,dphi_z;
   double ekx,eky,ekz,etmp;
 
@@ -288,7 +280,7 @@ void MSMDielectric::fieldforce()
   // (mx,my,mz) = global coords of moving stencil pt
   // ek = 3 components of E-field on particle
 
-  double *q = atom->q;
+  double *q = atom->q_scaled;
   double **x = atom->x;
   double **f = atom->f;
   double *eps = atom->epsilon;
@@ -304,7 +296,7 @@ void MSMDielectric::fieldforce()
 
     compute_phis_and_dphis(dx,dy,dz);
 
-    u = ekx = eky = ekz = 0.0;
+    ekx = eky = ekz = 0.0;
     for (n = nlower; n <= nupper; n++) {
       mz = n+nz;
       phi_z = phi1d[2][n];
@@ -318,7 +310,6 @@ void MSMDielectric::fieldforce()
           phi_x = phi1d[0][l];
           dphi_x = dphi1d[0][l];
           etmp = egridn[mz][my][mx];
-          u += phi_z*phi_y*phi_x*etmp;
           ekx += dphi_x*phi_y*phi_z*etmp;
           eky += phi_x*dphi_y*phi_z*etmp;
           ekz += phi_x*phi_y*dphi_z*etmp;
@@ -329,10 +320,6 @@ void MSMDielectric::fieldforce()
     ekx *= delxinv[0];
     eky *= delyinv[0];
     ekz *= delzinv[0];
-
-    // electrical potential
-
-    phi[i] = u;
 
     // effectively divide by length for a triclinic system
 
@@ -358,4 +345,13 @@ void MSMDielectric::fieldforce()
     f[i][1] += qfactor*eky;
     f[i][2] += qfactor*ekz;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+
+double MSMDielectric::memory_usage()
+{
+  double bytes = MSM::memory_usage();
+  bytes += (double) nmax * 3 * sizeof(double);    // efield[nmax][3]
+  return bytes;
 }

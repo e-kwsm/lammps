@@ -32,7 +32,7 @@
 #include "molfile_interface.h"
 
 using namespace LAMMPS_NS;
-typedef MolfileInterface MFI;
+using MFI = MolfileInterface;
 
 // syntax:
 // dump <id> <groupid> molfile <every> <filename> <type> [<path>]
@@ -182,7 +182,7 @@ void DumpMolfile::write()
     cell[0] = domain->xprd;
     cell[1] = domain->yprd;
     cell[2] = domain->zprd;
-    cell[3] = cell[4] = cell[5] = 90.0f;
+    cell[3] = cell[4] = cell[5] = 90.0F;
   }
 
   // nme = # of dump lines this proc will contribute to dump
@@ -212,7 +212,7 @@ void DumpMolfile::write()
 
   if (multifile) openfile();
 
-  // insure proc 0 can receive everyone's info
+  // ensure proc 0 can receive everyone's info
   // limit nmax*size_one to int since used as arg in MPI_Rsend() below
   // pack my data into buf
   // if sorting on IDs also request ID list from pack()
@@ -234,7 +234,8 @@ void DumpMolfile::write()
   pack(ids);
   sort();
 
-  int tmp,nlines;
+  int nlines;
+  int tmp = 0;
 
   if (me == 0) {
     MPI_Status status;

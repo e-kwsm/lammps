@@ -33,11 +33,13 @@ class DihedralHelix : public Dihedral {
   void write_restart(FILE *) override;
   void read_restart(FILE *) override;
   void write_data(FILE *) override;
+  void born_matrix(int, int, int, int, int, double &, double &) override;
+  void *extract(const char *, int &) override;
 
  protected:
   double *aphi, *bphi, *cphi;
 
-  void allocate();
+  virtual void allocate();
 };
 
 }    // namespace LAMMPS_NS

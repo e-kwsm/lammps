@@ -3,6 +3,8 @@
 #ifndef COLVARPROXY_VOLMAPS_H
 #define COLVARPROXY_VOLMAPS_H
 
+#include "colvarmodule.h"
+
 
 /// \brief Container of grid-based objects
 class colvarproxy_volmaps {
@@ -18,8 +20,8 @@ public:
   /// Clear volumetric map data
   int reset();
 
-  /// \brief Whether this implementation has capability to use volumetric maps
-  virtual int volmaps_available();
+  /// Test whether this implementation can use volumetric maps as CVs
+  virtual int check_volmaps_available();
 
   /// Create a slot for a volumetric map not requested yet
   int add_volmap_slot(int volmap_id);
@@ -75,16 +77,15 @@ public:
   }
 
   /// Re-weigh an atomic field (e.g. a colvar) by the value of a volumetric map
+
   /// \param flags Combination of flags
   /// \param volmap_id Numeric index of the map (no need to request it)
-  /// \param atom_begin Iterator pointing to first atom
-  /// \param atom_end Iterator pointing past the last atom
+  /// \param ag Pointer to the SOA atom group
   /// \param value Pointer to location of total to increment
   /// \param atom_field Array of atomic field values (if NULL, ones are used)
   virtual int compute_volmap(int flags,
                              int volmap_id,
-                             cvm::atom_iter atom_begin,
-                             cvm::atom_iter atom_end,
+                             cvm::atom_group* ag,
                              cvm::real *value,
                              cvm::real *atom_field);
 
@@ -108,7 +109,7 @@ protected:
 
   /// \brief Keep track of how many times each vol map is used by a
   /// separate colvar object
-  std::vector<size_t>       volmaps_ncopies;
+  std::vector<size_t>       volmaps_refcount;
 
   /// \brief Current values of the vol maps
   std::vector<cvm::real>    volmaps_values;

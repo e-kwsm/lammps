@@ -1,13 +1,11 @@
 Howto discussions
 *****************
 
-These doc pages describe how to perform various tasks with LAMMPS,
-both for users and developers.  The
-`glossary <https://www.lammps.org/glossary.html>`_ website page also lists MD
-terminology with links to corresponding LAMMPS manual pages.  The
-example input scripts included in the examples directory of the LAMMPS
-distribution and highlighted on the :doc:`Examples <Examples>` doc page
-also show how to setup and run various kinds of simulations.
+These doc pages describe how to perform various tasks with LAMMPS, both
+for users and developers.  The example input scripts included in the
+``examples`` directory of the LAMMPS source code distribution and
+highlighted on the :doc:`Examples` page also show how to set up and run
+various kinds of simulations.
 
 General howto
 =============
@@ -23,8 +21,6 @@ General howto
    Howto_library
    Howto_couple
    Howto_mdi
-   Howto_bpm
-   Howto_broken_bonds
 
 Settings howto
 ==============
@@ -41,6 +37,8 @@ Settings howto
    Howto_walls
    Howto_nemd
    Howto_dispersion
+   Howto_bulk2slab
+   Howto_broken_bonds
 
 Analysis howto
 ==============
@@ -50,13 +48,14 @@ Analysis howto
    :maxdepth: 1
 
    Howto_output
+   Howto_structured_data
    Howto_chunk
+   Howto_grid
    Howto_temperature
    Howto_elastic
    Howto_kappa
    Howto_viscosity
    Howto_diffusion
-   Howto_structured_data
 
 Force fields howto
 ==================
@@ -65,11 +64,15 @@ Force fields howto
    :name: force_howto
    :maxdepth: 1
 
+   Howto_FFgeneral
    Howto_bioFF
+   Howto_amber2lammps
    Howto_amoeba
    Howto_tip3p
    Howto_tip4p
+   Howto_tip5p
    Howto_spc
+   Howto_eam_overlay
 
 Packages howto
 ==============
@@ -80,14 +83,20 @@ Packages howto
 
    Howto_spherical
    Howto_granular
+   Howto_granular_surfaces
    Howto_body
+   Howto_bpm
    Howto_polarizable
    Howto_coreshell
    Howto_drude
    Howto_drude2
    Howto_peri
    Howto_manifold
+   Howto_rheo
    Howto_spins
+   Howto_apip
+   Howto_ldd
+   Howto_fenix
 
 Tutorials howto
 ===============
@@ -98,6 +107,7 @@ Tutorials howto
 
    Howto_cmake
    Howto_github
-   Howto_pylammps
+   Howto_lammps_gui
+   Howto_moltemplate
+   Howto_python
    Howto_wsl
-

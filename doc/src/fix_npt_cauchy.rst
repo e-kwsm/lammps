@@ -6,7 +6,7 @@ fix npt/cauchy command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID style_name keyword value ...
 
@@ -311,7 +311,7 @@ flipping the box when it is exceeded.  If the *flip* value is set to
 applied stress induces large deformations (e.g. in a liquid), this
 means the box shape can tilt dramatically and LAMMPS will run less
 efficiently, due to the large volume of communication needed to
-acquire ghost atoms around a processor's irregular-shaped sub-domain.
+acquire ghost atoms around a processor's irregular-shaped subdomain.
 For extreme values of tilt, LAMMPS may also lose atoms and generate an
 error.
 
@@ -426,8 +426,8 @@ according to the following factorization of the Liouville propagator
 .. math::
 
    \exp \left(\mathrm{i} L \Delta t \right) = & \hat{E}
-   \exp \left(\mathrm{i} L_{\rm T\textrm{-}baro} \frac{\Delta t}{2} \right)
-   \exp \left(\mathrm{i} L_{\rm T\textrm{-}part} \frac{\Delta t}{2} \right)
+   \exp \left(\mathrm{i} L_\mathrm{T\textrm{-}baro} \frac{\Delta t}{2} \right)
+   \exp \left(\mathrm{i} L_\mathrm{T\textrm{-}part} \frac{\Delta t}{2} \right)
    \exp \left(\mathrm{i} L_{\epsilon , 2} \frac{\Delta t}{2} \right)
    \exp \left(\mathrm{i} L_{2}^{(2)} \frac{\Delta t}{2} \right) \\
    &\times \left[
@@ -440,8 +440,8 @@ according to the following factorization of the Liouville propagator
    &\times
    \exp \left(\mathrm{i} L_{2}^{(2)} \frac{\Delta t}{2} \right)
    \exp \left(\mathrm{i} L_{\epsilon , 2} \frac{\Delta t}{2} \right)
-   \exp \left(\mathrm{i} L_{\rm T\textrm{-}part} \frac{\Delta t}{2} \right)
-   \exp \left(\mathrm{i} L_{\rm T\textrm{-}baro} \frac{\Delta t}{2} \right) \\
+   \exp \left(\mathrm{i} L_\mathrm{T\textrm{-}part} \frac{\Delta t}{2} \right)
+   \exp \left(\mathrm{i} L_\mathrm{T\textrm{-}baro} \frac{\Delta t}{2} \right) \\
    &+ \mathcal{O} \left(\Delta t^3 \right)
 
 This factorization differs somewhat from that of Tuckerman et al, in
@@ -647,5 +647,5 @@ Martyna, J Phys A: Math Gen, 39, 5629 (2006).
 
 .. _nc-Miller:
 
-**(Miller)** Miller, Tadmor, Gibson, Bernstein and Pavia, J Chem Phys,
+**(Miller2)** Miller, Tadmor, Gibson, Bernstein and Pavia, J Chem Phys,
 144, 184107 (2016).

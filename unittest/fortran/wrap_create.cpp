@@ -17,18 +17,24 @@ void f_lammps_close();
 int f_lammps_get_comm();
 }
 
+// C wrapper to split MPI communicator w/o requiring a Fortran MPI lib
+extern "C" int create_mpi_comm_split(int color, int key)
+{
+    MPI_Comm c_newcomm = MPI_COMM_NULL;
+    MPI_Comm_split(MPI_COMM_WORLD, color, key, &c_newcomm);
+    return MPI_Comm_c2f(c_newcomm);
+}
+
 TEST(open_no_mpi, no_args)
 {
     ::testing::internal::CaptureStdout();
     int mpi_init = 0;
     MPI_Initialized(&mpi_init);
-    EXPECT_EQ(mpi_init, 0);
+    EXPECT_EQ(mpi_init, 1);
     void *handle       = f_lammps_no_mpi_no_args();
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_STREQ(output.substr(0, 6).c_str(), "LAMMPS");
-    LAMMPS_NS::LAMMPS *lmp = (LAMMPS_NS::LAMMPS *)handle;
-    MPI_Initialized(&mpi_init);
-    EXPECT_NE(mpi_init, 0);
+    auto *lmp = (LAMMPS_NS::LAMMPS *)handle;
     EXPECT_EQ(lmp->world, MPI_COMM_WORLD);
     EXPECT_EQ(lmp->infile, stdin);
     EXPECT_EQ(lmp->screen, stdout);
@@ -45,7 +51,7 @@ TEST(open_no_mpi, with_args)
     void *handle       = f_lammps_no_mpi_with_args();
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_STREQ(output.substr(0, 6).c_str(), "LAMMPS");
-    LAMMPS_NS::LAMMPS *lmp = (LAMMPS_NS::LAMMPS *)handle;
+    auto *lmp = (LAMMPS_NS::LAMMPS *)handle;
     EXPECT_EQ(lmp->infile, stdin);
     EXPECT_EQ(lmp->screen, stdout);
     EXPECT_EQ(lmp->logfile, nullptr);
@@ -64,10 +70,10 @@ TEST(fortran_open, no_args)
     void *handle       = f_lammps_open_no_args();
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_STREQ(output.substr(0, 6).c_str(), "LAMMPS");
-    LAMMPS_NS::LAMMPS *lmp = (LAMMPS_NS::LAMMPS *)handle;
+    auto *lmp = (LAMMPS_NS::LAMMPS *)handle;
 
-    int f_comm      = f_lammps_get_comm();
-    MPI_Comm mycomm = MPI_Comm_f2c(f_comm);
+    int f_comm  = f_lammps_get_comm();
+    auto mycomm = MPI_Comm_f2c(f_comm);
     EXPECT_EQ(lmp->world, mycomm);
     EXPECT_EQ(lmp->infile, stdin);
     EXPECT_EQ(lmp->screen, stdout);
@@ -84,10 +90,10 @@ TEST(fortran_open, with_args)
     void *handle       = f_lammps_open_with_args();
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_STREQ(output.substr(0, 6).c_str(), "LAMMPS");
-    LAMMPS_NS::LAMMPS *lmp = (LAMMPS_NS::LAMMPS *)handle;
+    auto *lmp = (LAMMPS_NS::LAMMPS *)handle;
 
-    int f_comm      = f_lammps_get_comm();
-    MPI_Comm mycomm = MPI_Comm_f2c(f_comm);
+    int f_comm  = f_lammps_get_comm();
+    auto mycomm = MPI_Comm_f2c(f_comm);
     EXPECT_EQ(lmp->world, mycomm);
     EXPECT_EQ(lmp->infile, stdin);
     EXPECT_EQ(lmp->screen, stdout);

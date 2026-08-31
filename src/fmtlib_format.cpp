@@ -6,6 +6,11 @@
 //
 // For the license information refer to format.h.
 
+#if __has_include(<version>)
+#include <version>
+#endif
+#if !defined(__cpp_lib_format) || (__cpp_lib_format < 201907L)
+
 #include "fmt/format-inl.h"
 
 FMT_BEGIN_NAMESPACE
@@ -29,12 +34,8 @@ template FMT_API auto decimal_point_impl(locale_ref) -> char;
 
 template FMT_API void buffer<char>::append(const char*, const char*);
 
-// DEPRECATED!
-// There is no correspondent extern template in format.h because of
-// incompatibility between clang and gcc (#2377).
 template FMT_API void vformat_to(buffer<char>&, string_view,
-                                 basic_format_args<FMT_BUFFER_CONTEXT(char)>,
-                                 locale_ref);
+                                 typename vformat_args<>::type, locale_ref);
 
 // Explicit instantiations for wchar_t.
 
@@ -46,3 +47,4 @@ template FMT_API void buffer<wchar_t>::append(const wchar_t*, const wchar_t*);
 
 }  // namespace detail
 FMT_END_NAMESPACE
+#endif // (__cplusplus < 202002L)

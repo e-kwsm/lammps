@@ -13,17 +13,19 @@
 ------------------------------------------------------------------------- */
 
 #include "fix_wall_piston.h"
+
+#include "atom.h"
+#include "comm.h"
+#include "domain.h"
+#include "error.h"
+#include "force.h"
+#include "lattice.h"
+#include "math_const.h"
+#include "random_mars.h"
+#include "update.h"
+
 #include <cmath>
 #include <cstring>
-#include "atom.h"
-#include "domain.h"
-#include "lattice.h"
-#include "update.h"
-#include "error.h"
-#include "random_mars.h"
-#include "force.h"
-#include "comm.h"
-#include "math_const.h"
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
@@ -37,10 +39,8 @@ FixWallPiston::FixWallPiston(LAMMPS *lmp, int narg, char **arg) :
   force_reneighbor = 1;
   next_reneighbor = -1;
 
-  if (narg < 4) error->all(FLERR,"Illegal fix wall/piston command");
+  if (narg < 4) utils::missing_cmd_args(FLERR,"fix wall/piston", error);
 
-  randomt = nullptr;
-  gfactor1 = gfactor2 = nullptr;
   tempflag = 0;
   scaleflag = 1;
   roughflag = 0;
@@ -90,6 +90,9 @@ FixWallPiston::FixWallPiston(LAMMPS *lmp, int narg, char **arg) :
       if (t_period <= 0) error->all(FLERR,"Illegal fix wall/piston command");
       if (t_extent <= 0) error->all(FLERR,"Illegal fix wall/piston command");
       if (tseed <= 0) error->all(FLERR,"Illegal fix wall/piston command");
+      delete randomt;
+      delete[] gfactor1;
+      delete[] gfactor2;
       randomt = new RanMars(lmp,tseed + comm->me);
       gfactor1 = new double[atom->ntypes+1];
       gfactor2 = new double[atom->ntypes+1];
@@ -180,7 +183,7 @@ void FixWallPiston::initial_integrate(int /*vflag*/)
 
 void FixWallPiston::post_integrate()
 {
-  double zlo;
+  double zlo = z0;
 
   double **x = atom->x;
   double **v = atom->v;
@@ -226,25 +229,25 @@ void FixWallPiston::post_integrate()
     paccelz = maxvz / tott;
 
     if (zloflag) {
-      zlo = z0 + paccelz*tott*tott/2.5 * (t2p5 );
-      vz =  paccelz * tott * (t1p5 );
+      zlo = z0 + paccelz*tott*tott/2.5 * t2p5;
+      vz =  paccelz * tott * t1p5;
     } else error->all(FLERR, "NL ramp in wall/piston only implemented in zlo for now");
   } else if (rampNL4flag) {
     paccelz = maxvz / tott;
 
     if (zloflag) {
-      zlo = z0 + paccelz/tott/3.0 * (ttt);
-      vz =  paccelz / tott * (tt);
+      zlo = z0 + paccelz/tott/3.0 * ttt;
+      vz =  paccelz / tott * tt;
     } else error->all(FLERR, "NL ramp in wall/piston only implemented in zlo for now");
   } else if (rampNL5flag) {
     paccelz = maxvz / tott;
 
     if (zloflag) {
-      zlo = z0 + paccelz/tott/tott/4.0 * (tttt);
-      vz =  paccelz / tott / tott * (ttt);
+      zlo = z0 + paccelz/tott/tott/4.0 * tttt;
+      vz =  paccelz / tott / tott * ttt;
     } else error->all(FLERR, "NL ramp in wall/piston only implemented in zlo for now");
   } else {
-    if (zloflag) { zlo = z0 + vz * t; }
+    if (zloflag) zlo = z0 + vz * t;
   }
 
   if ((update->ntimestep % 1000 == 0) && (comm->me == 0))

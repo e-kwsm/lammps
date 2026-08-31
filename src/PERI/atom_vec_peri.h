@@ -24,7 +24,7 @@ AtomStyle(peri,AtomVecPeri);
 
 namespace LAMMPS_NS {
 
-class AtomVecPeri : public AtomVec {
+class AtomVecPeri : virtual public AtomVec {
  public:
   AtomVecPeri(class LAMMPS *);
 
@@ -35,7 +35,7 @@ class AtomVecPeri : public AtomVec {
   void pack_property_atom(int, double *, int, int) override;
 
  private:
-  double *rmass, *vfrac, *s0;
+  double *rmass, *vfrac, *s0, *smin;
   double **x0;
 };
 

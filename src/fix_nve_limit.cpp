@@ -30,7 +30,7 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 FixNVELimit::FixNVELimit(LAMMPS *lmp, int narg, char **arg) :
-  Fix(lmp, narg, arg)
+    Fix(lmp, narg, arg), step_respa(nullptr)
 {
   if (narg != 4) utils::missing_cmd_args(FLERR, "fix nve/limit", error);
 
@@ -71,12 +71,10 @@ void FixNVELimit::init()
 
   // warn if using fix shake, which will lead to invalid constraint forces
 
-  for (int i = 0; i < modify->nfix; i++)
-    if (utils::strmatch(modify->fix[i]->style,"^shake")
-        || utils::strmatch(modify->fix[i]->style,"^rattle")) {
-      if (comm->me == 0)
-        error->warning(FLERR,"Should not use fix nve/limit with fix shake or fix rattle");
-    }
+  if ((comm->me == 0) && ((!modify->get_fix_by_style("^shake").empty()) ||
+                          (!modify->get_fix_by_style("^rattle").empty()) ||
+                          (!modify->get_fix_by_style("^ilves").empty())))
+        error->warning(FLERR,"Should not use fix nve/limit with fix shake, rattle or ilves");
 }
 
 /* ----------------------------------------------------------------------

@@ -10,7 +10,7 @@ Syntax
 
    angle_style style
 
-* style = *none* or *zero* or *hybrid* or *amoeba* or *charmm* or *class2* or *class2/p6* or *cosine* or *cosine/buck6d* or *cosine/delta* or *cosine/periodic* or *cosine/shift* or *cosine/shift/exp* or *cosine/squared* or *cross* or *dipole* or *fourier* or *fourier/simple* or *gaussian* or *harmonic* or *mm3* or *quartic* or *spica* or *table*
+* style = *none* or *zero* or *hybrid* or *amoeba* or *charmm* or *class2* or *class2xe* or *class2/p6* or *cosine* or *cosine/buck6d* or *cosine/delta* or *cosine/periodic* or *cosine/shift* or *cosine/shift/exp* or *cosine/squared* or *cosine/squared/restricted* or *cross* or *dipole* or *fourier* or *fourier/simple* or *gaussian* or *harmonic* or *lepton* or *mm3* or *quartic* or *spica* or *table*
 
 Examples
 """"""""
@@ -52,7 +52,7 @@ file; angle coefficients need to be re-specified.
    exist between 3 bonded atoms.
 
 In the formulas listed for each angle style, *theta* is the angle
-between the 3 atoms in the angle.
+between the three atoms in the angle.
 
 ----------
 
@@ -76,6 +76,7 @@ of (g,i,k,o,t) to indicate which accelerated styles exist.
 * :doc:`amoeba <angle_amoeba>` - AMOEBA angle
 * :doc:`charmm <angle_charmm>` - CHARMM angle
 * :doc:`class2 <angle_class2>` - COMPASS (class 2) angle
+* :doc:`class2xe <angle_class2>` - ClassII-xe (class 2) angle
 * :doc:`class2/p6 <angle_class2>` - COMPASS (class 2) angle expanded to 6th order
 * :doc:`cosine <angle_cosine>` - angle with cosine term
 * :doc:`cosine/buck6d <angle_cosine_buck6d>` - same as cosine with Buckingham term between 1-3 atoms
@@ -84,14 +85,17 @@ of (g,i,k,o,t) to indicate which accelerated styles exist.
 * :doc:`cosine/shift <angle_cosine_shift>` - angle cosine with a shift
 * :doc:`cosine/shift/exp <angle_cosine_shift_exp>` - cosine with shift and exponential term in spring constant
 * :doc:`cosine/squared <angle_cosine_squared>` - angle with cosine squared term
+* :doc:`cosine/squared/restricted <angle_cosine_squared_restricted>` - angle with restricted cosine squared term
 * :doc:`cross <angle_cross>` - cross term coupling angle and bond lengths
 * :doc:`dipole <angle_dipole>` - angle that controls orientation of a point dipole
 * :doc:`fourier <angle_fourier>` - angle with multiple cosine terms
 * :doc:`fourier/simple <angle_fourier_simple>` - angle with a single cosine term
 * :doc:`gaussian <angle_gaussian>` - multi-centered Gaussian-based angle potential
 * :doc:`harmonic <angle_harmonic>` - harmonic angle
+* :doc:`lepton <angle_lepton>` - angle potential from evaluating a string
 * :doc:`mesocnt <angle_mesocnt>` - piecewise harmonic and linear angle for bending-buckling of nanotubes
 * :doc:`mm3 <angle_mm3>` - anharmonic angle
+* :doc:`mwlc <angle_mwlc>` - meltable wormlike chain
 * :doc:`quartic <angle_quartic>` - angle with cubic and quartic terms
 * :doc:`spica <angle_spica>` - harmonic angle with repulsive SPICA pair style between 1-3 atoms
 * :doc:`table <angle_table>` - tabulated by angle

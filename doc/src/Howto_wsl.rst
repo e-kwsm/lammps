@@ -11,12 +11,14 @@ LAMMPS in workshop settings, we had to redirect Windows users to
 Linux Virtual Machines such as VirtualBox or Unix-like compilation with
 Cygwin.
 
-With the latest updates in Windows 10 (Version 2004, Build 19041 or higher),
-Microsoft has added a new way to work on Linux-based code. The Windows
-Subsystem for Linux (WSL). With WSL Version 2, you now get a Linux Virtual
-Machine that transparently integrates into Windows. All you need is to ensure
-you have the latest Windows updates installed and enable this new feature.
-Linux VMs are then easily installed using the Microsoft Store.
+With the latest updates in Windows 10 (Version 2004, Build 19041 or
+higher), Microsoft has added a new way to work on Linux-based code. The
+`Windows Subsystem for Linux (WSL)
+<https://learn.microsoft.com/en-us/windows/wsl/>`_.  With WSL Version 2,
+you now get a Linux Virtual Machine that transparently integrates into
+Windows.  All you need is to ensure you have the latest Windows updates
+installed and enable this new feature.  Linux VMs are then easily
+installed using the Microsoft Store.
 
 In this tutorial, I'll show you how to set up and compile LAMMPS for both serial
 and MPI usage in WSL2.
@@ -143,7 +145,7 @@ steps to follow:
 Install prerequisite packages
 -----------------------------
 
-Before we can begin, we need to download the necessary compiler toolchain and
+Before we can begin, we need to download the necessary compiler tool chain and
 libraries to compile LAMMPS. In our Ubuntu-based Linux installation, we will
 use the :code:`apt` package manager to install additional packages.
 
@@ -258,7 +260,7 @@ Switch into the :code:`examples/melt` folder:
 
    cd ../examples/melt
 
-To run this example in serial, use the following command line:
+To run this example in serial, use the following command:
 
 .. code-block::
 
@@ -356,4 +358,4 @@ these skills will make you much more productive in this environment.
 
 .. seealso::
 
-   * `Windows Subsystem for Linux Documentation <https://docs.microsoft.com/en-us/windows/wsl/>`_
+   * `Windows Subsystem for Linux Documentation <https://learn.microsoft.com/en-us/windows/wsl/>`_

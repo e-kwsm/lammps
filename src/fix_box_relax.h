@@ -42,6 +42,7 @@ class FixBoxRelax : public Fix {
   int min_dof() override;
 
   int modify_param(int, char **) override;
+  double compute_scalar() override;
 
  private:
   int p_flag[6];
@@ -52,11 +53,12 @@ class FixBoxRelax : public Fix {
   double vmax, pv2e, pflagsum;
   int kspace_flag;
 
-  int current_lifo;       // LIFO stack pointer
-  double boxlo0[2][3];    // box bounds at start of line search
-  double boxhi0[2][3];
-  double boxtilt0[2][3];    // xy,xz,yz tilts at start of line search
-  double ds[6];             // increment in scale matrix
+  static constexpr int MAX_LIFO_DEPTH = 2;
+  int current_lifo;                      // LIFO stack pointer
+  double boxlo0[MAX_LIFO_DEPTH][3];      // low box bounds at start of line search
+  double boxhi0[MAX_LIFO_DEPTH][3];      // high box bounds at start of line search
+  double boxtilt0[MAX_LIFO_DEPTH][3];    // xy,xz,yz tilts at start of line search
+  double ds[6];                          // increment in scale matrix
 
   int scaleyz;    // 1 if yz scaled with lz
   int scalexz;    // 1 if xz scaled with lz
@@ -68,8 +70,7 @@ class FixBoxRelax : public Fix {
   class Compute *temperature, *pressure;
   int tflag, pflag;
 
-  int nrigid;
-  int *rfix;
+  std::vector<Fix *> rfix;
 
   double sigma[6];        // scaled target stress
   double utsigma[3];      // weighting for upper-tri elements
@@ -89,7 +90,6 @@ class FixBoxRelax : public Fix {
   void compute_deviatoric();
   double compute_strain_energy();
   void compute_press_target();
-  double compute_scalar() override;
 };
 
 }    // namespace LAMMPS_NS

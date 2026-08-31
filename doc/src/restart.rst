@@ -6,7 +6,7 @@ restart command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    restart 0
    restart N root keyword value ...
@@ -33,7 +33,6 @@ Examples
 
    restart 0
    restart 1000 poly.restart
-   restart 1000 poly.restart.mpiio
    restart 1000 restart.*.equil
    restart 10000 poly.%.1 poly.%.2 nfile 10
    restart v_mystep poly.restart
@@ -81,21 +80,6 @@ of output and subsequent input on parallel machines that support
 parallel I/O.  The optional *fileper* and *nfile* keywords discussed
 below can alter the number of files written.
 
-The restart file can also be written in parallel as one large binary
-file via the MPI-IO library, which is part of the MPI standard for
-versions 2.0 and above.  Using MPI-IO requires two steps.  First,
-build LAMMPS with its MPIIO package installed, e.g.
-
-.. code-block:: bash
-
-   make yes-mpiio    # installs the MPIIO package
-   make mpi          # build LAMMPS for your platform
-
-Second, use a restart filename which contains ".mpiio".  Note that it
-does not have to end in ".mpiio", just contain those characters.
-Unlike MPI-IO dump files, a particular restart file must be both
-written and read using MPI-IO.
-
 Restart files are written on timesteps that are a multiple of N but
 not on the first timestep of a run or minimization.  You can use the
 :doc:`write_restart <write_restart>` command to write a restart file
@@ -104,15 +88,41 @@ timestep of a run unless it is a multiple of N.  A restart file is
 written on the last timestep of a minimization if N > 0 and the
 minimization converges.
 
-Instead of a numeric value, N can be specified as an :doc:`equal-style variable <variable>`, which should be specified as v_name, where
-name is the variable name.  In this case, the variable is evaluated at
-the beginning of a run to determine the next timestep at which a
-restart file will be written out.  On that timestep, the variable will
-be evaluated again to determine the next timestep, etc.  Thus the
-variable should return timestep values.  See the stagger() and
-logfreq() and stride() math functions for :doc:`equal-style variables <variable>`, as examples of useful functions to use in
-this context.  Other similar math functions could easily be added as
-options for :doc:`equal-style variables <variable>`.
+.. admonition:: Enabling or disabling restarts may change the trajectory
+   :class: Hint
+
+   Writing a restart file forces a neighbor list rebuild on that
+   timestep, so that all atoms are correctly assigned to their owning
+   subdomains before the file is written.  This rebuild happens
+   regardless of the :doc:`neigh_modify <neigh_modify>` *every*,
+   *delay*, and *check* settings.  As a result, enabling restart output
+   can change the number of neighbor list builds reported at the end
+   of a run.  And because changing when neighbor lists are rebuilt
+   changes the order in which pairwise interactions are summed, it can
+   also lead to small differences in the trajectory (due to the
+   limitations of floating-point math) compared to an otherwise
+   identical run without restart output.
+
+   To obtain the *same* number of neighbor list builds (and thus an
+   identical trajectory) whether or not restart output is enabled, use
+   :doc:`neigh_modify <neigh_modify>` with *check* set to *no* and
+   *every* set to a value *<num>* that evenly divides the restart
+   frequency N (with the default *delay* of 0).  The neighbor lists are
+   then rebuilt on a fixed schedule that already includes every
+   restart-write step, so the forced rebuild coincides with a rebuild
+   that would have happened anyway and no extra builds are added.
+
+Instead of a numeric value, N can be specified as an :doc:`equal-style
+variable <variable>`, which should be specified as v_name, where name is
+the variable name.  In this case, the variable is evaluated at the
+beginning of a run to determine the next timestep at which a restart
+file will be written out.  On that timestep, the variable will be
+evaluated again to determine the next timestep, etc.  Thus the variable
+should return timestep values.  See the stagger() and logfreq() and
+stride() math functions for :doc:`equal-style variables <variable>`, as
+examples of useful functions to use in this context.  Other similar math
+functions could easily be added as options for :doc:`equal-style
+variables <variable>`.
 
 For example, the following commands will write restart files
 every step from 1100 to 1200, and could be useful for debugging
@@ -170,8 +180,7 @@ next 3 processors and write it to a restart file.
 Restrictions
 """"""""""""
 
-To write and read restart files in parallel with MPI-IO, the MPIIO
-package must be installed.
+none
 
 Related commands
 """"""""""""""""

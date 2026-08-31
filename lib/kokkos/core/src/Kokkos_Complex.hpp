@@ -1,46 +1,5 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 #ifndef KOKKOS_COMPLEX_HPP
 #define KOKKOS_COMPLEX_HPP
 #ifndef KOKKOS_IMPL_PUBLIC_INCLUDE
@@ -51,10 +10,12 @@
 #include <Kokkos_Atomic.hpp>
 #include <Kokkos_MathematicalFunctions.hpp>
 #include <Kokkos_NumericTraits.hpp>
+#include <Kokkos_ReductionIdentity.hpp>
 #include <impl/Kokkos_Error.hpp>
 #include <complex>
 #include <type_traits>
 #include <iosfwd>
+#include <tuple>
 
 namespace Kokkos {
 
@@ -71,6 +32,11 @@ class
     alignas(2 * sizeof(RealType))
 #endif
         complex {
+  static_assert(std::is_floating_point_v<RealType> &&
+                    std::is_same_v<RealType, std::remove_cv_t<RealType>>,
+                "Kokkos::complex can only be instantiated for a cv-unqualified "
+                "floating point type");
+
  private:
   RealType re_{};
   RealType im_{};
@@ -83,17 +49,9 @@ class
   KOKKOS_DEFAULTED_FUNCTION
   complex() = default;
 
-  //! Copy constructor.
-  KOKKOS_DEFAULTED_FUNCTION
-  complex(const complex&) noexcept = default;
-
-  KOKKOS_DEFAULTED_FUNCTION
-  complex& operator=(const complex&) noexcept = default;
-
   /// \brief Conversion constructor from compatible RType
-  template <
-      class RType,
-      std::enable_if_t<std::is_convertible<RType, RealType>::value, int> = 0>
+  template <class RType,
+            std::enable_if_t<std::is_convertible_v<RType, RealType>, int> = 0>
   KOKKOS_INLINE_FUNCTION complex(const complex<RType>& other) noexcept
       // Intentionally do the conversions implicitly here so that users don't
       // get any warnings about narrowing, etc., that they would expect to get
@@ -128,15 +86,17 @@ class
 
   /// \brief Constructor that takes just the real part, and sets the
   ///   imaginary part to zero.
-  KOKKOS_INLINE_FUNCTION complex(const RealType& val) noexcept
+  KOKKOS_INLINE_FUNCTION constexpr complex(const RealType& val) noexcept
       : re_(val), im_(static_cast<RealType>(0)) {}
 
   //! Constructor that takes the real and imaginary parts.
   KOKKOS_INLINE_FUNCTION
-  complex(const RealType& re, const RealType& im) noexcept : re_(re), im_(im) {}
+  constexpr complex(const RealType& re, const RealType& im) noexcept
+      : re_(re), im_(im) {}
 
   //! Assignment operator (from a real number).
-  KOKKOS_INLINE_FUNCTION complex& operator=(const RealType& val) noexcept {
+  KOKKOS_INLINE_FUNCTION constexpr complex& operator=(
+      const RealType& val) noexcept {
     re_ = val;
     im_ = RealType(0);
     return *this;
@@ -278,166 +238,69 @@ class
     return *this;
   }
 
-  //---------------------------------------------------------------------------
-  // TODO: refactor Kokkos reductions to remove dependency on
-  // volatile member overloads since they are being deprecated in c++20
-  //---------------------------------------------------------------------------
+  template <size_t I, typename RT>
+  friend constexpr const RT& get(const complex<RT>&) noexcept;
 
-  //! Copy constructor from volatile.
-  template <
-      class RType,
-      std::enable_if_t<std::is_convertible<RType, RealType>::value, int> = 0>
-  KOKKOS_INLINE_FUNCTION complex(const volatile complex<RType>& src) noexcept
-      // Intentionally do the conversions implicitly here so that users don't
-      // get any warnings about narrowing, etc., that they would expect to get
-      // otherwise.
-      : re_(src.re_), im_(src.im_) {}
-
-  /// \brief Assignment operator, for volatile <tt>*this</tt> and
-  ///   nonvolatile input.
-  ///
-  /// \param src [in] Input; right-hand side of the assignment.
-  ///
-  /// This operator returns \c void instead of <tt>volatile
-  /// complex& </tt>.  See Kokkos Issue #177 for the
-  /// explanation.  In practice, this means that you should not chain
-  /// assignments with volatile lvalues.
-  //
-  // Templated, so as not to be a copy assignment operator (Kokkos issue #2577)
-  // Intended to behave as
-  //    void operator=(const complex&) volatile noexcept
-  //
-  // Use cases:
-  //    complex r;
-  //    const complex cr;
-  //    volatile complex vl;
-  //    vl = r;
-  //    vl = cr;
-  template <class Complex,
-            std::enable_if_t<std::is_same<Complex, complex>::value, int> = 0>
-  KOKKOS_INLINE_FUNCTION void operator=(const Complex& src) volatile noexcept {
-    re_ = src.re_;
-    im_ = src.im_;
-    // We deliberately do not return anything here.  See explanation
-    // in public documentation above.
-  }
-
-  //! Assignment operator, volatile LHS and volatile RHS
-  // TODO Should this return void like the other volatile assignment operators?
-  //
-  // Templated, so as not to be a copy assignment operator (Kokkos issue #2577)
-  // Intended to behave as
-  //    volatile complex& operator=(const volatile complex&) volatile noexcept
-  //
-  // Use cases:
-  //    volatile complex vr;
-  //    const volatile complex cvr;
-  //    volatile complex vl;
-  //    vl = vr;
-  //    vl = cvr;
-  template <class Complex,
-            std::enable_if_t<std::is_same<Complex, complex>::value, int> = 0>
-  KOKKOS_INLINE_FUNCTION volatile complex& operator=(
-      const volatile Complex& src) volatile noexcept {
-    re_ = src.re_;
-    im_ = src.im_;
-    return *this;
-  }
-
-  //! Assignment operator, volatile RHS and non-volatile LHS
-  //
-  // Templated, so as not to be a copy assignment operator (Kokkos issue #2577)
-  // Intended to behave as
-  //    complex& operator=(const volatile complex&) noexcept
-  //
-  // Use cases:
-  //    volatile complex vr;
-  //    const volatile complex cvr;
-  //    complex l;
-  //    l = vr;
-  //    l = cvr;
-  //
-  template <class Complex,
-            std::enable_if_t<std::is_same<Complex, complex>::value, int> = 0>
-  KOKKOS_INLINE_FUNCTION complex& operator=(
-      const volatile Complex& src) noexcept {
-    re_ = src.re_;
-    im_ = src.im_;
-    return *this;
-  }
-
-  // Mirroring the behavior of the assignment operators from complex RHS in the
-  // RealType RHS versions.
-
-  //! Assignment operator (from a volatile real number).
-  KOKKOS_INLINE_FUNCTION void operator=(const volatile RealType& val) noexcept {
-    re_ = val;
-    im_ = RealType(0);
-    // We deliberately do not return anything here.  See explanation
-    // in public documentation above.
-  }
-
-  //! Assignment operator volatile LHS and non-volatile RHS
-  KOKKOS_INLINE_FUNCTION complex& operator=(
-      const RealType& val) volatile noexcept {
-    re_ = val;
-    im_ = RealType(0);
-    return *this;
-  }
-
-  //! Assignment operator volatile LHS and volatile RHS
-  // TODO Should this return void like the other volatile assignment operators?
-  KOKKOS_INLINE_FUNCTION complex& operator=(
-      const volatile RealType& val) volatile noexcept {
-    re_ = val;
-    im_ = RealType(0);
-    return *this;
-  }
-
-  //! The imaginary part of this complex number (volatile overload).
-  KOKKOS_INLINE_FUNCTION
-  volatile RealType& imag() volatile noexcept { return im_; }
-
-  //! The real part of this complex number (volatile overload).
-  KOKKOS_INLINE_FUNCTION
-  volatile RealType& real() volatile noexcept { return re_; }
-
-  //! The imaginary part of this complex number (volatile overload).
-  KOKKOS_INLINE_FUNCTION
-  RealType imag() const volatile noexcept { return im_; }
-
-  //! The real part of this complex number (volatile overload).
-  KOKKOS_INLINE_FUNCTION
-  RealType real() const volatile noexcept { return re_; }
-
-  KOKKOS_INLINE_FUNCTION void operator+=(
-      const volatile complex<RealType>& src) volatile noexcept {
-    re_ += src.re_;
-    im_ += src.im_;
-  }
-
-  KOKKOS_INLINE_FUNCTION void operator+=(
-      const volatile RealType& src) volatile noexcept {
-    re_ += src;
-  }
-
-  KOKKOS_INLINE_FUNCTION void operator*=(
-      const volatile complex<RealType>& src) volatile noexcept {
-    const RealType realPart = re_ * src.re_ - im_ * src.im_;
-    const RealType imagPart = re_ * src.im_ + im_ * src.re_;
-
-    re_ = realPart;
-    im_ = imagPart;
-  }
-
-  KOKKOS_INLINE_FUNCTION void operator*=(
-      const volatile RealType& src) volatile noexcept {
-    re_ *= src;
-    im_ *= src;
-  }
-
-  // TODO DSH 2019-10-7 why are there no volatile /= and friends?
+  template <size_t I, typename RT>
+  friend constexpr const RT&& get(const complex<RT>&&) noexcept;
 };
+
+}  // namespace Kokkos
+
+// Tuple protocol for complex based on https://wg21.link/P2819R2 (voted into
+// the C++26 working draft on 2023-11)
+
+template <typename RealType>
+struct std::tuple_size<Kokkos::complex<RealType>>
+    : std::integral_constant<size_t, 2> {};
+
+template <size_t I, typename RealType>
+struct std::tuple_element<I, Kokkos::complex<RealType>> {
+  static_assert(I < 2);
+  using type = RealType;
+};
+
+namespace Kokkos {
+
+// get<...>(...) defined here so as not to be hidden friends, as per P2819R2
+
+template <size_t I, typename RealType>
+KOKKOS_FUNCTION constexpr RealType& get(complex<RealType>& z) noexcept {
+  static_assert(I < 2);
+  if constexpr (I == 0)
+    return z.real();
+  else
+    return z.imag();
+}
+
+template <size_t I, typename RealType>
+KOKKOS_FUNCTION constexpr RealType&& get(complex<RealType>&& z) noexcept {
+  static_assert(I < 2);
+  if constexpr (I == 0)
+    return std::move(z.real());
+  else
+    return std::move(z.imag());
+}
+
+template <size_t I, typename RealType>
+KOKKOS_FUNCTION constexpr const RealType& get(
+    const complex<RealType>& z) noexcept {
+  static_assert(I < 2);
+  if constexpr (I == 0)
+    return z.re_;
+  else
+    return z.im_;
+}
+
+template <size_t I, typename RealType>
+KOKKOS_FUNCTION constexpr const RealType&& get(
+    const complex<RealType>&& z) noexcept {
+  static_assert(I < 2);
+  if constexpr (I == 0)
+    return std::move(z.re_);
+  else
+    return std::move(z.im_);
+}
 
 //==============================================================================
 // <editor-fold desc="Equality and inequality"> {{{1
@@ -448,8 +311,8 @@ class
 
 //! Binary == operator for complex complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION bool operator==(complex<RealType1> const& x,
-                                       complex<RealType2> const& y) noexcept {
+KOKKOS_INLINE_FUNCTION constexpr bool operator==(
+    complex<RealType1> const& x, complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) == common_type(y.real()) &&
          common_type(x.imag()) == common_type(y.imag());
@@ -479,9 +342,9 @@ inline bool operator==(complex<RealType1> const& x,
 template <
     class RealType1, class RealType2,
     // Constraints to avoid participation in oparator==() for every possible RHS
-    std::enable_if_t<std::is_convertible<RealType2, RealType1>::value, int> = 0>
-KOKKOS_INLINE_FUNCTION bool operator==(complex<RealType1> const& x,
-                                       RealType2 const& y) noexcept {
+    std::enable_if_t<std::is_convertible_v<RealType2, RealType1>, int> = 0>
+KOKKOS_INLINE_FUNCTION constexpr bool operator==(complex<RealType1> const& x,
+                                                 RealType2 const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) == common_type(y) &&
          common_type(x.imag()) == common_type(0);
@@ -491,9 +354,9 @@ KOKKOS_INLINE_FUNCTION bool operator==(complex<RealType1> const& x,
 template <
     class RealType1, class RealType2,
     // Constraints to avoid participation in oparator==() for every possible RHS
-    std::enable_if_t<std::is_convertible<RealType1, RealType2>::value, int> = 0>
-KOKKOS_INLINE_FUNCTION bool operator==(RealType1 const& x,
-                                       complex<RealType2> const& y) noexcept {
+    std::enable_if_t<std::is_convertible_v<RealType1, RealType2>, int> = 0>
+KOKKOS_INLINE_FUNCTION constexpr bool operator==(
+    RealType1 const& x, complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x) == common_type(y.real()) &&
          common_type(0) == common_type(y.imag());
@@ -501,8 +364,8 @@ KOKKOS_INLINE_FUNCTION bool operator==(RealType1 const& x,
 
 //! Binary != operator for complex complex.
 template <class RealType1, class RealType2>
-KOKKOS_INLINE_FUNCTION bool operator!=(complex<RealType1> const& x,
-                                       complex<RealType2> const& y) noexcept {
+KOKKOS_INLINE_FUNCTION constexpr bool operator!=(
+    complex<RealType1> const& x, complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) != common_type(y.real()) ||
          common_type(x.imag()) != common_type(y.imag());
@@ -530,9 +393,9 @@ inline bool operator!=(complex<RealType1> const& x,
 template <
     class RealType1, class RealType2,
     // Constraints to avoid participation in oparator==() for every possible RHS
-    std::enable_if_t<std::is_convertible<RealType2, RealType1>::value, int> = 0>
-KOKKOS_INLINE_FUNCTION bool operator!=(complex<RealType1> const& x,
-                                       RealType2 const& y) noexcept {
+    std::enable_if_t<std::is_convertible_v<RealType2, RealType1>, int> = 0>
+KOKKOS_INLINE_FUNCTION constexpr bool operator!=(complex<RealType1> const& x,
+                                                 RealType2 const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x.real()) != common_type(y) ||
          common_type(x.imag()) != common_type(0);
@@ -542,9 +405,9 @@ KOKKOS_INLINE_FUNCTION bool operator!=(complex<RealType1> const& x,
 template <
     class RealType1, class RealType2,
     // Constraints to avoid participation in oparator==() for every possible RHS
-    std::enable_if_t<std::is_convertible<RealType1, RealType2>::value, int> = 0>
-KOKKOS_INLINE_FUNCTION bool operator!=(RealType1 const& x,
-                                       complex<RealType2> const& y) noexcept {
+    std::enable_if_t<std::is_convertible_v<RealType1, RealType2>, int> = 0>
+KOKKOS_INLINE_FUNCTION constexpr bool operator!=(
+    RealType1 const& x, complex<RealType2> const& y) noexcept {
   using common_type = std::common_type_t<RealType1, RealType2>;
   return common_type(x) != common_type(y.real()) ||
          common_type(0) != common_type(y.imag());
@@ -664,7 +527,8 @@ operator*(const complex<RealType1>& y, const RealType2& x) noexcept {
 
 //! Imaginary part of a complex number.
 template <class RealType>
-KOKKOS_INLINE_FUNCTION RealType imag(const complex<RealType>& x) noexcept {
+KOKKOS_INLINE_FUNCTION constexpr RealType imag(
+    const complex<RealType>& x) noexcept {
   return x.imag();
 }
 
@@ -676,7 +540,8 @@ KOKKOS_INLINE_FUNCTION constexpr Impl::promote_t<ArithmeticType> imag(
 
 //! Real part of a complex number.
 template <class RealType>
-KOKKOS_INLINE_FUNCTION RealType real(const complex<RealType>& x) noexcept {
+KOKKOS_INLINE_FUNCTION constexpr RealType real(
+    const complex<RealType>& x) noexcept {
   return x.real();
 }
 
@@ -718,16 +583,14 @@ KOKKOS_INLINE_FUNCTION complex<T> pow(const complex<T>& x,
   return x == T() ? T() : exp(y * log(x));
 }
 
-template <class T, class U,
-          class = std::enable_if_t<std::is_arithmetic<T>::value>>
+template <class T, class U, class = std::enable_if_t<std::is_arithmetic_v<T>>>
 KOKKOS_INLINE_FUNCTION complex<Impl::promote_2_t<T, U>> pow(
     const T& x, const complex<U>& y) {
   using type = Impl::promote_2_t<T, U>;
   return pow(type(x), complex<type>(y));
 }
 
-template <class T, class U,
-          class = std::enable_if_t<std::is_arithmetic<U>::value>>
+template <class T, class U, class = std::enable_if_t<std::is_arithmetic_v<U>>>
 KOKKOS_INLINE_FUNCTION complex<Impl::promote_2_t<T, U>> pow(const complex<T>& x,
                                                             const U& y) {
   using type = Impl::promote_2_t<T, U>;
@@ -763,9 +626,9 @@ KOKKOS_INLINE_FUNCTION Kokkos::complex<RealType> sqrt(
 
 //! Conjugate of a complex number.
 template <class RealType>
-KOKKOS_INLINE_FUNCTION complex<RealType> conj(
+KOKKOS_INLINE_FUNCTION constexpr complex<RealType> conj(
     const complex<RealType>& x) noexcept {
-  return complex<RealType>(real(x), -imag(x));
+  return {real(x), -imag(x)};
 }
 
 template <class ArithmeticType>
@@ -773,6 +636,18 @@ KOKKOS_INLINE_FUNCTION constexpr complex<Impl::promote_t<ArithmeticType>> conj(
     ArithmeticType x) {
   using type = Impl::promote_t<ArithmeticType>;
   return complex<type>(x, -type());
+}
+
+//! Norm of a complex number.
+template <class RealType>
+KOKKOS_INLINE_FUNCTION constexpr RealType norm(const complex<RealType>& x) {
+  return x.real() * x.real() + x.imag() * x.imag();
+}
+
+template <class ArithmeticType>
+KOKKOS_INLINE_FUNCTION constexpr Impl::promote_t<ArithmeticType> norm(
+    ArithmeticType x) {
+  return static_cast<Impl::promote_t<ArithmeticType>>(x) * x;
 }
 
 //! Exponential of a complex number.
@@ -984,15 +859,8 @@ std::istream& operator>>(std::istream& is, complex<RealType>& x) {
 
 template <class T>
 struct reduction_identity<Kokkos::complex<T>> {
-  using t_red_ident = reduction_identity<T>;
-  KOKKOS_FORCEINLINE_FUNCTION constexpr static Kokkos::complex<T>
-  sum() noexcept {
-    return Kokkos::complex<T>(t_red_ident::sum(), t_red_ident::sum());
-  }
-  KOKKOS_FORCEINLINE_FUNCTION constexpr static Kokkos::complex<T>
-  prod() noexcept {
-    return Kokkos::complex<T>(t_red_ident::prod(), t_red_ident::sum());
-  }
+  KOKKOS_FUNCTION static Kokkos::complex<T> sum() noexcept { return 0; }
+  KOKKOS_FUNCTION static Kokkos::complex<T> prod() noexcept { return 1; }
 };
 
 }  // namespace Kokkos

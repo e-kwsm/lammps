@@ -32,12 +32,13 @@
 
 #include <cmath>
 #include <cstring>
+#include <exception>
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define CHUNK 1000
-#define MAXLINE 256
+static constexpr int CHUNK = 1000;
+static constexpr int MAXLINE = 256;
 
 /* ---------------------------------------------------------------------- */
 
@@ -156,9 +157,9 @@ void FixTMD::init()
   // check that no integrator fix comes after a TMD fix
 
   int flag = 0;
-  for (int i = 0; i < modify->nfix; i++) {
-    if (strcmp(modify->fix[i]->style,"tmd") == 0) flag = 1;
-    if (flag && modify->fix[i]->time_integrate) flag = 2;
+  for (const auto &ifix : modify->get_fix_list()) {
+    if (strcmp(ifix->style,"tmd") == 0) flag = 1;
+    if (flag && ifix->time_integrate) flag = 2;
   }
   if (flag == 2) error->all(FLERR,"Fix tmd must come after integration fixes");
 
@@ -269,7 +270,7 @@ void FixTMD::initial_integrate(int /*vflag*/)
     work_lambda += lambda*(rho_target - rho_old);
     if (!(update->ntimestep % nfileevery) &&
         (previous_stat != update->ntimestep)) {
-      fmt::print(fp, "{} {} {} {} {} {} {} {}\n", update->ntimestep,rho_target,rho_old,
+      utils::print(fp, "{} {} {} {} {} {} {} {}\n", update->ntimestep,rho_target,rho_old,
                  gamma_back,gamma_forward,lambda,work_lambda,work_analytical);
       fflush(fp);
       previous_stat = update->ntimestep;
@@ -389,7 +390,7 @@ void FixTMD::readfile(char *file)
   int *mask = atom->mask;
   int nlocal = atom->nlocal;
 
-  auto buffer = new char[CHUNK*MAXLINE];
+  auto *buffer = new char[CHUNK*MAXLINE];
   char *next,*bufptr;
   int i,m,nlines,imageflag,ix,iy,iz;
   tagint itag;
@@ -433,19 +434,19 @@ void FixTMD::readfile(char *file)
         try {
           ValueTokenizer values(bufptr);
 
-          if (utils::strmatch(bufptr,"^\\s*\\f+\\s+\\f+\\s+xlo\\s+xhi")) {
+          if (utils::strmatch(bufptr,R"(^\s*\f+\s+\f+\s+xlo\s+xhi)")) {
             auto lo = values.next_double();
             auto hi = values.next_double();
             xprd = hi - lo;
             bufptr = next + 1;
             continue;
-          } else if (utils::strmatch(bufptr,"^\\s*\\f+\\s+\\f+\\s+ylo\\s+yhi")) {
+          } else if (utils::strmatch(bufptr,R"(^\s*\f+\s+\f+\s+ylo\s+yhi)")) {
             auto lo = values.next_double();
             auto hi = values.next_double();
             yprd = hi - lo;
             bufptr = next + 1;
             continue;
-          } else if (utils::strmatch(bufptr,"^\\s*\\f+\\s+\\f+\\s+zlo\\s+zhi")) {
+          } else if (utils::strmatch(bufptr,R"(^\s*\f+\s+\f+\s+zlo\s+zhi)")) {
             auto lo = values.next_double();
             auto hi = values.next_double();
             zprd = hi - lo;

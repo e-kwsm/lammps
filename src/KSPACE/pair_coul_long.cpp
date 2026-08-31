@@ -20,6 +20,7 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "ewald_const.h"
 #include "force.h"
 #include "kspace.h"
 #include "memory.h"
@@ -30,18 +31,11 @@
 #include <cstring>
 
 using namespace LAMMPS_NS;
-
-#define EWALD_F 1.12837917
-#define EWALD_P 0.3275911
-#define A1 0.254829592
-#define A2 -0.284496736
-#define A3 1.421413741
-#define A4 -1.453152027
-#define A5 1.061405429
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairCoulLong::PairCoulLong(LAMMPS *lmp) : Pair(lmp)
+PairCoulLong::PairCoulLong(LAMMPS *lmp) : Pair(lmp), scale(nullptr)
 {
   ewaldflag = pppmflag = 1;
   ftable = nullptr;
@@ -132,7 +126,7 @@ void PairCoulLong::compute(int eflag, int vflag)
           rsq_lookup.f = rsq;
           itable = rsq_lookup.i & ncoulmask;
           itable >>= ncoulshiftbits;
-          fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+          fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
           table = ftable[itable] + fraction * dftable[itable];
           forcecoul = scale[itype][jtype] * qtmp * q[j] * table;
           if (factor_coul < 1.0) {
@@ -206,7 +200,7 @@ void PairCoulLong::settings(int narg, char **arg)
 
 void PairCoulLong::coeff(int narg, char **arg)
 {
-  if (narg != 2) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg != 2) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi, jlo, jhi;
@@ -222,7 +216,7 @@ void PairCoulLong::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -237,7 +231,7 @@ void PairCoulLong::init_style()
 
   cut_coulsq = cut_coul * cut_coul;
 
-  // insure use of KSpace long-range solver, set g_ewald
+  // ensure use of KSpace long-range solver, set g_ewald
 
   if (force->kspace == nullptr) error->all(FLERR, "Pair style requires a KSpace style");
   g_ewald = force->kspace->g_ewald;
@@ -352,7 +346,7 @@ double PairCoulLong::single(int i, int j, int /*itype*/, int /*jtype*/, double r
     rsq_lookup.f = rsq;
     itable = rsq_lookup.i & ncoulmask;
     itable >>= ncoulshiftbits;
-    fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+    fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
     table = ftable[itable] + fraction * dftable[itable];
     forcecoul = atom->q[i] * atom->q[j] * table;
     if (factor_coul < 1.0) {

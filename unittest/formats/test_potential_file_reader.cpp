@@ -23,8 +23,6 @@
 #include "MANYBODY/pair_tersoff_table.h"
 #include "MANYBODY/pair_tersoff_zbl.h"
 #include "MANYBODY/pair_vashishta.h"
-#include "info.h"
-#include "input.h"
 #include "potential_file_reader.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -32,9 +30,6 @@
 #include "../testing/core.h"
 
 #include <cstring>
-#include <iostream>
-#include <mpi.h>
-#include <vector>
 
 using namespace LAMMPS_NS;
 using utils::split_words;
@@ -67,7 +62,7 @@ TEST_F(PotentialFileReaderTest, Sw_native)
     PotentialFileReader reader(lmp, "Si.sw", "Stillinger-Weber");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairSW::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairSW::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairSW::NPARAMS_PER_LINE);
 }
 
@@ -79,7 +74,7 @@ TEST_F(PotentialFileReaderTest, Sw_conv)
     PotentialFileReader reader(lmp, "Si.sw", "Stillinger-Weber", utils::METAL2REAL);
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairSW::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairSW::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairSW::NPARAMS_PER_LINE);
 }
 
@@ -101,7 +96,7 @@ TEST_F(PotentialFileReaderTest, Comb)
     PotentialFileReader reader(lmp, "ffield.comb", "COMB");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairComb::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairComb::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairComb::NPARAMS_PER_LINE);
 }
 
@@ -112,7 +107,7 @@ TEST_F(PotentialFileReaderTest, Comb3)
     PotentialFileReader reader(lmp, "ffield.comb3", "COMB3");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairComb3::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairComb3::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairComb3::NPARAMS_PER_LINE);
 }
 
@@ -123,7 +118,7 @@ TEST_F(PotentialFileReaderTest, Tersoff)
     PotentialFileReader reader(lmp, "Si.tersoff", "Tersoff");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairTersoff::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairTersoff::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairTersoff::NPARAMS_PER_LINE);
 }
 
@@ -134,7 +129,7 @@ TEST_F(PotentialFileReaderTest, TersoffMod)
     PotentialFileReader reader(lmp, "Si.tersoff.mod", "Tersoff/Mod");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairTersoffMOD::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairTersoffMOD::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairTersoffMOD::NPARAMS_PER_LINE);
 }
 
@@ -145,7 +140,7 @@ TEST_F(PotentialFileReaderTest, TersoffModC)
     PotentialFileReader reader(lmp, "Si.tersoff.modc", "Tersoff/ModC");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairTersoffMODC::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairTersoffMODC::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairTersoffMODC::NPARAMS_PER_LINE);
 }
 
@@ -156,7 +151,7 @@ TEST_F(PotentialFileReaderTest, TersoffTable)
     PotentialFileReader reader(lmp, "Si.tersoff", "TersoffTable");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairTersoffTable::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairTersoffTable::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairTersoffTable::NPARAMS_PER_LINE);
 }
 
@@ -167,7 +162,7 @@ TEST_F(PotentialFileReaderTest, TersoffZBL)
     PotentialFileReader reader(lmp, "SiC.tersoff.zbl", "Tersoff/ZBL");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairTersoffZBL::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairTersoffZBL::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairTersoffZBL::NPARAMS_PER_LINE);
 }
 
@@ -178,7 +173,7 @@ TEST_F(PotentialFileReaderTest, GW)
     PotentialFileReader reader(lmp, "SiC.gw", "GW");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairGW::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairGW::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairGW::NPARAMS_PER_LINE);
 }
 
@@ -189,7 +184,7 @@ TEST_F(PotentialFileReaderTest, GWZBL)
     PotentialFileReader reader(lmp, "SiC.gw.zbl", "GW/ZBL");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairGWZBL::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairGWZBL::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairGWZBL::NPARAMS_PER_LINE);
 }
 
@@ -200,7 +195,7 @@ TEST_F(PotentialFileReaderTest, Nb3bHarmonic)
     PotentialFileReader reader(lmp, "MOH.nb3b.harmonic", "NB3B Harmonic");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairNb3bHarmonic::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairNb3bHarmonic::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairNb3bHarmonic::NPARAMS_PER_LINE);
 }
 
@@ -211,7 +206,7 @@ TEST_F(PotentialFileReaderTest, Vashishta)
     PotentialFileReader reader(lmp, "SiC.vashishta", "Vashishta");
     END_HIDE_OUTPUT();
 
-    auto line = reader.next_line(PairVashishta::NPARAMS_PER_LINE);
+    auto *line = reader.next_line(PairVashishta::NPARAMS_PER_LINE);
     ASSERT_EQ(utils::count_words(line), PairVashishta::NPARAMS_PER_LINE);
 }
 
@@ -322,9 +317,6 @@ int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
     ::testing::InitGoogleMock(&argc, argv);
-
-    if (platform::mpi_vendor() == "Open MPI" && !Info::has_exceptions())
-        std::cout << "Warning: using OpenMPI without exceptions. Death tests will be skipped\n";
 
     // handle arguments passed via environment variable
     if (const char *var = getenv("TEST_ARGS")) {

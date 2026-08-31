@@ -24,6 +24,7 @@
 #include "kspace.h"
 #include "math_const.h"
 #include "memory.h"
+#include "pair.h"
 #include "neigh_list.h"
 #include "neighbor.h"
 
@@ -37,7 +38,8 @@ static constexpr double EPSILON = 1.0e-6;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJCutCoulMSMDielectric::PairLJCutCoulMSMDielectric(LAMMPS *_lmp) : PairLJCutCoulLong(_lmp)
+PairLJCutCoulMSMDielectric::PairLJCutCoulMSMDielectric(LAMMPS *_lmp) :
+    PairLJCutCoulLong(_lmp), avec(nullptr)
 {
   ewaldflag = pppmflag = 0;
   msmflag = 1;
@@ -101,7 +103,7 @@ void PairLJCutCoulMSMDielectric::compute(int eflag, int vflag)
 
   double **x = atom->x;
   double **f = atom->f;
-  double *q = atom->q;
+  double *q = atom->q_scaled;
   double *eps = atom->epsilon;
   double **norm = atom->mu;
   double *curvature = atom->curvature;
@@ -173,7 +175,7 @@ void PairLJCutCoulMSMDielectric::compute(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction * dftable[itable];
             forcecoul = qtmp * q[j] * table;
             efield_i = q[j] * table;
@@ -187,7 +189,7 @@ void PairLJCutCoulMSMDielectric::compute(int eflag, int vflag)
             }
           }
         } else
-          forcecoul = 0.0;
+          efield_i = forcecoul = 0.0;
 
         if (rsq < cut_ljsq[itype][jtype]) {
           r6inv = r2inv * r2inv * r2inv;
@@ -229,7 +231,7 @@ void PairLJCutCoulMSMDielectric::compute(int eflag, int vflag)
         }
 
         if (eflag) {
-          if (rsq < cut_coulsq) {
+          if (rsq < cut_coulsq && rsq > EPSILON) {
             if (!ncoultablebits || rsq <= tabinnersq)
               ecoul = prefactor * 0.5 * (etmp + eps[j]) * egamma;
             else {
@@ -269,15 +271,17 @@ void PairLJCutCoulMSMDielectric::compute(int eflag, int vflag)
 double PairLJCutCoulMSMDielectric::single(int i, int j, int itype, int jtype, double rsq,
                                           double factor_coul, double factor_lj, double &fforce)
 {
-  double r2inv, r6inv, r, egamma, fgamma, prefactor;
+  double r2inv, r6inv, r, egamma, fgamma, ei, ej, prefactor;
   double fraction, table, forcecoul, forcelj, phicoul, philj;
   int itable;
+  double *q = atom->q_scaled;
+  double *eps = atom->epsilon;
 
   r2inv = 1.0 / rsq;
   if (rsq < cut_coulsq) {
     if (!ncoultablebits || rsq <= tabinnersq) {
       r = sqrt(rsq);
-      prefactor = force->qqrd2e * atom->q[i] * atom->q[j] / r;
+      prefactor = force->qqrd2e * q[i] * q[j] / r;
       egamma = 1.0 - (r / cut_coul) * force->kspace->gamma(r / cut_coul);
       fgamma = 1.0 + (rsq / cut_coulsq) * force->kspace->dgamma(r / cut_coul);
       forcecoul = prefactor * fgamma;
@@ -287,12 +291,12 @@ double PairLJCutCoulMSMDielectric::single(int i, int j, int itype, int jtype, do
       rsq_lookup_single.f = rsq;
       itable = rsq_lookup_single.i & ncoulmask;
       itable >>= ncoulshiftbits;
-      fraction = (rsq_lookup_single.f - rtable[itable]) * drtable[itable];
+      fraction = ((double) rsq_lookup_single.f - rtable[itable]) * drtable[itable];
       table = ftable[itable] + fraction * dftable[itable];
-      forcecoul = atom->q[i] * atom->q[j] * table;
+      forcecoul = q[i] * q[j] * table;
       if (factor_coul < 1.0) {
         table = ctable[itable] + fraction * dctable[itable];
-        prefactor = atom->q[i] * atom->q[j] * table;
+        prefactor = q[i] * q[j] * table;
         forcecoul -= (1.0 - factor_coul) * prefactor;
       }
     }
@@ -308,12 +312,20 @@ double PairLJCutCoulMSMDielectric::single(int i, int j, int itype, int jtype, do
   fforce = (forcecoul + factor_lj * forcelj) * r2inv;
 
   double eng = 0.0;
+  if (eps[i] == 1)
+    ei = 0;
+  else
+    ei = eps[i];
+  if (eps[j] == 1)
+    ej = 0;
+  else
+    ej = eps[j];
   if (rsq < cut_coulsq) {
     if (!ncoultablebits || rsq <= tabinnersq)
-      phicoul = prefactor * egamma;
+      phicoul = prefactor * 0.5 * (ei + ej) * egamma;
     else {
       table = etable[itable] + fraction * detable[itable];
-      phicoul = atom->q[i] * atom->q[j] * table;
+      phicoul = q[i] * q[j] * 0.5 * (ei + ej) * table;
     }
     if (factor_coul < 1.0) phicoul -= (1.0 - factor_coul) * prefactor;
     eng += phicoul;
@@ -340,7 +352,7 @@ void PairLJCutCoulMSMDielectric::init_style()
 
   cut_coulsq = cut_coul * cut_coul;
 
-  // insure use of KSpace long-range solver, set g_ewald
+  // ensure use of KSpace long-range solver, set g_ewald
 
   if (force->kspace == nullptr) error->all(FLERR, "Pair style requires a KSpace style");
   g_ewald = force->kspace->g_ewald;

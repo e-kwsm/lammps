@@ -1,55 +1,10 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_IMPL_PUBLIC_INCLUDE
 #include <Kokkos_Macros.hpp>
-#ifndef KOKKOS_ENABLE_DEPRECATED_CODE_3
 static_assert(false,
               "Including non-public Kokkos header files is not allowed.");
-#else
-KOKKOS_IMPL_WARNING("Including non-public Kokkos header files is not allowed.")
-#endif
 #endif
 
 #ifndef KOKKOS_OPENACC_HPP
@@ -62,11 +17,23 @@ KOKKOS_IMPL_WARNING("Including non-public Kokkos header files is not allowed.")
 #include <impl/Kokkos_InitializationSettings.hpp>
 #include <impl/Kokkos_Profiling_Interface.hpp>
 #include <OpenACC/Kokkos_OpenACC_Traits.hpp>
+#include <impl/Kokkos_HostSharedPtr.hpp>
 
 #include <openacc.h>
+#ifdef KOKKOS_COMPILER_CLANG
+#include <omp.h>
+#endif
 
 #include <iosfwd>
 #include <string>
+
+// FIXME_OPENACC: Below macro is temporarily enabled to avoid issues on existing
+// OpenACC compilers not supporting lambda with parallel loops.
+// LLVM/Clacc compiler does not need this.
+#ifndef KOKKOS_COMPILER_CLANG
+#define KOKKOS_ENABLE_OPENACC_COLLAPSE_HIERARCHICAL_CONSTRUCTS
+#define KOKKOS_ENABLE_OPENACC_COLLAPSE_MDRANGE_LOOPS
+#endif
 
 namespace Kokkos::Experimental::Impl {
 class OpenACCInternal;
@@ -75,7 +42,15 @@ class OpenACCInternal;
 namespace Kokkos::Experimental {
 
 class OpenACC {
-  Impl::OpenACCInternal* m_space_instance = nullptr;
+  Kokkos::Impl::HostSharedPtr<Impl::OpenACCInternal> m_space_instance;
+
+  friend bool operator==(OpenACC const& lhs, OpenACC const& rhs) {
+    return lhs.impl_internal_space_instance() ==
+           rhs.impl_internal_space_instance();
+  }
+  friend bool operator!=(OpenACC const& lhs, OpenACC const& rhs) {
+    return !(lhs == rhs);
+  }
 
  public:
   using execution_space = OpenACC;
@@ -87,11 +62,20 @@ class OpenACC {
 
   using scratch_memory_space = ScratchMemorySpace<OpenACC>;
 
+  OpenACC(const OpenACC&) = default;
+  OpenACC(OpenACC&& other) noexcept
+      : OpenACC(static_cast<const OpenACC&>(other)) {}
+  OpenACC& operator=(const OpenACC&) = default;
+  OpenACC& operator=(OpenACC&& other) noexcept {
+    return *this = static_cast<const OpenACC&>(other);
+  }
+  ~OpenACC();
   OpenACC();
+
+  explicit OpenACC(int async_arg);
 
   static void impl_initialize(InitializationSettings const& settings);
   static void impl_finalize();
-  static bool impl_is_initialized();
 
   void print_configuration(std::ostream& os, bool verbose = false) const;
 
@@ -100,9 +84,14 @@ class OpenACC {
   static void impl_static_fence(std::string const& name);
 
   static char const* name() { return "OpenACC"; }
-  static int concurrency() { return 256000; }  // FIXME_OPENACC
-  static bool in_parallel() { return acc_on_device(acc_device_not_host); }
+  int concurrency() const;
   uint32_t impl_instance_id() const noexcept;
+  Impl::OpenACCInternal* impl_internal_space_instance() const {
+    return m_space_instance.get();
+  }
+
+  int acc_async_queue() const;
+  int acc_device_number() const;
 };
 
 }  // namespace Kokkos::Experimental
@@ -112,14 +101,8 @@ struct Kokkos::Tools::Experimental::DeviceTypeTraits<
     ::Kokkos::Experimental::OpenACC> {
   static constexpr DeviceType id =
       ::Kokkos::Profiling::Experimental::DeviceType::OpenACC;
-  // FIXME_OPENACC: Need to return the device id from the execution space
-  // instance. In fact, acc_get_device_num() will return the same value as the
-  // device id from the execution space instance except for the host fallback
-  // case, where the device id may need to be updated with the value of
-  // acc_get_device_num().
-  static int device_id(const Kokkos::Experimental::OpenACC&) {
-    using Kokkos::Experimental::Impl::OpenACC_Traits;
-    return acc_get_device_num(OpenACC_Traits::dev_type);
+  static int device_id(const Kokkos::Experimental::OpenACC& accInstance) {
+    return accInstance.acc_device_number();
   }
 };
 

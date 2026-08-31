@@ -14,7 +14,7 @@
 #ifndef LMP_EXCEPTIONS_H
 #define LMP_EXCEPTIONS_H
 
-#include <exception>
+#include <exception>  // IWYU pragma: export
 #include <mpi.h>
 #include <string>
 
@@ -22,21 +22,23 @@ namespace LAMMPS_NS {
 
 class LAMMPSException : public std::exception {
  public:
-  std::string message;
-
   LAMMPSException(const std::string &msg) : message(msg) {}
+  [[nodiscard]] const char *what() const noexcept override { return message.c_str(); }
 
-  const char *what() const noexcept override { return message.c_str(); }
+ protected:
+  std::string message;
 };
 
 class LAMMPSAbortException : public LAMMPSException {
  public:
-  MPI_Comm universe;
-
   LAMMPSAbortException(const std::string &msg, MPI_Comm _universe) :
       LAMMPSException(msg), universe(_universe)
   {
   }
+  [[nodiscard]] MPI_Comm get_universe() const { return universe; }
+
+ protected:
+  MPI_Comm universe;
 };
 
 enum ErrorType { ERROR_NONE = 0, ERROR_NORMAL = 1, ERROR_ABORT = 2 };

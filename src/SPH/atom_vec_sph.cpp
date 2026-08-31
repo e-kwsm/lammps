@@ -15,6 +15,8 @@
 
 #include "atom.h"
 
+#include <cstring>
+
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
@@ -122,7 +124,6 @@ int AtomVecSPH::property_atom(const std::string &name)
 
 void AtomVecSPH::pack_property_atom(int index, double *buf, int nvalues, int groupbit)
 {
-  int *mask = atom->mask;
   int nlocal = atom->nlocal;
   int n = 0;
 

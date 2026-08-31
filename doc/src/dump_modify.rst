@@ -17,7 +17,7 @@ Syntax
 * one or more keyword/value pairs may be appended
 
 * these keywords apply to various dump styles
-* keyword = *append* or *at* or *balance* or *buffer* or *colname* or *delay* or *element* or *every* or *every/time* or *fileper* or *first* or *flush* or *format* or *header* or *image* or *label* or *maxfiles* or *nfile* or *pad* or *pbc* or *precision* or *region* or *refresh* or *scale* or *sfactor* or *skip* or *sort* or *tfactor* or *thermo* or *thresh* or *time* or *units* or *unwrap*
+* keyword = *append* or *at* or *balance* or *buffer* or *colname* or *delay* or *element* or *every* or *every/time* or *fileper* or *first* or *flush* or *format* or *header* or *image* or *label* or *maxfiles* or *nfile* or *pad* or *pbc* or *precision* or *region* or *refresh* or *scale* or *sfactor* or *skip* or *sort* or *tfactor* or *thermo* or *thresh* or *time* or *triclinic/general* or *types* or *units* or *unwrap*
 
   .. parsed-literal::
 
@@ -74,12 +74,14 @@ Syntax
           -N = sort per-atom lines in descending order by the Nth column
        *tfactor* arg = time scaling factor (> 0.0)
        *thermo* arg = *yes* or *no*
-       *time* arg = *yes* or *no*
        *thresh* args = attribute operator value
          attribute = same attributes (x,fy,etotal,sxx,etc) used by dump custom style
          operator = "<" or "<=" or ">" or ">=" or "==" or "!=" or "\|\^"
          value = numeric value to compare to, or LAST
          these 3 args can be replaced by the word "none" to turn off thresholding
+       *time* arg = *yes* or *no*
+       *triclinic/general* arg = *yes* or *no*
+       *types* value = *numeric* or *labels*
        *units* arg = *yes* or *no*
        *unwrap* arg = *yes* or *no*
 
@@ -89,6 +91,15 @@ Syntax
   .. parsed-literal::
 
        see the :doc:`dump image <dump_image>` doc page for details
+
+* these keywords apply only to the extxyz dump style
+* keyword = *forces* or *mass* or *vel*
+
+  .. parsed-literal::
+
+       *forces* arg = *yes* or *no*
+       *mass* arg = *yes* or *no*
+       *vel* arg = *yes* or *no*
 
 * these keywords apply only to the */gz* and */zstd* dump styles
 * keyword = *compression_level*
@@ -104,6 +115,14 @@ Syntax
   .. parsed-literal::
 
        *checksum* args = *yes* or *no* (add checksum at end of zst file)
+
+* these keywords apply only to the *vtk* and *grid/vtk* dump styles
+* keyword = *binary* or *double*
+
+  .. parsed-literal::
+
+       *binary* args = *yes* or *no* (select between binary and text mode VTK files)
+       *double* args = *yes* or *no* (select between double and single precision output)
 
 Examples
 """"""""
@@ -124,17 +143,6 @@ Description
 Modify the parameters of a previously defined dump command.  Not all
 parameters are relevant to all dump styles.
 
-As explained on the :doc:`dump <dump>` doc page, the *atom/mpiio*,
-*custom/mpiio*, and *xyz/mpiio* dump styles are identical in command
-syntax and in the format of the dump files they create, to the
-corresponding styles without "mpiio", except the single dump file they
-produce is written in parallel via the MPI-IO library.  Thus if a
-dump_modify option below is valid for the *atom* style, it is also
-valid for the *atom/mpiio* style, and similarly for the other styles
-which allow for use of MPI-IO.
-
-----------
-
 Unless otherwise noted, the following keywords apply to all the
 various dump styles, including the :doc:`dump image <dump_image>` and
 :doc:`dump movie <dump_image>` styles.
@@ -143,7 +151,7 @@ various dump styles, including the :doc:`dump image <dump_image>` and
 
 The *append* keyword applies to all dump styles except *cfg* and *xtc*
 and *dcd*\ .  It also applies only to text output files, not to binary
-or gzipped or image/movie files.  If specified as *yes*, then dump
+or compressed or image/movie files.  If specified as *yes*, then dump
 snapshots are appended to the end of an existing dump file.  If
 specified as *no*, then a new dump file will be created which will
 overwrite an existing file with the same name.
@@ -163,7 +171,7 @@ dump file has been opened, this keyword has no further effect.
 
 The *buffer* keyword applies only to dump styles *atom*, *cfg*,
 *custom*, *local*, and *xyz*\ .  It also applies only to text output
-files, not to binary or gzipped files.  If specified as *yes*, which
+files, not to binary or compressed files.  If specified as *yes*, which
 is the default, then each processor writes its output into an internal
 text buffer, which is then sent to the processor(s) which perform file
 writes, and written by those processors(s) as one large chunk of text.
@@ -181,19 +189,20 @@ extra buffering.
 .. versionadded:: 4May2022
 
 The *colname* keyword can be used to change the default header keyword
-for dump styles: *atom*, *custom*, *cfg*, and *local* and their compressed,
-ADIOS, and MPIIO variants.  The setting for *ID string* replaces the default
-text with the provided string.  *ID* can be a positive integer when it
-represents the column number counting from the left, a negative integer
-when it represents the column number from the right (i.e. -1 is the last
-column/keyword), or a custom dump keyword (or compute, fix, property, or
-variable reference) and then it replaces the string for that specific
-keyword. For *atom* dump styles only the keywords "id", "type", "x",
-"y", "z", "ix", "iy", "iz" can be accessed via string regardless of
-whether scaled or unwrapped coordinates were enabled or disabled, and
-it always assumes 8 columns for indexing regardless of whether image
-flags are enabled or not.  For dump style *cfg* only changes to the
-"auxiliary" keywords (6th or later keyword) will become visible.
+for dump styles: *atom*, *custom*, *cfg*, and *local* and their
+compressed, ADIOS variants.  The setting for *ID string* replaces the
+default text with the provided string.  *ID* can be a positive integer
+when it represents the column number counting from the left, a negative
+integer when it represents the column number from the right (i.e. -1 is
+the last column/keyword), or a custom dump keyword (or compute, fix,
+property, or variable reference) and then it replaces the string for
+that specific keyword. For *atom* dump styles only the keywords "id",
+"type", "x", "y", "z", "ix", "iy", "iz" can be accessed via string
+regardless of whether scaled or unwrapped coordinates were enabled or
+disabled, and it always assumes 8 columns for indexing regardless of
+whether image flags are enabled or not.  For dump style *cfg* only
+changes to the "auxiliary" keywords (6th or later keyword) will become
+visible.
 
 The *colname* keyword can be used multiple times. If multiple *colname*
 settings refer to the same keyword, the last setting has precedence.  A
@@ -296,6 +305,8 @@ in file tmp.times:
    place of 101.
 
 ----------
+
+.. versionadded:: 7Jan2022
 
 The *every/time* keyword can be used with any dump style except the
 *dcd* and *xtc* styles.  It changes the frequency of dump snapshots
@@ -408,17 +419,17 @@ command is invoked.
 ----------
 
 The *flush* keyword determines whether a flush operation is invoked
-after a dump snapshot is written to the dump file.  A flush insures
+after a dump snapshot is written to the dump file.  A flush ensures
 the output in that file is current (no buffering by the OS), even if
 LAMMPS halts before the simulation completes.  Flushes cannot be
 performed with dump style *xtc*\ .
 
 ----------
 
-The *format* keyword can be used to change the default numeric format output
-by the text-based dump styles: *atom*, *local*, *custom*, *cfg*, and
-*xyz* styles, and their MPIIO variants. Only the *line* or *none*
-options can be used with the *atom* and *xyz* styles.
+The *format* keyword can be used to change the default numeric format
+output by the text-based dump styles: *atom*, *local*, *custom*, *cfg*,
+and *xyz* styles. Only the *line* or *none* options can be used with the
+*atom* and *xyz* styles.
 
 All the specified format strings are C-style formats, such as used by
 the C/C++ printf() command.  The *line* keyword takes a single
@@ -728,11 +739,12 @@ descending order.
 The dump *local* style cannot be sorted by atom ID, since there are
 typically multiple lines of output per atom.  Some dump styles, such
 as *dcd* and *xtc*, require sorting by atom ID to format the output
-file correctly.  If multiple processors are writing the dump file, via
-the "%" wildcard in the dump filename and the *nfile* or *fileper*
-keywords are set to non-default values (i.e., the number of dump file
-pieces is not equal to the number of procs), then sorting cannot be
-performed.
+file correctly. When multiple processors write separate dump file
+pieces via the "%" wildcard together with the *nfile* or *fileper*
+keywords, sorting is performed globally across all processors first
+and the sorted data are then forwarded to a smaller subset of
+processors who accumulate the data in order, so each individual dump
+file contains a consecutive, sorted portion of the full snapshot.
 
 In a parallel run, the per-processor dump file pieces can have
 significant imbalance in number of lines of per-atom info. The *balance*
@@ -741,6 +753,18 @@ snapshot are balanced to be nearly the same. A balance value of *no*
 means no balancing will be done, while *yes* means balancing will be
 performed. This balancing preserves dump sorting order. For a serial
 run, this option is ignored since the output is already balanced.
+When multiple processors write separate dump file
+pieces via the "%" wildcard together with the *nfile* or *fileper*
+keywords, balancing is performed globally across all processors first
+and the balanced data are then forwarded to a smaller subset of
+processors who accumulate the data.
+
+.. note::
+
+   The balancing is performed on a per-processor basis, not per-file
+   when using *nfile* or *fileper*. If different numbers of processors
+   contribute data to different dump files, the files will naturally be
+   of different lengths.
 
 .. note::
 
@@ -751,9 +775,13 @@ run, this option is ignored since the output is already balanced.
 ----------
 
 The *thermo* keyword only applies the dump styles *netcdf* and *yaml*.
-It triggers writing of :doc:`thermo <thermo>` information to the dump file
-alongside per-atom data.  The values included in the dump file are
-identical to the values specified by :doc:`thermo_style <thermo_style>`.
+It triggers writing of :doc:`thermo <thermo>` information to the dump
+file alongside per-atom data.  The values included in the dump file are
+cached values from the last thermo output and include the exact same the
+values as specified by the :doc:`thermo_style <thermo_style>` command.
+Because these are cached values, they are only up-to-date when dump
+output is on a timestep that also has thermo output. Dump style *yaml*
+will skip thermo output on incompatible steps.
 
 ----------
 
@@ -806,14 +834,27 @@ region since the last dump.
    dump_modify ... thresh v_charge |^ LAST
 
 This will dump atoms whose charge has changed from an absolute value
-less than :math:`\frac12` to greater than :math:`\frac12` (or vice versa) since the last dump (e.g., due to reactions and subsequent charge equilibration in a
-reactive force field).
+less than :math:`\frac12` to greater than :math:`\frac12` (or vice
+versa) since the last dump (e.g., due to reactions and subsequent
+charge equilibration in a reactive force field).
 
 The choice of operators listed above are the usual comparison
 operators.  The XOR operation (exclusive or) is also included as "\|\^".
 In this context, XOR means that if either the attribute or value is
 0.0 and the other is non-zero, then the result is "true" and the
 threshold criterion is met.  Otherwise it is not met.
+
+.. note::
+
+   For style *custom*, the *triclinic/general* keyword can alter dump
+   output for general triclinic simulation boxes and their atoms.  See
+   the :doc:`dump <dump>` command for details of how this changes the
+   format of dump file snapshots.  The thresh keyword may access
+   per-atom attributes either directly or indirectly through a compute
+   or variable.  If the attribute is an atom coordinate or a per-atom
+   vector (such as velocity, force, or dipole moment), its value will
+   *NOT* be a general triclinic (rotated) value.  Rather it will be a
+   restricted triclinic value.
 
 ----------
 
@@ -836,6 +877,36 @@ time units equivalent to the :doc:`thermo keyword <thermo_style>` *time*\ .
 This is to simplify post-processing of trajectories using a variable time
 step (e.g., when using :doc:`fix dt/reset <fix_dt_reset>`).
 The default setting is *no*\ .
+
+----------
+
+The *types* keyword applies only to the dump xyz style. If this keyword is
+used with a value of *numeric*, then numeric atom types are printed in the
+xyz file (default). If the value *labels* is specified, then
+:doc:`type labels <Howto_type_labels>` are printed for atom types.
+
+----------
+
+The *triclinic/general* keyword only applies to the dump *atom* and
+*custom* styles.  It can only be used with a value of *yes* if the
+simulation box was created as a general triclinic box.  See the
+:doc:`Howto_triclinic <Howto_triclinic>` doc page for a detailed
+explanation of orthogonal, restricted triclinic, and general triclinic
+simulation boxes.
+
+If this keyword is used with a value of *yes*, the box information at
+the beginning of each snapshot will include information about the 3
+arbitrary edge vectors **A**, **B**, **C** that define the general
+triclinic box as well as their origin.  The format is described on the
+:doc:`dump <dump>` doc page.
+
+The coordinates of each atom will likewise be output as values in (or
+near) the general triclinic box.  Likewise, per-atom vector quantities
+such as velocity, omega, dipole moment, etc will have orientations
+consistent with the general triclinic box, meaning they will be
+rotated relative to the standard xyz coordinate axes.  See the
+:doc:`dump <dump>` doc page for a full list of which dump attributes
+this affects.
 
 ----------
 
@@ -866,11 +937,11 @@ box size stored with the snapshot.
 
 ----------
 
-The COMPRESS package offers both GZ and Zstd compression variants of
-styles atom, custom, local, cfg, and xyz. When using these styles the
-compression level can be controlled by the :code:`compression_level`
-keyword. File names with these styles have to end in either
-:code:`.gz` or :code:`.zst`.
+The :ref:`COMPRESS package <PKG-COMPRESS>` offers both GZ and Zstd
+compression variants of styles atom, custom, local, cfg, and xyz. When
+using these styles the compression level can be controlled by the
+:code:`compression_level` keyword. File names with these styles have to
+end in either :code:`.gz` or :code:`.zst`.
 
 GZ supports compression levels from :math:`-1` (default), 0 (no compression),
 and 1 to 9, 9 being the best compression. The COMPRESS :code:`/gz` styles use 9
@@ -886,6 +957,28 @@ similar compression ratios. For more details see
 In addition, Zstd compressed files can include a checksum of the
 entire contents. The Zstd enabled dump styles enable this feature by
 default and it can be disabled with the :code:`checksum` keyword.
+
+----------
+
+.. versionadded:: TBD
+
+The :ref:`EXTRA-DUMP package <PKG-EXTRA-DUMP>` offers writing dump files
+in `VTK file formats <https://vtk.org/>`_ that can be read by a variety
+of visualization tools based on the VTK library.  These VTK files follow
+naming conventions that collide with the LAMMPS convention to append
+".bin" to a file name in order to switch to a binary output.  Thus for
+:doc:`vtk style dumps <dump_vtk>` and :doc:`grid/vtk style dumps <dump>`
+the dump_modify command supports the keyword *binary* which selects
+between generating text mode and binary style VTK files.
+
+The keyword *double* selects the precision of all floating point data
+written by the *vtk* and *grid/vtk* dump styles.  By default, that data
+is written in single precision, which keeps about 7 significant digits
+and is what visualization tools work with.  With *double* set to *yes*,
+coordinates and data values are written in double precision instead, so
+that dump files can be post-processed quantitatively without loss of
+precision.  Text mode files then store each number with as many digits
+as are needed to read back the identical value.
 
 ----------
 
@@ -907,15 +1000,19 @@ The option defaults are
 
 * append = no
 * balance = no
+* binary = no (dump styles *vtk* and *grid/vtk*)
 * buffer = yes for dump styles *atom*, *custom*, *loca*, and *xyz*
+* double = no (dump styles *vtk* and *grid/vtk*)
 * element = "C" for every atom type
 * every = whatever it was set to via the :doc:`dump <dump>` command
 * fileper = # of processors
 * first = no
 * flush = yes
+* forces = yes
 * format = %d and %g for each integer or floating point value
 * image = no
 * label = ENTRIES
+* mass = no
 * maxfiles = -1
 * nfile = 1
 * pad = 0
@@ -926,10 +1023,13 @@ The option defaults are
 * sort = off for dump styles *atom*, *custom*, *cfg*, and *local*
 * sort = id for dump styles *dcd*, *xtc*, and *xyz*
 * thresh = none
+* time = no
+* triclinic/general = no
+* types = numeric
 * units = no
 * unwrap = no
+* vel = yes
 
 * compression_level = 9 (gz variants)
 * compression_level = 0 (zstd variants)
 * checksum = yes (zstd variants)
-

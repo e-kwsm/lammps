@@ -6,7 +6,7 @@ timestep command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    timestep dt
 
@@ -35,7 +35,7 @@ the outer loop (largest) timestep.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

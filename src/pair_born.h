@@ -40,6 +40,7 @@ class PairBorn : public Pair {
   void write_data(FILE *) override;
   void write_data_all(FILE *) override;
   double single(int, int, int, int, double, double, double, double &) override;
+  void born_matrix(int, int, int, int, double, double, double, double &, double &) override;
   void *extract(const char *, int &) override;
 
  protected:
@@ -48,7 +49,7 @@ class PairBorn : public Pair {
   double **a, **rho, **sigma, **c, **d;
   double **rhoinv, **born1, **born2, **born3, **offset;
 
-  void allocate();
+  virtual void allocate();
 };
 
 }    // namespace LAMMPS_NS

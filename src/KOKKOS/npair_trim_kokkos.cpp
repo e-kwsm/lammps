@@ -62,8 +62,8 @@ void NPairTrimKokkos<DeviceType>::trim_to_kokkos(NeighList *list)
   d_ilist_copy = k_list_copy->d_ilist;
   d_numneigh_copy = k_list_copy->d_numneigh;
   d_neighbors_copy = k_list_copy->d_neighbors;
-  int inum_copy = list->listcopy->inum;
-  if (list->ghost) inum_copy += list->listcopy->gnum;
+  int inum_trim = list->listcopy->inum;
+  if (list->ghost) inum_trim += list->listcopy->gnum;
 
   NeighListKokkos<DeviceType>* k_list = static_cast<NeighListKokkos<DeviceType>*>(list);
   k_list->maxneighs = k_list_copy->maxneighs; // simple, but could be made more memory efficient
@@ -75,7 +75,7 @@ void NPairTrimKokkos<DeviceType>::trim_to_kokkos(NeighList *list)
   // loop over parent list and trim
 
   copymode = 1;
-  Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagNPairTrim>(0,inum_copy),*this);
+  Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagNPairTrim>(0,inum_trim),*this);
   copymode = 0;
 
   list->inum = k_list_copy->inum;
@@ -85,14 +85,15 @@ void NPairTrimKokkos<DeviceType>::trim_to_kokkos(NeighList *list)
 }
 
 template<class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void NPairTrimKokkos<DeviceType>::operator()(TagNPairTrim, const int &ii) const {
   int n = 0;
 
   const int i = d_ilist_copy(ii);
-  const double xtmp = x(i,0);
-  const double ytmp = x(i,1);
-  const double ztmp = x(i,2);
+  const double xtmp = static_cast<double>(x(i,0));
+  const double ytmp = static_cast<double>(x(i,1));
+  const double ztmp = static_cast<double>(x(i,2));
 
   // loop over copy neighbor list
 
@@ -104,9 +105,9 @@ void NPairTrimKokkos<DeviceType>::operator()(TagNPairTrim, const int &ii) const 
     const int joriginal = d_neighbors_copy(i,jj);
     const int j = joriginal & NEIGHMASK;
 
-    const double delx = xtmp - x(j,0);
-    const double dely = ytmp - x(j,1);
-    const double delz = ztmp - x(j,2);
+    const double delx = xtmp - static_cast<double>(x(j,0));
+    const double dely = ytmp - static_cast<double>(x(j,1));
+    const double delz = ztmp - static_cast<double>(x(j,2));
     const double rsq = delx*delx + dely*dely + delz*delz;
 
     if (rsq > cutsq_custom) continue;
@@ -126,15 +127,15 @@ void NPairTrimKokkos<DeviceType>::trim_to_cpu(NeighList *list)
   NeighList *listcopy = list->listcopy;
   NeighListKokkos<DeviceType>* listcopy_kk = (NeighListKokkos<DeviceType>*) listcopy;
 
-  listcopy_kk->k_ilist.template sync<LMPHostType>();
+  listcopy_kk->k_ilist.sync_host();
 
   double** x = atom->x;
 
   int inum = listcopy->inum;
   int gnum = listcopy->gnum;
-  int inum_all = inum;
-  if (list->ghost) inum_all += gnum;
-  auto h_ilist = listcopy_kk->k_ilist.h_view;
+  int inum_trim = inum;
+  if (list->ghost) inum_trim += gnum;
+  auto h_ilist = listcopy_kk->k_ilist.view_host();
   auto h_numneigh = Kokkos::create_mirror_view_and_copy(LMPHostType(),listcopy_kk->d_numneigh);
   auto h_neighbors = Kokkos::create_mirror_view_and_copy(LMPHostType(),listcopy_kk->d_neighbors);
 
@@ -151,7 +152,7 @@ void NPairTrimKokkos<DeviceType>::trim_to_cpu(NeighList *list)
   MyPage<int> *ipage = list->ipage;
   ipage->reset();
 
-  for (int ii = 0; ii < inum_all; ii++) {
+  for (int ii = 0; ii < inum_trim; ii++) {
     int n = 0;
     neighptr = ipage->vget();
 
@@ -184,7 +185,7 @@ void NPairTrimKokkos<DeviceType>::trim_to_cpu(NeighList *list)
     numneigh[i] = n;
     ipage->vgot(n);
     if (ipage->status())
-      error->one(FLERR,"Neighbor list overflow, boost neigh_modify one");
+      error->one(FLERR, Error::NOLASTLINE, "Neighbor list overflow, boost neigh_modify one" + utils::errorurl(36));
   }
 }
 

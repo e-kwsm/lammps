@@ -109,7 +109,7 @@ FixQTB::FixQTB(LAMMPS *lmp, int narg, char **arg) :
   gfactor3 = new double[atom->ntypes+1];
 
   // allocate random-arrays and fran
-  grow_arrays(atom->nmax);
+  FixQTB::grow_arrays(atom->nmax);
   atom->add_callback(Atom::GROW);
 
   // allocate omega_H and time_H
@@ -170,11 +170,11 @@ void FixQTB::init()
     h_timestep=alpha*dtv;
   }
   if (comm->me == 0 && screen)
-    fmt::print(screen,"The effective maximum frequency is now {} inverse time unit "
+    utils::print(screen,"The effective maximum frequency is now {} inverse time unit "
                "with alpha value as {}!\n", 0.5/h_timestep, alpha);
 
   // set force prefactors
-  if (!atom->rmass) {
+  if (atom->mass) {
     for (int i = 1; i <= atom->ntypes; i++) {
       //gfactor1 is the friction force \gamma{}m_{i}\frac{dv}{dt}
       gfactor1[i] = (atom->mass[i]*fric_coef) / force->ftm2v;
@@ -345,15 +345,13 @@ int FixQTB::modify_param(int narg, char **arg)
 {
   if (strcmp(arg[0],"temp") == 0) {
     if (narg < 2) error->all(FLERR,"Illegal fix_modify command");
-    delete [] id_temp;
+    delete[] id_temp;
     id_temp = utils::strdup(arg[1]);
-
-    int icompute = modify->find_compute(id_temp);
-    if (icompute < 0) error->all(FLERR,"Could not find fix_modify temperature ID");
-    temperature = modify->compute[icompute];
-
+    temperature = modify->get_compute_by_id(id_temp);
+    if (!temperature)
+      error->all(FLERR, "Could not find fix_modify temperature ID {}", id_temp);
     if (temperature->tempflag == 0)
-      error->all(FLERR,"Fix_modify temperature ID does not compute temperature");
+      error->all(FLERR,"Fix_modify temperature ID {} does not compute temperature", id_temp);
     if (temperature->igroup != igroup && comm->me == 0)
       error->warning(FLERR,"Group for fix_modify temp != fix group");
     return 2;

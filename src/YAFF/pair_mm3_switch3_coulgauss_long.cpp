@@ -21,6 +21,7 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "ewald_const.h"
 #include "force.h"
 #include "kspace.h"
 #include "math_const.h"
@@ -33,18 +34,14 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
-
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define A1        0.254829592
-#define A2       -0.284496736
-#define A3        1.421413741
-#define A4       -1.453152027
-#define A5        1.061405429
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairMM3Switch3CoulGaussLong::PairMM3Switch3CoulGaussLong(LAMMPS *lmp) : Pair(lmp)
+PairMM3Switch3CoulGaussLong::PairMM3Switch3CoulGaussLong(LAMMPS *lmp) :
+    Pair(lmp), cut_lj(nullptr), cut_ljsq(nullptr), epsilon(nullptr), sigma(nullptr),
+    gamma(nullptr), lj1(nullptr), lj2(nullptr), lj3(nullptr), lj4(nullptr), offset(nullptr),
+    cut_respa(nullptr)
 {
   ewaldflag = pppmflag = 1;
   writedata = 1;
@@ -56,6 +53,8 @@ PairMM3Switch3CoulGaussLong::PairMM3Switch3CoulGaussLong(LAMMPS *lmp) : Pair(lmp
 
 PairMM3Switch3CoulGaussLong::~PairMM3Switch3CoulGaussLong()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -82,7 +81,7 @@ void PairMM3Switch3CoulGaussLong::compute(int eflag, int vflag)
   double qtmp,xtmp,ytmp,ztmp,delx,dely,delz,evdwl,ecoul,fpair;
   double fraction,table;
   double r,r2inv,r6inv,forcecoul,forcecoul2,forcelj,factor_coul,factor_lj,tr,ftr,trx;
-  double grij,expm2,prefactor,prefactor2,t,erfc1,erfc2,rrij,expn2,expb;
+  double grij,expm2,prefactor,prefactor2,t,erfc1,erfc2,rrij,expb;
   int *ilist,*jlist,*numneigh,**firstneigh;
   double rsq;
 
@@ -130,6 +129,7 @@ void PairMM3Switch3CoulGaussLong::compute(int eflag, int vflag)
       jtype = type[j];
 
       if (rsq < cutsq[itype][jtype]) {
+        forcecoul = forcecoul2 = forcelj = 0.0;
         r2inv = 1.0/rsq;
 
         if (rsq < cut_coulsq) {
@@ -146,7 +146,7 @@ void PairMM3Switch3CoulGaussLong::compute(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {
@@ -155,7 +155,7 @@ void PairMM3Switch3CoulGaussLong::compute(int eflag, int vflag)
               forcecoul -= (1.0-factor_coul)*prefactor;
             }
           }
-        } else forcecoul = 0.0;
+        }
 
         if (rsq < cut_ljsq[itype][jtype]) {
           // Repulsive exponential part
@@ -168,18 +168,16 @@ void PairMM3Switch3CoulGaussLong::compute(int eflag, int vflag)
           // Correction for Gaussian radii
           if (lj2[itype][jtype]==0.0) {
             // This means a point charge is considered, so the correction is zero
-            expn2 = 0.0;
             erfc2 = 0.0;
-            forcecoul2 = 0.0;
             prefactor2 = 0.0;
           } else {
             rrij = lj2[itype][jtype]*r;
-            expn2 = exp(-rrij*rrij);
+            double expn2 = exp(-rrij*rrij);
             erfc2 = erfc(rrij);
             prefactor2 = -qqrd2e*qtmp*q[j]/r;
             forcecoul2 = prefactor2*(erfc2+EWALD_F*rrij*expn2);
           }
-        } else forcelj = 0.0;
+        }
 
         if (rsq < cut_coulsq) {
           if (!ncoultablebits || rsq <= tabinnersq)
@@ -294,7 +292,7 @@ void PairMM3Switch3CoulGaussLong::settings(int narg, char **arg)
 void PairMM3Switch3CoulGaussLong::coeff(int narg, char **arg)
 {
   if (narg < 5 || narg > 6)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -320,7 +318,7 @@ void PairMM3Switch3CoulGaussLong::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -337,7 +335,7 @@ void PairMM3Switch3CoulGaussLong::init_style()
   if (truncw>0.0) truncwi = 1.0/truncw;
   else truncwi = 0.0;
 
-  // insure use of KSpace long-range solver, set g_ewald
+  // ensure use of KSpace long-range solver, set g_ewald
 
   if (force->kspace == nullptr)
     error->all(FLERR,"Pair style requires a KSpace style");
@@ -581,12 +579,14 @@ double PairMM3Switch3CoulGaussLong::single(int i, int j, int itype, int jtype,
 {
   double r2inv,r6inv,r,grij,expm2,t,erfc1,prefactor,prefactor2;
   double fraction,table,forcecoul,forcecoul2,forcelj;
-  double expb,rrij,expn2,erfc2,evdwl,ecoul,trx,tr,ftr;
+  double expb,rrij,erfc2,evdwl,ecoul,trx,tr,ftr;
 
   int itable;
 
   r2inv = 1.0/rsq;
   r = sqrt(rsq);
+  forcecoul = forcecoul2 = 0.0;
+
   if (rsq < cut_coulsq) {
     if (!ncoultablebits || rsq <= tabinnersq) {
       grij = g_ewald * r;
@@ -601,7 +601,7 @@ double PairMM3Switch3CoulGaussLong::single(int i, int j, int itype, int jtype,
       rsq_lookup_single.f = rsq;
       itable = rsq_lookup_single.i & ncoulmask;
       itable >>= ncoulshiftbits;
-      fraction = (rsq_lookup_single.f - rtable[itable]) * drtable[itable];
+      fraction = ((double) rsq_lookup_single.f - rtable[itable]) * drtable[itable];
       table = ftable[itable] + fraction*dftable[itable];
       forcecoul = atom->q[i]*atom->q[j] * table;
       if (factor_coul < 1.0) {
@@ -610,7 +610,7 @@ double PairMM3Switch3CoulGaussLong::single(int i, int j, int itype, int jtype,
         forcecoul -= (1.0-factor_coul)*prefactor;
       }
     }
-  } else forcecoul = 0.0;
+  }
 
   if (rsq < cut_ljsq[itype][jtype]) {
     expb = lj3[itype][jtype]*exp(-lj1[itype][jtype]*r);
@@ -619,13 +619,11 @@ double PairMM3Switch3CoulGaussLong::single(int i, int j, int itype, int jtype,
     forcelj -= 6.0*lj4[itype][jtype]*r6inv;
 
     if (lj2[itype][jtype] == 0.0) {
-      expn2 = 0.0;
       erfc2 = 0.0;
-      forcecoul2 = 0.0;
       prefactor2 = 0.0;
     } else {
       rrij = lj2[itype][jtype]*r;
-      expn2 = exp(-rrij*rrij);
+      double expn2 = exp(-rrij*rrij);
       erfc2 = erfc(rrij);
       prefactor2 = -force->qqrd2e * atom->q[i]*atom->q[j]/r;
       forcecoul2 = prefactor2 * (erfc2 + EWALD_F*rrij*expn2);

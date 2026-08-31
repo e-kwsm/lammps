@@ -17,8 +17,14 @@
 ------------------------------------------------------------------------- */
 
 #include "math_extra.h"
+#include "math_special.h"
+#include "math_const.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+
+using namespace LAMMPS_NS;
+using MathConst::MY_4PI3;
 
 namespace MathExtra {
 
@@ -205,7 +211,7 @@ void no_squish_rotate(int k, double *p, double *q, double *inertia,
 {
   double phi,c_phi,s_phi,kp[4],kq[4];
 
-  // apply permuation operator on p and q, get kp and kq
+  // apply permutation operator on p and q, get kp and kq
 
   if (k == 1) {
     kq[0] = -q[1];  kp[0] = -p[1];
@@ -222,6 +228,10 @@ void no_squish_rotate(int k, double *p, double *q, double *inertia,
     kq[1] =  q[2];  kp[1] =  p[2];
     kq[2] = -q[1];  kp[2] = -p[1];
     kq[3] =  q[0];  kp[3] =  p[0];
+  } else {
+    // all callers use k = 1, 2, or 3; zero the outputs so they are always defined
+    kq[0] = kq[1] = kq[2] = kq[3] = 0.0;
+    kp[0] = kp[1] = kp[2] = kp[3] = 0.0;
   }
 
   // obtain phi, cosines and sines
@@ -363,6 +373,29 @@ void exyz_to_q(double *ex, double *ey, double *ez, double *q)
 }
 
 /* ----------------------------------------------------------------------
+   create unit quaternion from a rotation matrix
+   just a wrapper on exyz_to_q()
+   ex,ey,ez are columns of a rotation matrix
+------------------------------------------------------------------------- */
+
+void mat_to_quat(double mat[3][3], double *q)
+{
+  double ex[3],ey[3],ez[3];
+
+  ex[0] = mat[0][0];
+  ex[1] = mat[1][0];
+  ex[2] = mat[2][0];
+  ey[0] = mat[0][1];
+  ey[1] = mat[1][1];
+  ey[2] = mat[2][1];
+  ez[0] = mat[0][2];
+  ez[1] = mat[1][2];
+  ez[2] = mat[2][2];
+
+  MathExtra::exyz_to_q(ex,ey,ez,q);
+}
+
+/* ----------------------------------------------------------------------
    compute space-frame ex,ey,ez from current quaternion q
    ex,ey,ez = space-frame coords of 1st,2nd,3rd principal axis
    operation is ex = q' d q = Q d, where d is (1,0,0) = 1st axis in body frame
@@ -417,6 +450,7 @@ void quat_to_mat(const double *quat, double mat[3][3])
 /* ----------------------------------------------------------------------
    compute rotation matrix from quaternion conjugate
    quat = [w i j k]
+   similar logic to quat_to_mat()
 ------------------------------------------------------------------------- */
 
 void quat_to_mat_trans(const double *quat, double mat[3][3])
@@ -447,12 +481,12 @@ void quat_to_mat_trans(const double *quat, double mat[3][3])
 
 /* ----------------------------------------------------------------------
    compute space-frame inertia tensor of an ellipsoid
-   radii = 3 radii of ellipsoid
+   shape = 3 semiaxes of ellipsoid
    quat = orientiation quaternion of ellipsoid
    return symmetric inertia tensor as 6-vector in Voigt ordering
 ------------------------------------------------------------------------- */
 
-void inertia_ellipsoid(double *radii, double *quat, double mass,
+void inertia_ellipsoid(double *shape, double *quat, double mass,
                        double *inertia)
 {
   double p[3][3],ptrans[3][3],itemp[3][3],tensor[3][3];
@@ -460,9 +494,31 @@ void inertia_ellipsoid(double *radii, double *quat, double mass,
 
   quat_to_mat(quat,p);
   quat_to_mat_trans(quat,ptrans);
-  idiag[0] = 0.2*mass * (radii[1]*radii[1] + radii[2]*radii[2]);
-  idiag[1] = 0.2*mass * (radii[0]*radii[0] + radii[2]*radii[2]);
-  idiag[2] = 0.2*mass * (radii[0]*radii[0] + radii[1]*radii[1]);
+  idiag[0] = 0.2*mass * (shape[1]*shape[1] + shape[2]*shape[2]);
+  idiag[1] = 0.2*mass * (shape[0]*shape[0] + shape[2]*shape[2]);
+  idiag[2] = 0.2*mass * (shape[0]*shape[0] + shape[1]*shape[1]);
+  diag_times3(idiag,ptrans,itemp);
+  times3(p,itemp,tensor);
+  inertia[0] = tensor[0][0];
+  inertia[1] = tensor[1][1];
+  inertia[2] = tensor[2][2];
+  inertia[3] = tensor[1][2];
+  inertia[4] = tensor[0][2];
+  inertia[5] = tensor[0][1];
+}
+
+/* ----------------------------------------------------------------------
+  Superellipsoid inertia tensor
+  No need to compute new inertia tensor
+  for superellipsoid since it is stored in bonus_super
+------------------------------------------------------------------------- */
+
+void inertia_ellipsoid(double *idiag, double *quat, double *inertia)
+{
+  double p[3][3],ptrans[3][3],itemp[3][3],tensor[3][3];
+
+  quat_to_mat(quat,p);
+  quat_to_mat_trans(quat,ptrans);
   diag_times3(idiag,ptrans,itemp);
   times3(p,itemp,tensor);
   inertia[0] = tensor[0][0];
@@ -577,8 +633,41 @@ void inertia_triangle(double *idiag, double *quat, double /*mass*/,
 }
 
 /* ----------------------------------------------------------------------
- Build rotation matrix for a small angle rotation around the X axis
- ------------------------------------------------------------------------- */
+   compute the volume of the ellipsoid
+   shape = 3 radii of ellipsoid
+   return volume of the ellipsoid
+------------------------------------------------------------------------- */
+
+double volume_ellipsoid(double *shape)
+{
+  double unitvol = MY_4PI3;
+  return unitvol * shape[0] * shape[1] * shape[2];
+}
+
+/* ----------------------------------------------------------------------
+   compute the volume of the (super)ellipsoid
+   shape = 3 radii of (super)ellipsoid
+   block = blockiness exponents of (super)ellipsoid
+   return volume of the (super)ellipsoid
+------------------------------------------------------------------------- */
+
+double volume_ellipsoid(double *shape, double *block, int flag_super)
+{
+  double unitvol = MY_4PI3;
+
+  // superellipsoid, Eq. (12) of Jaklic and Solina, 2003, for p = q = r = 0
+
+  if (flag_super) {
+    double e1 = 2.0 / block[0], e2 = 2.0 / block[1];
+    unitvol = e1 * e2 * beta(0.5 * e1, 1.0 + e1) *
+                        beta(0.5 * e2, 0.5 * e2);
+  }
+  return unitvol * shape[0] * shape[1] * shape[2];
+}
+
+/* ----------------------------------------------------------------------
+   build rotation matrix for a small angle rotation around the X axis
+------------------------------------------------------------------------- */
 
 void BuildRxMatrix(double R[3][3], const double angle)
 {
@@ -592,8 +681,8 @@ void BuildRxMatrix(double R[3][3], const double angle)
 }
 
 /* ----------------------------------------------------------------------
- Build rotation matrix for a small angle rotation around the Y axis
- ------------------------------------------------------------------------- */
+   build rotation matrix for a small angle rotation around the Y axis
+------------------------------------------------------------------------- */
 
 void BuildRyMatrix(double R[3][3], const double angle)
 {
@@ -607,8 +696,8 @@ void BuildRyMatrix(double R[3][3], const double angle)
 }
 
 /* ----------------------------------------------------------------------
- Build rotation matrix for a small angle rotation around the Z axis
- ------------------------------------------------------------------------- */
+   build rotation matrix for a small angle rotation around the Z axis
+------------------------------------------------------------------------- */
 
 void BuildRzMatrix(double R[3][3], const double angle)
 {
@@ -619,6 +708,30 @@ void BuildRzMatrix(double R[3][3], const double angle)
   R[0][0] = cosAngle;  R[0][1] = -sinAngle;  R[0][2] = 0.0;
   R[1][0] = sinAngle;  R[1][1] = cosAngle;   R[1][2] = 0.0;
   R[2][0] = 0.0;       R[2][1] = 0.0;        R[2][2] = 1.0;
+}
+
+/* ----------------------------------------------------------------------
+   convert a sphere in box coords to an ellipsoid in triclinic lamda (0-1) coords
+   h[6] = domain->h for size and shape of triclinic box
+   radius = radius of sphere in box coords
+   return dist[3] = tight (axis-aligned) bounding box in triclinic lamda coords
+   see: http://www.loria.fr/~shornus/ellipsoid-bbox.html (no longer online)
+        https://yiningkarlli.blogspot.com/2013/02/bounding-boxes-for-ellipsoidsfigure.html
+------------------------------------------------------------------------- */
+
+void tribbox(double *h, double radius, double *dist)
+{
+  double lx = h[0];
+  double ly = h[1];
+  double lz = h[2];
+  double yz = h[3];
+  double xz = h[4];
+  double xy = h[5];
+
+  dist[0] = radius * sqrt(ly*ly*lz*lz + ly*ly*xz*xz - 2.0*ly*xy*xz*yz +
+                          lz*lz*xy*xy + xy*xy*yz*yz) / (lx*ly*lz);
+  dist[1] = radius * sqrt(lz*lz + yz*yz) / (ly*lz);
+  dist[2] = radius / lz;
 }
 
 /* ---------------------------------------------------------------------- */

@@ -35,11 +35,11 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define DELTABOND 16384
-#define DELTABIAS 16
-#define COEFFINIT 1.0
-#define FCCBONDS 12
-#define BIG 1.0e20
+static constexpr int DELTABOND = 16384;
+static constexpr int DELTABIAS = 16;
+static constexpr double COEFFINIT = 1.0;
+static constexpr int FCCBONDS = 12;
+static constexpr double BIG = 1.0e20;
 
 enum{STRAIN,STRAINDOMAIN,BIASFLAG,BIASCOEFF};
 enum{IGNORE,WARN,ERROR};
@@ -47,10 +47,11 @@ enum{IGNORE,WARN,ERROR};
 /* ---------------------------------------------------------------------- */
 
 FixHyperLocal::FixHyperLocal(LAMMPS *lmp, int narg, char **arg) :
-  FixHyper(lmp, narg, arg), blist(nullptr), biascoeff(nullptr), numbond(nullptr),
-  maxhalf(nullptr), eligible(nullptr), maxhalfstrain(nullptr), old2now(nullptr),
-  tagold(nullptr), xold(nullptr), maxstrain(nullptr), maxstrain_domain(nullptr),
-  biasflag(nullptr), bias(nullptr), cpage(nullptr), clist(nullptr), numcoeff(nullptr)
+    FixHyper(lmp, narg, arg), listfull(nullptr), listhalf(nullptr), blist(nullptr),
+    biascoeff(nullptr), numbond(nullptr), maxhalf(nullptr), eligible(nullptr),
+    maxhalfstrain(nullptr), old2now(nullptr), tagold(nullptr), xold(nullptr), maxstrain(nullptr),
+    maxstrain_domain(nullptr), biasflag(nullptr), bias(nullptr), cpage(nullptr), clist(nullptr),
+    numcoeff(nullptr)
 {
   // error checks
 
@@ -310,9 +311,10 @@ void FixHyperLocal::init()
   // NOTE: what if pair style list cutoff > Dcut
   //   or what if neigh skin is huge?
 
-  auto req = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
+  auto *req = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
   req->set_id(1);
-  req->set_cutoff(dcut);
+
+  req->set_cutoff_fixed(dcut);
 
   // also need occasional half neighbor list derived from pair style
   // used for building local bond list
@@ -1058,7 +1060,7 @@ void FixHyperLocal::build_bond_list(int natom)
   for (i = 0; i < nlocal; i++) numbond[i] = 0;
 
   // trigger neighbor list builds for both lists
-  // insure the I loops in both are from 1 to nlocal
+  // ensure the I loops in both are from 1 to nlocal
 
   neighbor->build_one(listfull);
   neighbor->build_one(listhalf);
@@ -1441,7 +1443,7 @@ void FixHyperLocal::unpack_reverse_comm(int n, int *list, double *buf)
 
 void FixHyperLocal::grow_bond()
 {
-  if (maxbond + DELTABOND > MAXSMALLINT)
+  if (maxbond > MAXSMALLINT - DELTABOND)
     error->one(FLERR,"Fix hyper/local bond count is too big");
   maxbond += DELTABOND;
   blist = (OneBond *)

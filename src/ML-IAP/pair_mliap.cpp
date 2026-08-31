@@ -21,6 +21,9 @@
 #include "mliap_data.h"
 #include "mliap_descriptor_snap.h"
 #include "mliap_descriptor_so3.h"
+#ifdef MLIAP_ACE
+#include "mliap_descriptor_ace.h"
+#endif
 #include "mliap_model_linear.h"
 #include "mliap_model_nn.h"
 #include "mliap_model_quadratic.h"
@@ -30,12 +33,11 @@
 #endif
 
 #include "atom.h"
-#include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "neighbor.h"
-#include "neigh_request.h"
 
 #include <cmath>
 #include <cstring>
@@ -45,12 +47,13 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 PairMLIAP::PairMLIAP(LAMMPS *lmp) :
-    Pair(lmp), map(nullptr), model(nullptr), descriptor(nullptr), data(nullptr)
+    Pair(lmp), model(nullptr), descriptor(nullptr), data(nullptr)
 {
   single_enable = 0;
   restartinfo = 0;
   one_coeff = 1;
   manybody_flag = 1;
+  is_child = false;
   centroidstressflag = CENTROID_NOTAVAIL;
 }
 
@@ -63,12 +66,14 @@ PairMLIAP::~PairMLIAP()
   delete model;
   delete descriptor;
   delete data;
-
+  model=nullptr;
+  descriptor=nullptr;
+  data=nullptr;
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
-    memory->destroy(cutghost);
     memory->destroy(map);
+    memory->destroy(cutghost);
   }
 }
 
@@ -80,7 +85,6 @@ void PairMLIAP::compute(int eflag, int vflag)
 {
 
   // consistency checks
-
   if (data->ndescriptors != model->ndescriptors)
     error->all(FLERR, "Inconsistent model and descriptor descriptor count: {} vs {}",
                model->ndescriptors, data->ndescriptors);
@@ -121,8 +125,8 @@ void PairMLIAP::allocate()
 
   memory->create(setflag,n+1,n+1,"pair:setflag");
   memory->create(cutsq,n+1,n+1,"pair:cutsq");
-  memory->create(cutghost,n+1,n+1,"pair:cutghost");
   memory->create(map,n+1,"pair:map");
+  if (ghostneigh) memory->create(cutghost, n+1, n+1, "pair:cutghost");
 }
 
 /* ----------------------------------------------------------------------
@@ -131,19 +135,18 @@ void PairMLIAP::allocate()
 
 void PairMLIAP::settings(int narg, char ** arg)
 {
-  if (narg < 2) utils::missing_cmd_args(FLERR, "pair_style mliap", error);
 
-  // set flags for required keywords
-
-  delete model;
-  model = nullptr;
-  delete descriptor;
-  descriptor = nullptr;
+  // This is needed because the unit test calls settings twice
+  if (!is_child) {
+    if (narg < 2) utils::missing_cmd_args(FLERR, "pair_style mliap", error);
+    delete model;
+    model = nullptr;
+    delete descriptor;
+    descriptor = nullptr;
+  }
 
   // process keywords
-
   int iarg = 0;
-
   while (iarg < narg) {
     if (strcmp(arg[iarg],"model") == 0) {
       if (iarg+2 > narg) utils::missing_cmd_args(FLERR, "pair_style mliap model", error);
@@ -180,8 +183,16 @@ void PairMLIAP::settings(int narg, char ** arg)
         if (iarg+3 > narg) utils::missing_cmd_args(FLERR, "pair_style mliap descriptor so3", error);
         descriptor = new MLIAPDescriptorSO3(lmp,arg[iarg+2]);
         iarg += 3;
-
-      } else error->all(FLERR,"Illegal pair_style mliap command");
+      }
+#ifdef MLIAP_ACE
+        else if (strcmp(arg[iarg+1],"ace") == 0) {
+        if (iarg+3 > narg) error->all(FLERR,"Illegal pair_style mliap command");
+        if (lmp->kokkos) error->all(FLERR,"Cannot (yet) use KOKKOS package with ACE descriptors");
+        descriptor = new MLIAPDescriptorACE(lmp,arg[iarg+2]);
+        iarg += 3;
+      }
+#endif
+      else error->all(FLERR,"Illegal pair_style mliap command");
     } else if (strcmp(arg[iarg], "unified") == 0) {
 #ifdef MLIAP_PYTHON
       if (model != nullptr) error->all(FLERR,"Illegal multiple pair_style mliap model definitions");
@@ -214,7 +225,7 @@ void PairMLIAP::settings(int narg, char ** arg)
 
 void PairMLIAP::coeff(int narg, char **arg)
 {
-  if (narg < 3) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (narg < 3) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   char** elemtypes = &arg[2];
@@ -233,7 +244,7 @@ void PairMLIAP::coeff(int narg, char **arg)
     if (jelem < descriptor->nelements)
       map[i] = jelem;
     else if (strcmp(elemname,"NULL") == 0) map[i] = -1;
-    else error->all(FLERR,"Incorrect args for pair coefficients");
+    else error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   }
 
   // clear setflag since coeff() called once with I,J = * *
@@ -253,13 +264,13 @@ void PairMLIAP::coeff(int narg, char **arg)
         count++;
       }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
   // set up model, descriptor, and mliap data structures
 
   model->init();
   descriptor->init();
-  int gradgradflag = -1;
+  constexpr int gradgradflag = -1;
   delete data;
   data = new MLIAPData(lmp, gradgradflag, map, model, descriptor, this);
   data->init();
@@ -327,7 +338,7 @@ void PairMLIAP::v_tally(int i, int j, double *fij, double *rij)
 void PairMLIAP::init_style()
 {
   if (force->newton_pair == 0)
-    error->all(FLERR,"Pair style MLIAP requires newton pair on");
+    error->all(FLERR, Error::NOLASTLINE, "Pair style mliap requires newton pair on");
 
   // need a full neighbor list
 
@@ -345,9 +356,12 @@ void PairMLIAP::init_style()
 
 double PairMLIAP::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
+
   double cutmax = sqrt(descriptor->cutsq[map[i]][map[j]]);
-  cutghost[i][j] = cutghost[j][i] = 2.0 * cutmax + neighbor->skin;
+  if (ghostneigh) cutghost[i][j] =  cutghost[j][i] = cutmax;
   return cutmax;
 }
 
@@ -362,7 +376,6 @@ double PairMLIAP::memory_usage()
   int n = atom->ntypes+1;
   bytes += (double)n*n*sizeof(int);            // setflag
   bytes += (double)n*n*sizeof(int);            // cutsq
-  bytes += (double)n*n*sizeof(int);            // cutghost
   bytes += (double)n*sizeof(int);              // map
   bytes += descriptor->memory_usage(); // Descriptor object
   bytes += model->memory_usage();      // Model object

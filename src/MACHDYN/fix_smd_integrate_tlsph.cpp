@@ -24,15 +24,18 @@
  ------------------------------------------------------------------------- */
 
 #include "fix_smd_integrate_tlsph.h"
+
+#include "atom.h"
+#include "comm.h"
+#include "domain.h"
+#include "error.h"
+#include "force.h"
+#include "pair.h"
+#include "update.h"
+
 #include <cmath>
 #include <cstring>
 #include <Eigen/Eigen>
-#include "atom.h"
-#include "force.h"
-#include "update.h"
-#include "error.h"
-#include "pair.h"
-#include "comm.h"
 
 using namespace Eigen;
 using namespace LAMMPS_NS;
@@ -42,7 +45,8 @@ using namespace std;
 /* ---------------------------------------------------------------------- */
 
 FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
-                Fix(lmp, narg, arg) {
+    Fix(lmp, narg, arg), pair(nullptr)
+{
         if (narg < 3) {
                 printf("narg=%d\n", narg);
                 error->all(FLERR, "Illegal fix smd/integrate_tlsph command");
@@ -80,9 +84,7 @@ FixSMDIntegrateTlsph::FixSMDIntegrateTlsph(LAMMPS *lmp, int narg, char **arg) :
                                 printf("... will limit velocities to <= %g\n", vlimit);
                         }
                 } else {
-                        char msg[128];
-                        snprintf(msg,128, "Illegal keyword for smd/integrate_tlsph: %s\n", arg[iarg]);
-                        error->all(FLERR, msg);
+                        error->all(FLERR, iarg, "Unknown fix smd/integrate_tlsph keyword: {}", arg[iarg]);
                 }
 
                 iarg++;
@@ -115,6 +117,11 @@ void FixSMDIntegrateTlsph::init() {
         dtv = update->dt;
         dtf = 0.5 * update->dt * force->ftm2v;
         vlimitsq = vlimit * vlimit;
+
+        // Cannot use vremap since its effects aren't propagated to vest
+        //   see RHEO or SPH packages for examples of patches
+        if (domain->deform_vremap)
+          error->all(FLERR, "Fix smd/integrate_tlsph cannot be used with velocity remapping");
 }
 
 /* ----------------------------------------------------------------------
@@ -137,7 +144,7 @@ void FixSMDIntegrateTlsph::initial_integrate(int /*vflag*/) {
         if (igroup == atom->firstgroup)
                 nlocal = atom->nfirst;
 
-        auto smoothVelDifference = (Vector3d *) force->pair->extract("smd/tlsph/smoothVel_ptr", itmp);
+        auto *smoothVelDifference = (Vector3d *) force->pair->extract("smd/tlsph/smoothVel_ptr", itmp);
 
         if (xsphFlag) {
                 if (smoothVelDifference == nullptr) {

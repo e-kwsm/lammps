@@ -30,6 +30,8 @@ class Compute : protected Pointers {
     INVOKED_ARRAY   = 1<<2,
     INVOKED_PERATOM = 1<<3,
     INVOKED_LOCAL   = 1<<4,
+    INVOKED_PERGRID = 1<<5,
+    INVOKED_IMAGE   = 1<<6,
   };
   // clang-format on
   static int instance_total;    // # of Compute classes ever instantiated
@@ -45,21 +47,23 @@ class Compute : protected Pointers {
   double *vector_local;    // computed local vector
   double **array_local;    // computed local array
 
-  int scalar_flag;                 // 0/1 if compute_scalar() function exists
-  int vector_flag;                 // 0/1 if compute_vector() function exists
-  int array_flag;                  // 0/1 if compute_array() function exists
+  int scalar_flag;     // 0/1 if compute_scalar() function exists
+  int vector_flag;     // 0/1 if compute_vector() function exists
+  int array_flag;      // 0/1 if compute_array() function exists
+  int pergrid_flag;    // 0/1 if compute_pergrid() function exists
+  int image_flag;      // 0/1 if compute_image() function exists
+  int peratom_flag;    // 0/1 if compute_peratom() function exists
+  int local_flag;      // 0/1 if compute_local() function exists
+
+  int thermo_modify_colname;       // 1 if compute has custom column names for output
   int size_vector;                 // length of global vector
   int size_array_rows;             // rows in global array
   int size_array_cols;             // columns in global array
   int size_vector_variable;        // 1 if vec length is unknown in advance
   int size_array_rows_variable;    // 1 if array rows is unknown in advance
-
-  int peratom_flag;         // 0/1 if compute_peratom() function exists
-  int size_peratom_cols;    // 0 = vector, N = columns in peratom array
-
-  int local_flag;         // 0/1 if compute_local() function exists
-  int size_local_rows;    // rows in local vector or array
-  int size_local_cols;    // 0 = vector, N = columns in local array
+  int size_peratom_cols;           // 0 = vector, N = columns in peratom array
+  int size_local_rows;             // rows in local vector or array
+  int size_local_cols;             // 0 = vector, N = columns in local array
 
   int extscalar;    // 0/1 if global scalar is intensive/extensive
   int extvector;    // 0/1/-1 if global vector is all int/ext/extlist
@@ -85,12 +89,15 @@ class Compute : protected Pointers {
   int maxtime;      // max # of entries time list can hold
   bigint *tlist;    // list of timesteps the Compute is called on
 
+  int initialized_flag;      // 1 if compute is initialized, 0 if not
   int invoked_flag;          // non-zero if invoked or accessed this step, 0 if not
   bigint invoked_scalar;     // last timestep on which compute_scalar() was invoked
   bigint invoked_vector;     // ditto for compute_vector()
   bigint invoked_array;      // ditto for compute_array()
+  bigint invoked_image;      // ditto for compute_image()
   bigint invoked_peratom;    // ditto for compute_peratom()
   bigint invoked_local;      // ditto for compute_local()
+  bigint invoked_pergrid;    // ditto for compute_grid()
 
   double dof;    // degrees-of-freedom for temperature
 
@@ -101,39 +108,55 @@ class Compute : protected Pointers {
   // KOKKOS host/device flag and data masks
 
   ExecutionSpace execution_space;
-  unsigned int datamask_read, datamask_modify;
+  uint64_t datamask_read, datamask_modify;
 
   int copymode, kokkosable;
+  int forward_comm_device;    // 1 if forward comm on Device
 
   Compute(class LAMMPS *, int, char **);
   ~Compute() override;
   void modify_params(int, char **);
+  virtual int modify_param(int, char **) { return 0; }
   virtual void reset_extra_dof();
+  virtual void post_constructor() {}
 
+  void init_flags();
   virtual void init() = 0;
   virtual void init_list(int, class NeighList *) {}
   virtual void setup() {}
   virtual double compute_scalar() { return 0.0; }
   virtual void compute_vector() {}
   virtual void compute_array() {}
+  virtual int compute_image(int *&, double **&) { return 0; }
   virtual void compute_peratom() {}
   virtual void compute_local() {}
+  virtual void compute_pergrid() {}
   virtual void set_arrays(int) {}
+  virtual std::string get_thermo_colname(int) { return {}; }
 
   virtual int pack_forward_comm(int, int *, double *, int, int *) { return 0; }
   virtual void unpack_forward_comm(int, int, double *) {}
   virtual int pack_reverse_comm(int, int, double *) { return 0; }
   virtual void unpack_reverse_comm(int, int *, double *) {}
 
+  virtual void reset_grid() {};
+
+  virtual int get_grid_by_name(const std::string &, int &) { return -1; };
+  virtual void *get_grid_by_index(int) { return nullptr; };
+  virtual int get_griddata_by_name(int, const std::string &, int &) { return -1; };
+  virtual void *get_griddata_by_index(int) { return nullptr; };
+
   virtual void dof_remove_pre() {}
   virtual int dof_remove(int) { return 0; }
   virtual void remove_bias(int, double *) {}
   virtual void remove_bias_thr(int, double *, double *) {}
   virtual void remove_bias_all() {}
+  virtual void remove_bias_all_kk() {}
   virtual void reapply_bias_all() {}
   virtual void restore_bias(int, double *) {}
   virtual void restore_bias_thr(int, double *, double *) {}
   virtual void restore_bias_all() {}
+  virtual void restore_bias_all_kk() {}
 
   virtual void reset_extra_compute_fix(const char *);
 
@@ -149,6 +172,8 @@ class Compute : protected Pointers {
   int matchstep(bigint);
   void clearstep();
 
+  [[nodiscard]] bool is_initialized() const { return initialized_flag == 1; }
+
   virtual double memory_usage() { return 0.0; }
 
   virtual void pair_setup_callback(int, int) {}
@@ -162,7 +187,7 @@ class Compute : protected Pointers {
 
   double natoms_temp;    // # of atoms used for temperature calculation
   double extra_dof;      // extra DOF for temperature computes
-  int fix_dof;           // DOF due to fixes
+  double fix_dof;        // DOF due to fixes
   int dynamic;           // recount atoms for temperature computes
   int dynamic_user;      // user request for temp compute to be dynamic
 
@@ -170,7 +195,7 @@ class Compute : protected Pointers {
   double **vbiasall;    // stored velocity bias for all atoms
   int maxbias;          // size of vbiasall array
 
-  inline int sbmask(int j) const { return j >> SBBITS & 3; }
+  [[nodiscard]] int sbmask(int j) const { return j >> SBBITS & 3; }
 
   // private methods
 

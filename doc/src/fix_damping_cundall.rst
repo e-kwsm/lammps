@@ -6,7 +6,7 @@ fix damping/cundall command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID damping/cundall gamma_l gamma_a keyword values ...
 
@@ -70,11 +70,12 @@ using an :doc:`atom-style variable <variable>`.
 
 .. Note::
 
-  The damping force/torque is computed based on the force/torque at the moment
-  this fix is invoked. Any force/torque added after this fix, e.g., by
-  :doc:`fix addforce <fix_addforce>` or :doc:`fix addtorque <fix_addtorque>`
-  will not be damped. When performing simulations with gravity, invoking
-  :doc:`fix gravity <fix_gravity>` after this fix will maintain the specified
+  The damping force/torque is computed based on the force/torque at the
+  moment this fix is invoked. Any force/torque added after this fix,
+  e.g., by :doc:`fix addforce <fix_addforce>` or :doc:`fix
+  addtorque/group <fix_addtorque_group>` will not be damped. When
+  performing simulations with gravity, invoking :doc:`fix gravity
+  <fix_gravity>` after this fix will maintain the specified
   gravitational acceleration.
 
 .. Note::
@@ -85,9 +86,12 @@ using an :doc:`atom-style variable <variable>`.
 
 This non-viscous damping presents the following advantages:
 
-1. damping is independent of velocity, equally damping regions with distinct natural frequencies,
-2. damping affects acceleration and vanishes for steady uniform motion of the particles,
-3. damping parameter :math:`\gamma` is dimensionless and does not require scaling.
+#. damping is independent of velocity, equally damping regions with
+   distinct natural frequencies,
+#. damping affects acceleration and vanishes for steady uniform motion
+   of the particles,
+#. damping parameter :math:`\gamma` is dimensionless and does not
+   require scaling.
 
 ----------
 
@@ -95,27 +99,28 @@ Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 No information about this fix is written to :doc:`binary restart files
-<restart>`.  None of the :doc:`fix_modify <fix_modify>` options are
-relevant to this fix.  No global or per-atom quantities are stored by
-this fix for access by various :doc:`output commands <Howto_output>`.
-No parameter of this fix can be used with the *start/stop* keywords of
-the :doc:`run <run>` command.
+<restart>`.  No global or per-atom quantities are stored by this fix for
+access by various :doc:`output commands <Howto_output>`.  No parameter
+of this fix can be used with the *start/stop* keywords of the :doc:`run
+<run>` command.
 
 The :doc:`fix_modify <fix_modify>` *respa* option is supported by this
 fix. This allows to set at which level of the :doc:`r-RESPA <run_style>`
-integrator the fix is modifying forces/torques. Default is the outermost level.
+integrator the fix is modifying forces/torques.  Default is the outermost
+level.
 
-The forces/torques due to this fix are imposed during an energy minimization,
-invoked by the :doc:`minimize <minimize>` command.  This fix should only
-be used with damped dynamics minimizers that allow for
+The forces/torques due to this fix are imposed during an energy
+minimization, invoked by the :doc:`minimize <minimize>` command.  This
+fix should only be used with damped dynamics minimizers that allow for
 non-conservative forces.  See the :doc:`min_style <min_style>` command
 for details.
 
 Restrictions
 """"""""""""
 
-This fix is part of the GRANULAR package.  It is only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
+This fix is part of the GRANULAR package.  It is only enabled if LAMMPS
+was built with that package.  See the :doc:`Build package
+<Build_package>` page for more info.
 
 This fix requires that atoms store torque and a radius as defined by the
 :doc:`atom_style sphere <atom_style>` command.

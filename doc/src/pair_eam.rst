@@ -19,6 +19,10 @@
 .. index:: pair_style eam/fs/omp
 .. index:: pair_style eam/fs/opt
 .. index:: pair_style eam/he
+.. index:: pair_style eam/he/gpu
+.. index:: pair_style eam/he/kk
+.. index:: pair_style eam/he/omp
+.. index:: pair_style eam/he/opt
 
 pair_style eam command
 ======================
@@ -39,10 +43,12 @@ pair_style eam/cd/old command
 pair_style eam/fs command
 =========================
 
+Accelerator Variants: *eam/fs/gpu*, *eam/fs/intel*, *eam/fs/kk*, *eam/fs/omp*, *eam/fs/opt*
+
 pair_style eam/he command
 =========================
 
-Accelerator Variants: *eam/fs/gpu*, *eam/fs/intel*, *eam/fs/kk*, *eam/fs/omp*, *eam/fs/opt*
+Accelerator Variants: *eam/he/gpu*, *eam/he/kk*, *eam/he/omp*, *eam/he/opt*
 
 Syntax
 """"""
@@ -116,17 +122,18 @@ are parameterized in terms of LAMMPS :doc:`metal units <units>`.
 
 .. note::
 
-   Note that unlike for other potentials, cutoffs for EAM
-   potentials are not set in the pair_style or pair_coeff command; they
-   are specified in the EAM potential files themselves.  Likewise, the
-   EAM potential files list atomic masses; thus you do not need to use
-   the :doc:`mass <mass>` command to specify them.
+   Note that unlike for other potentials, cutoffs for EAM potentials are not
+   set in the pair_style or pair_coeff command; they are specified in the EAM
+   potential files themselves.  Likewise, valid EAM potential files usually
+   contain atomic masses; thus you may not need to use the :doc:`mass <mass>`
+   command to specify them, unless the potential file uses a dummy value (e.g.
+   0.0). LAMMPS will print a warning, if this is the case.
 
 There are web sites that distribute and document EAM potentials stored
 in DYNAMO or other formats:
 
-* https://www.ctcms.nist.gov/potentials
-* https://openkim.org
+* https://www.ctcms.nist.gov/potentials/
+* https://openkim.org/
 
 These potentials should be usable with LAMMPS, though the alternate
 formats would need to be converted to the DYNAMO format used by LAMMPS
@@ -138,6 +145,21 @@ The OpenKIM Project at
 `https://openkim.org/browse/models/by-type <https://openkim.org/browse/models/by-type>`_
 provides EAM potentials that can be used directly in LAMMPS with the
 :doc:`kim command <kim_commands>` interface.
+
+.. warning::
+
+   The EAM potential files tabulate the embedding energy as a function
+   of the local electron density :math:`\rho`.  When atoms get too
+   close, this electron density may exceed the range for which the
+   embedding energy was tabulated for.  To avoid crashes, LAMMPS will
+   assume a linearly increasing embedding energy for electron densities
+   beyond the maximum tabulated value.  LAMMPS will print a warning when
+   this happens.  It may be acceptable at the beginning of an
+   equilibration (e.g. when using randomized coordinates) but would be a
+   big concern for accuracy if it happens during production runs.  The
+   EAM potential file triggering the warning during production is thus
+   not a good choice, and the EAM model in general not likely a good
+   model for the kind of system under investigation.
 
 ----------
 
@@ -478,9 +500,6 @@ The eam pair styles can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  They do not support the
 *inner*, *middle*, *outer* keywords.
 
-
-
-
 ----------
 
 Restrictions
@@ -490,10 +509,18 @@ All of these styles are part of the MANYBODY package.  They are only
 enabled if LAMMPS was built with that package.  See the :doc:`Build
 package <Build_package>` page for more info.
 
+Two-band (s+d) and multi-band EAM potentials, such as the Fe-Cr models that
+add an extra "s-band" embedding term to the standard EAM energy, can be run
+with the existing *eam/fs* and :doc:`hybrid/overlay <pair_hybrid>` styles
+without modifying LAMMPS.  See the :doc:`Howto_eam_overlay <Howto_eam_overlay>`
+page for the construction and a helper script that builds the s-band file.
+
 Related commands
 """"""""""""""""
 
-:doc:`pair_coeff <pair_coeff>`
+:doc:`pair_coeff <pair_coeff>`,
+:doc:`pair_style hybrid/overlay <pair_hybrid>`,
+:doc:`Howto_eam_overlay <Howto_eam_overlay>`
 
 Default
 """""""

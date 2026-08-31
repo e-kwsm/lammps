@@ -34,17 +34,9 @@
 #include "pair_saip_metal_opt.h"
 
 #include "atom.h"
-#include "citeme.h"
-#include "comm.h"
-#include "error.h"
-#include "force.h"
 #include "interlayer_taper.h"
 #include "memory.h"
-#include "neigh_list.h"
-#include "neigh_request.h"
-#include "neighbor.h"
 
-#include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -57,15 +49,12 @@ PairSAIPMETALOpt::PairSAIPMETALOpt(LAMMPS *lmp) :
 
 void PairSAIPMETALOpt::coeff(int narg, char **args)
 {
-  PairSAIPMETAL::coeff(narg, args);
-  memory->create(special_type, atom->ntypes + 1, "PairSAIPMETALOpt:special_type");
+  PairILPGrapheneHBNOpt::coeff(narg, args);
   for (int i = 1; i <= atom->ntypes; i++) {
     int itype = map[i];
     if (strcmp(elements[itype], "C") != 0 && strcmp(elements[itype], "H") != 0 &&
         strcmp(elements[itype], "B") != 0 && strcmp(elements[itype], "N") != 0) {
-      special_type[i] = true;
-    } else {
-      special_type[i] = false;
+      special_type[i] = SAIP_METAL;
     }
   }
 }

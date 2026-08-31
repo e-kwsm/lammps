@@ -4,6 +4,7 @@
 .. index:: pair_style morse/opt
 .. index:: pair_style morse/smooth/linear
 .. index:: pair_style morse/smooth/linear/omp
+.. index:: pair_style morse/smooth/linear/kk
 .. index:: pair_style morse/kk
 
 pair_style morse command
@@ -14,7 +15,7 @@ Accelerator Variants: *morse/gpu*, *morse/omp*, *morse/opt*, *morse/kk*
 pair_style morse/smooth/linear command
 ======================================
 
-Accelerator Variants: *morse/smooth/linear/omp*
+Accelerator Variants: *morse/smooth/linear/omp*, *morse/smooth/linear/kk*
 
 Syntax
 """"""
@@ -53,7 +54,7 @@ Style *morse* computes pairwise interactions with the formula
    E = D_0 \left[ e^{- 2 \alpha (r - r_0)} - 2 e^{- \alpha (r - r_0)} \right]
        \qquad r < r_c
 
-Rc is the cutoff.
+:math:`r_c` is the cutoff.
 
 The following coefficients must be defined for each pair of atoms
 types via the :doc:`pair_coeff <pair_coeff>` command as in the examples
@@ -78,7 +79,7 @@ so that both, potential energy and force, go to zero at the cut-off:
 .. math::
 
    \phi\left(r\right) & =  D_0 \left[ e^{- 2 \alpha (r - r_0)} - 2 e^{- \alpha (r - r_0)} \right] \qquad r < r_c \\
-   E\left(r\right) & =  \phi\left(r\right)  - \phi\left(R_c\right) - \left(r - R_c\right) \left.\frac{d\phi}{d r} \right|_{r=R_c}       \qquad r < R_c
+   E\left(r\right) & =  \phi\left(r\right)  - \phi\left(r_c\right) - \left(r - r_c\right) \left.\frac{d\phi}{d r} \right|_{r=r_c}       \qquad r < r_c
 
 The syntax of the pair_style and pair_coeff commands are the same for
 the *morse* and *morse/smooth/linear* styles.
@@ -107,7 +108,7 @@ I,J pairs must be specified explicitly.
 All of these pair styles support the :doc:`pair_modify <pair_modify>`
 shift option for the energy of the pair interaction.
 
-The :doc:`pair_modify <pair_modify>` table options is not relevant for
+The :doc:`pair_modify <pair_modify>` table options are not relevant for
 the Morse pair styles.
 
 None of these pair styles support the :doc:`pair_modify <pair_modify>`

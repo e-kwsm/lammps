@@ -49,7 +49,9 @@ pkgs = []
 # folder, and is not called 'MAKE' is a package 
 
 for d in pkgdirs:
-    pkg = dirs.match(d).group(1)
+    match = dirs.match(d)
+    if not match: continue
+    pkg = match.group(1)
     if not os.path.isdir(os.path.join(src_dir, pkg)): continue
     if pkg in ['DEPEND','MAKE','STUBS']: continue
     pkgs.append(pkg)
@@ -58,14 +60,14 @@ print(f"Found {len(pkgs)} packages")
 
 counter = 0
 
-with open(os.path.join(doc_dir, 'Packages_list.rst')) as fp:
+with open(os.path.join(doc_dir, 'Packages.rst')) as fp:
     text = fp.read()
 
 matches = set(re.findall(':ref:`([A-Z0-9-]+) <[A-Z0-9-]+>`', text, re.MULTILINE))
 for p in pkgs:
   if not p in matches:
     counter += 1
-    print(f"Package {p} missing in Packages_list.rst")
+    print(f"Package {p} missing in Packages.rst")
 
 with open(os.path.join(doc_dir, 'Packages_details.rst')) as fp:
     text = fp.read()

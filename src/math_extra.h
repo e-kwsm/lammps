@@ -24,6 +24,7 @@ namespace MathExtra {
 
 // 3 vector operations
 
+inline void copy2(const double *v, double *ans);
 inline void copy3(const double *v, double *ans);
 inline void zero3(double *v);
 inline void norm3(double *v);
@@ -47,6 +48,7 @@ inline void cross3(const double *v1, const double *v2, double *ans);
 
 inline void zeromat3(double m[3][3]);
 inline void zeromat3(double **m);
+inline void transpose3(const double m[3][3], double ans[3][3]);
 
 inline void col2mat(const double *ex, const double *ey, const double *ez, double m[3][3]);
 inline double det3(const double mat[3][3]);
@@ -87,7 +89,8 @@ inline void multiply_shape_shape(const double *one, const double *two, double *a
 // quaternion operations
 
 inline void qnormalize(double *q);
-inline void qconjugate(double *q, double *qc);
+inline void qconjugate(double *q,
+                       double *qc);    // would it be better to have q passed as const double?
 inline void vecquat(double *a, double *b, double *c);
 inline void quatvec(double *a, double *b, double *c);
 inline void quatquat(double *a, double *b, double *c);
@@ -99,6 +102,7 @@ void angmom_to_omega(double *m, double *ex, double *ey, double *ez, double *idia
 void omega_to_angmom(double *w, double *ex, double *ey, double *ez, double *idiag, double *m);
 void mq_to_omega(double *m, double *q, double *moments, double *w);
 void exyz_to_q(double *ex, double *ey, double *ez, double *q);
+void mat_to_quat(double mat[3][3], double *quat);
 void q_to_exyz(double *q, double *ex, double *ey, double *ez);
 void quat_to_mat(const double *quat, double mat[3][3]);
 void quat_to_mat_trans(const double *quat, double mat[3][3]);
@@ -114,12 +118,34 @@ void BuildRyMatrix(double R[3][3], const double angle);
 void BuildRzMatrix(double R[3][3], const double angle);
 
 // moment of inertia operations
-
+void inertia_ellipsoid(double *idiag, double *quat, double *inertia);    //superellipsoid version
 void inertia_ellipsoid(double *shape, double *quat, double mass, double *inertia);
 void inertia_line(double length, double theta, double mass, double *inertia);
 void inertia_triangle(double *v0, double *v1, double *v2, double mass, double *inertia);
 void inertia_triangle(double *idiag, double *quat, double mass, double *inertia);
+
+// volume of ellipsoid
+double volume_ellipsoid(double *shape);
+double volume_ellipsoid(double *shape, double *block, int flag_super);
+
+// triclinic bounding box of a sphere
+
+void tribbox(double *, double, double *);
+
+// alternative to std::beta
+double beta(double x, double y);
+
 }    // namespace MathExtra
+
+/* ----------------------------------------------------------------------
+   copy a vector, return in ans
+------------------------------------------------------------------------- */
+
+inline void MathExtra::copy2(const double *v, double *ans)
+{
+  ans[0] = v[0];
+  ans[1] = v[1];
+}
 
 /* ----------------------------------------------------------------------
    copy a vector, return in ans
@@ -758,6 +784,21 @@ inline void MathExtra::zeromat3(double **m)
   m[2][0] = m[2][1] = m[2][2] = 0.0;
 }
 
+// transpose a matrix
+
+inline void MathExtra::transpose3(const double m[3][3], double ans[3][3])
+{
+  ans[0][0] = m[0][0];
+  ans[0][1] = m[1][0];
+  ans[0][2] = m[2][0];
+  ans[1][0] = m[0][1];
+  ans[1][1] = m[1][1];
+  ans[1][2] = m[2][1];
+  ans[2][0] = m[0][2];
+  ans[2][1] = m[1][2];
+  ans[2][2] = m[2][2];
+}
+
 // add two matrices
 
 inline void MathExtra::plus3(const double m[3][3], double **m2, double **ans)
@@ -814,6 +855,11 @@ inline void MathExtra::outer3(const double *v1, const double *v2, double ans[3][
   ans[2][0] = v1[2] * v2[0];
   ans[2][1] = v1[2] * v2[1];
   ans[2][2] = v1[2] * v2[2];
+}
+
+inline double MathExtra::beta(double x, double y)
+{
+  return std::exp(std::lgamma(x) + std::lgamma(y) - std::lgamma(x + y));
 }
 
 #endif

@@ -36,6 +36,8 @@ class AtomVecLine : public AtomVec {
   ~AtomVecLine() override;
   void init() override;
 
+  void set_sphere();
+
   void grow_pointers() override;
   void copy_bonus(int, int, int) override;
   void clear_bonus() override;
@@ -64,6 +66,7 @@ class AtomVecLine : public AtomVec {
   void set_length(int, double);
 
   int nlocal_bonus;
+  int particle_style;
 
  private:
   int *line;
@@ -76,7 +79,6 @@ class AtomVecLine : public AtomVec {
 
   void grow_bonus();
   void copy_bonus_all(int, int);
-  // void consistency_check(int, char *);
 };
 
 }    // namespace LAMMPS_NS

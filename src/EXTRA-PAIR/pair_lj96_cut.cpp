@@ -30,15 +30,19 @@
 #include "update.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJ96Cut::PairLJ96Cut(LAMMPS *lmp) : Pair(lmp)
+PairLJ96Cut::PairLJ96Cut(LAMMPS *lmp) :
+    Pair(lmp), cut(nullptr), epsilon(nullptr), sigma(nullptr), lj1(nullptr), lj2(nullptr),
+    lj3(nullptr), lj4(nullptr), offset(nullptr)
 {
   respa_enable = 1;
+  born_matrix_enable = 1;
   writedata = 1;
   cut_respa = nullptr;
 }
@@ -47,6 +51,8 @@ PairLJ96Cut::PairLJ96Cut(LAMMPS *lmp) : Pair(lmp)
 
 PairLJ96Cut::~PairLJ96Cut()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -449,7 +455,7 @@ void PairLJ96Cut::settings(int narg, char **arg)
 void PairLJ96Cut::coeff(int narg, char **arg)
 {
   if (narg < 4 || narg > 5)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -473,7 +479,7 @@ void PairLJ96Cut::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -487,7 +493,7 @@ void PairLJ96Cut::init_style()
   int list_style = NeighConst::REQ_DEFAULT;
 
   if (update->whichflag == 1 && utils::strmatch(update->integrate_style, "^respa")) {
-    auto respa = dynamic_cast<Respa *>(update->integrate);
+    auto *respa = dynamic_cast<Respa *>(update->integrate);
     if (respa->level_inner >= 0) list_style = NeighConst::REQ_RESPA_INOUT;
     if (respa->level_middle >= 0) list_style = NeighConst::REQ_RESPA_ALL;
   }
@@ -681,4 +687,37 @@ double PairLJ96Cut::single(int /*i*/, int /*j*/, int itype, int jtype, double rs
   philj = r6inv*(lj3[itype][jtype]*r3inv-lj4[itype][jtype]) -
     offset[itype][jtype];
   return factor_lj*philj;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairLJ96Cut::born_matrix(int /*i*/, int /*j*/, int itype, int jtype, double rsq,
+                            double /*factor_coul*/, double factor_lj, double &dupair,
+                            double &du2pair)
+{
+  double rinv, r2inv, r3inv, r6inv, du, du2;
+
+  r2inv = 1.0/rsq;
+  rinv = sqrt(r2inv);
+  r6inv = r2inv * r2inv * r2inv;
+  r3inv = r2inv * rinv;
+
+  // Reminder: lj1[i][j] = 36.0 * epsilon[i][j] * pow(sigma[i][j],9.0);
+  // Reminder: lj2[i][j] = 24.0 * epsilon[i][j] * pow(sigma[i][j],6.0);
+
+  du = r6inv * rinv * (lj2[itype][jtype] - lj1[itype][jtype] * r3inv);
+  du2 = r6inv * r2inv * (10 * lj1[itype][jtype] * r6inv - 7 * lj2[itype][jtype]);
+
+  dupair = factor_lj * du;
+  du2pair = factor_lj * du2;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void *PairLJ96Cut::extract(const char *str, int &dim)
+{
+  dim = 2;
+  if (strcmp(str, "epsilon") == 0) return (void *) epsilon;
+  if (strcmp(str, "sigma") == 0) return (void *) sigma;
+  return nullptr;
 }

@@ -14,27 +14,14 @@
 
 #include "lammps.h"
 
-#include "style_angle.h"     // IWYU pragma: keep
-#include "style_atom.h"      // IWYU pragma: keep
-#include "style_bond.h"      // IWYU pragma: keep
-#include "style_command.h"   // IWYU pragma: keep
-#include "style_compute.h"   // IWYU pragma: keep
-#include "style_dihedral.h"  // IWYU pragma: keep
-#include "style_dump.h"      // IWYU pragma: keep
-#include "style_fix.h"       // IWYU pragma: keep
-#include "style_improper.h"  // IWYU pragma: keep
-#include "style_integrate.h" // IWYU pragma: keep
-#include "style_kspace.h"    // IWYU pragma: keep
-#include "style_minimize.h"  // IWYU pragma: keep
-#include "style_pair.h"      // IWYU pragma: keep
-#include "style_region.h"    // IWYU pragma: keep
-
 #include "accelerator_kokkos.h"
 #include "accelerator_omp.h"
 #include "atom.h"
+#include "atom_vec_body.h"
 #include "citeme.h"
 #include "comm.h"
 #include "comm_brick.h"
+#include "creator_registry.h"
 #include "domain.h"
 #include "error.h"
 #include "force.h"
@@ -46,6 +33,8 @@
 #include "modify.h"
 #include "neighbor.h"
 #include "output.h"
+#include "package_registry.h"
+#include "platform.h"
 #include "suffix.h"
 #include "timer.h"
 #include "universe.h"
@@ -57,6 +46,7 @@
 #include "plugin.h"
 #endif
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -71,26 +61,25 @@
 #define UPDATE_STRING ""
 #endif
 
-static void print_style(FILE *fp, const char *str, int &pos);
+// list the keywords of all styles in a global registry in aligned columns,
+// sorted, with a trailing "*" on styles currently provided by a plugin
+// (used by LAMMPS::help)
 
-struct LAMMPS_NS::package_styles_lists {
-  std::map<std::string,std::string> angle_styles;
-  std::map<std::string,std::string> atom_styles;
-  std::map<std::string,std::string> body_styles;
-  std::map<std::string,std::string> bond_styles;
-  std::map<std::string,std::string> command_styles;
-  std::map<std::string,std::string> compute_styles;
-  std::map<std::string,std::string> dihedral_styles;
-  std::map<std::string,std::string> dump_styles;
-  std::map<std::string,std::string> fix_styles;
-  std::map<std::string,std::string> improper_styles;
-  std::map<std::string,std::string> integrate_styles;
-  std::map<std::string,std::string> kspace_styles;
-  std::map<std::string,std::string> minimize_styles;
-  std::map<std::string,std::string> pair_styles;
-  std::map<std::string,std::string> reader_styles;
-  std::map<std::string,std::string> region_styles;
-};
+template <typename Creator>
+static void print_styles(FILE *fp, const LAMMPS_NS::CreatorRegistry<Creator> &reg, int width)
+{
+  std::vector<std::string> names;
+  for (const auto &name : reg.keys()) {
+    if (isupper(name[0]) || LAMMPS_NS::utils::strmatch(name, "/kk/host$")
+        || LAMMPS_NS::utils::strmatch(name, "/kk/device$"))
+      continue;
+    names.push_back(name);
+  }
+  std::sort(names.begin(), names.end());
+  for (auto &name : names)
+    if (reg.has_plugin(name)) name += "*";
+  LAMMPS_NS::utils::print(fp, LAMMPS_NS::utils::columnize(names, width));
+}
 
 using namespace LAMMPS_NS;
 
@@ -103,9 +92,18 @@ using namespace LAMMPS_NS;
  *
  * The LAMMPS class manages the components of an MD simulation by creating,
  * deleting, and initializing instances of the classes it is composed of,
- * processing command line flags, and providing access to some global properties.
+ * processing command-line flags, and providing access to some global properties.
  * The specifics of setting up and running a simulation are handled by the
  * individual component class instances. */
+
+/** Create a LAMMPS simulation instance
+ *
+ * \param args list of arguments
+ * \param communicator MPI communicator used by this LAMMPS instance
+ */
+LAMMPS::LAMMPS(argv & args, MPI_Comm communicator) :
+  LAMMPS(args.size(), argv_pointers(args).data(), communicator) {
+}
 
 /** Create a LAMMPS simulation instance
  *
@@ -124,6 +122,17 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   modify(nullptr), group(nullptr), output(nullptr), timer(nullptr), kokkos(nullptr),
   atomKK(nullptr), memoryKK(nullptr), python(nullptr), citeme(nullptr)
 {
+  // register all built-in styles into their process-global registries.
+  // idempotent and thread-safe; runs only on the first LAMMPS instance.
+  register_builtin_styles();
+
+  // copy arguments for use with FENIX package
+  num_in_arg = narg;
+  in_args = num_in_arg ? new char*[num_in_arg] : nullptr;
+  for (int i = 0; i < num_in_arg; i++) {
+    in_args[i] = utils::strdup(arg[i]);
+  }
+
   memory = new Memory(this);
   error = new Error(this);
   universe = new Universe(this,communicator);
@@ -132,7 +141,17 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   num_ver = utils::date2num(version);
   restart_ver = -1;
 
-  external_comm = 0;
+  std::string update_string = UPDATE_STRING; // NOLINT
+
+  // increment the version number for development branch
+  // so that it is larger than that of the release version
+  if (update_string == " - Development") ++num_ver;
+
+  // append git descriptor info to update string when compiling development or maintenance version
+  if (has_git_info() && ((update_string == " - Development") || (update_string == " - Maintenance")))
+    update_string += fmt::format(" - {}", git_descriptor());
+
+  external_comm = MPI_COMM_NULL;
   mdicomm = nullptr;
 
   skiprunflag = 0;
@@ -142,8 +161,6 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   infile = nullptr;
 
   initclock = platform::walltime();
-
-  init_pkg_lists();
 
 #if defined(LMP_PYTHON) && defined(_WIN32)
   // If the LAMMPSHOME environment variable is set, it should point
@@ -174,7 +191,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
     int me,nprocs;
     MPI_Comm_rank(communicator,&me);
     MPI_Comm_size(communicator,&nprocs);
-    int color = atoi(arg[iarg+1]);
+    int color = std::stoi(arg[iarg+1]);
     MPI_Comm subcomm;
     MPI_Comm_split(communicator,color,me,&subcomm);
     external_comm = communicator;
@@ -193,6 +210,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   int kokkosflag = 0;
   int restart2data = 0;
   int restart2dump = 0;
+  int restart2info = 0;
   int restartremap = 0;
   int citeflag = 1;
   int citescreen = CiteMe::TERSE;
@@ -204,7 +222,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   suffix = suffix2 = nullptr;
   suffix_enable = 0;
   pair_only_flag = 0;
-  if (arg) exename = arg[0];
+  if (arg) exename = utils::strdup(arg[0]);
   else exename = nullptr;
   packargs = nullptr;
   num_package = 0;
@@ -259,6 +277,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
         error->universe_all(FLERR,"Invalid command-line argument");
       helpflag = 1;
       citeflag = 0;
+      inflag = -1;              // skip inflag check
       iarg += 1;
 
     } else if (strcmp(arg[iarg],"-in") == 0 ||
@@ -364,10 +383,12 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
       if (iarg+3 > narg)
         error->universe_all(FLERR,"Invalid command-line argument");
       if (restart2dump)
-        error->universe_all(FLERR,
-                            "Cannot use both -restart2data and -restart2dump");
+        error->universe_all(FLERR, "Cannot use both -restart2data and -restart2dump");
+      if (restart2info)
+        error->universe_all(FLERR, "Cannot use both -restart2data and -restart2info");
       restart2data = 1;
       restartfile = arg[iarg+1];
+      inflag = -1;               // skip inflag check
       // check for restart remap flag
       if (strcmp(arg[iarg+2],"remap") == 0) {
         if (iarg+4 > narg)
@@ -386,10 +407,12 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
       if (iarg+3 > narg)
         error->universe_all(FLERR,"Invalid command-line argument");
       if (restart2data)
-        error->universe_all(FLERR,
-                            "Cannot use both -restart2data and -restart2dump");
+        error->universe_all(FLERR, "Cannot use both -restart2data and -restart2dump");
+      if (restart2info)
+        error->universe_all(FLERR, "Cannot use both -restart2dump and -restart2info");
       restart2dump = 1;
       restartfile = arg[iarg+1];
+      inflag = -1;               // skip inflag check
       // check for restart remap flag
       if (strcmp(arg[iarg+2],"remap") == 0) {
         if (iarg+4 > narg)
@@ -399,6 +422,23 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
       }
       iarg += 2;
       // delimit args for the write_dump command
+      wfirst = iarg;
+      while (iarg < narg && arg[iarg][0] != '-') iarg++;
+      wlast = iarg;
+
+    } else if (strcmp(arg[iarg],"-restart2info") == 0 ||
+               strcmp(arg[iarg],"-r2info") == 0) {
+      if (iarg+2 > narg)
+        error->universe_all(FLERR,"Invalid command-line argument");
+      if (restart2data)
+        error->universe_all(FLERR, "Cannot use both -restart2data and -restart2info");
+      if (restart2dump)
+        error->universe_all(FLERR, "Cannot use both -restart2dump and -restart2info");
+      restart2info = 1;
+      restartfile = arg[iarg+1];
+      inflag = -1;               // skip inflag check
+      iarg += 2;
+      // delimit args for the info command
       wfirst = iarg;
       while (iarg < narg && arg[iarg][0] != '-') iarg++;
       wlast = iarg;
@@ -442,7 +482,9 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
       iarg += 3;
       while (iarg < narg && arg[iarg][0] != '-') iarg++;
 
-    } else error->universe_all(FLERR,"Invalid command-line argument");
+    } else {
+      error->universe_all(FLERR, fmt::format("Invalid command-line argument: {}", arg[iarg]) );
+    }
   }
 
   // if no partition command-line switch, universe is one world with all procs
@@ -486,8 +528,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
       if (helpflag == 0) {
         universe->ulogfile = fopen("log.lammps","w");
         if (universe->ulogfile == nullptr)
-          error->universe_warn(FLERR,"Cannot open log.lammps for writing: "
-                               + utils::getsyserror());
+          error->universe_warn(FLERR,"Cannot open log.lammps for writing: " + utils::getsyserror());
       }
     } else if (strcmp(arg[logflag],"none") == 0)
       universe->ulogfile = nullptr;
@@ -516,18 +557,15 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
     world = universe->uworld;
 
     if (universe->me == 0) {
-      if (inflag == 0) infile = stdin;
+      if (inflag <= 0) infile = stdin;
       else if (strcmp(arg[inflag], "none") == 0) infile = stdin;
       else infile = fopen(arg[inflag],"r");
+
       if (infile == nullptr)
         error->one(FLERR,"Cannot open input script {}: {}", arg[inflag], utils::getsyserror());
       if (!helpflag)
-        utils::logmesg(this,fmt::format("LAMMPS ({}{})\n",version,UPDATE_STRING));
+        utils::logmesg(this,"LAMMPS ({}{})\n", version, update_string);
 
-     // warn against using I/O redirection in parallel runs
-      if ((inflag == 0) && (universe->nprocs > 1))
-        error->warning(FLERR, "Using I/O redirection is unreliable with parallel runs. "
-                       "Better use -in switch to read input file.");
       utils::flush_buffers(this);
     }
 
@@ -607,19 +645,24 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
     }
 
     // screen and logfile messages for universe and world
+    std::string update_string = UPDATE_STRING; // NOLINT
+    if (has_git_info() && ((update_string == " - Development")
+                           || (update_string == " - Maintenance")))
+      update_string += fmt::format(" - {}", git_descriptor());
 
     if ((universe->me == 0) && (!helpflag)) {
-      const char fmt[] = "LAMMPS ({})\nRunning on {} partitions of processors\n";
+
+      constexpr char fmt[] = "LAMMPS ({}{})\nRunning on {} partitions of processors\n";
       if (universe->uscreen)
-        fmt::print(universe->uscreen,fmt,version,universe->nworlds);
+        utils::print(universe->uscreen, fmt, version, update_string, universe->nworlds);
 
       if (universe->ulogfile)
-        fmt::print(universe->ulogfile,fmt,version,universe->nworlds);
+        utils::print(universe->ulogfile, fmt, version, update_string, universe->nworlds);
     }
 
     if ((me == 0) && (!helpflag))
-      utils::logmesg(this,fmt::format("LAMMPS ({})\nProcessor partition = {}\n",
-                                      version, universe->iworld));
+      utils::logmesg(this,"LAMMPS ({}{})\nProcessor partition = {}\n", version, update_string,
+                     universe->iworld);
   }
 
   // check consistency of datatype settings in lmptype.h
@@ -649,11 +692,6 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
 #ifdef LAMMPS_BIGBIG
   if (sizeof(smallint) != 4 || sizeof(imageint) != 8 ||
       sizeof(tagint) != 8 || sizeof(bigint) != 8)
-    error->all(FLERR,"Small to big integers are not sized correctly");
-#endif
-#ifdef LAMMPS_SMALLSMALL
-  if (sizeof(smallint) != 4 || sizeof(imageint) != 4 ||
-      sizeof(tagint) != 4 || sizeof(bigint) != 4)
     error->all(FLERR,"Small to big integers are not sized correctly");
 #endif
 
@@ -707,17 +745,18 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
   // if either restart conversion option was used, invoke 2 commands and quit
   // add args between wfirst and wlast to write_data or write_data command
   // add "noinit" to write_data to prevent a system init
-  // write_dump will just give a warning message about no init
 
-  if (restart2data || restart2dump) {
+  if (restart2data || restart2dump || restart2info) {
     std::string cmd = fmt::format("read_restart {}",restartfile);
     if (restartremap) cmd += " remap\n";
     input->one(cmd);
     if (restart2data) cmd = "write_data ";
-    else cmd = "write_dump";
+    else if (restart2dump) cmd = "write_dump";
+    else cmd = "info system group compute fix";
     for (iarg = wfirst; iarg < wlast; iarg++)
        cmd += fmt::format(" {}", arg[iarg]);
-    if (restart2data) cmd += " noinit";
+    if (restart2data || restart2dump)
+      cmd += " noinit";
     input->one(cmd);
     error->done(0);
   }
@@ -730,7 +769,7 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator) :
  * and files and MPI communicators in sub-partitions ("universes"). Then it
  * deletes the fundamental class instances and copies of data inside the class.
  */
-LAMMPS::~LAMMPS()
+LAMMPS::~LAMMPS() noexcept(false)
 {
   const int me = comm->me;
 
@@ -750,12 +789,11 @@ LAMMPS::~LAMMPS()
 
   double totalclock = platform::walltime() - initclock;
   if ((me == 0) && (screen || logfile)) {
-    int seconds = fmod(totalclock,60.0);
+    auto seconds = (int) fmod(totalclock,60.0);
     totalclock  = (totalclock - seconds) / 60.0;
-    int minutes = fmod(totalclock,60.0);
-    int hours = (totalclock - minutes) / 60.0;
-    utils::logmesg(this,fmt::format("Total wall time: {}:{:02d}:{:02d}\n",
-                                    hours, minutes, seconds));
+    auto minutes = (int) fmod(totalclock,60.0);
+    auto hours = (int) ((totalclock - minutes) / 60.0);
+    utils::logmesg(this, "Total wall time: {}:{:02d}:{:02d}\n", hours, minutes, seconds);
   }
 
   if (universe->nworlds == 1) {
@@ -786,14 +824,19 @@ LAMMPS::~LAMMPS()
   // free a copy of uorig here, so check in universe destructor will still work
 
   MPI_Comm copy = universe->uorig;
-  if (external_comm) MPI_Comm_free(&copy);
+  if (external_comm != MPI_COMM_NULL) MPI_Comm_free(&copy);
 
   delete input;
   delete universe;
   delete error;
   delete memory;
 
-  delete pkg_lists;
+  delete[] exename;
+
+  if (num_in_arg) {
+    for (int i = 0; i < num_in_arg; i++) delete[] in_args[i];
+    delete[] in_args;
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -830,7 +873,9 @@ void LAMMPS::create()
   else
     atom->create_avec("atomic",0,nullptr,1);
 
-  group = new Group(this);
+  if (kokkos) group = new GroupKokkos(this);
+  else group = new Group(this);
+
   force = new Force(this);    // must be after group, to create temperature
 
   if (kokkos) modify = new ModifyKokkos(this);
@@ -843,7 +888,8 @@ void LAMMPS::create()
 
   python = new Python(this);
 
-  // auto-load plugins
+  // auto-load plugins; previously loaded plugins persist in the global style
+  // registry across "clear", so they do not need to be restored here
 #if defined(LMP_PLUGIN)
   plugin_auto_load(this);
 #endif
@@ -951,10 +997,6 @@ void LAMMPS::init()
 
 void LAMMPS::destroy()
 {
-  // must wipe out all plugins first, if configured
-#if defined(LMP_PLUGIN)
-  plugin_clear(this);
-#endif
   delete update;
   update = nullptr;
 
@@ -998,128 +1040,9 @@ void LAMMPS::destroy()
   restart_ver = -1;       // reset last restart version id
 }
 
-/* ----------------------------------------------------------------------
-   initialize lists of styles in packages
-------------------------------------------------------------------------- */
-
-void _noopt LAMMPS::init_pkg_lists()
-{
-  pkg_lists = new package_styles_lists;
-#define PACKAGE "UNKNOWN"
-#define ANGLE_CLASS
-#define AngleStyle(key,Class)                   \
-  pkg_lists->angle_styles[#key] = PACKAGE;
-#include "packages_angle.h"
-#undef AngleStyle
-#undef ANGLE_CLASS
-#define ATOM_CLASS
-#define AtomStyle(key,Class)                    \
-  pkg_lists->atom_styles[#key] = PACKAGE;
-#include "packages_atom.h"
-#undef AtomStyle
-#undef ATOM_CLASS
-#define BODY_CLASS
-#define BodyStyle(key,Class)                    \
-  pkg_lists->body_styles[#key] = PACKAGE;
-#include "packages_body.h"
-#undef BodyStyle
-#undef BODY_CLASS
-#define BOND_CLASS
-#define BondStyle(key,Class)                    \
-  pkg_lists->bond_styles[#key] = PACKAGE;
-#include "packages_bond.h"
-#undef BondStyle
-#undef BOND_CLASS
-#define COMMAND_CLASS
-#define CommandStyle(key,Class)                 \
-  pkg_lists->command_styles[#key] = PACKAGE;
-#include "packages_command.h"
-#undef CommandStyle
-#undef COMMAND_CLASS
-#define COMPUTE_CLASS
-#define ComputeStyle(key,Class)                 \
-  pkg_lists->compute_styles[#key] = PACKAGE;
-#include "packages_compute.h"
-#undef ComputeStyle
-#undef COMPUTE_CLASS
-#define DIHEDRAL_CLASS
-#define DihedralStyle(key,Class)                \
-  pkg_lists->dihedral_styles[#key] = PACKAGE;
-#include "packages_dihedral.h"
-#undef DihedralStyle
-#undef DIHEDRAL_CLASS
-#define DUMP_CLASS
-#define DumpStyle(key,Class)                    \
-  pkg_lists->dump_styles[#key] = PACKAGE;
-#include "packages_dump.h"
-#undef DumpStyle
-#undef DUMP_CLASS
-#define FIX_CLASS
-#define FixStyle(key,Class)                     \
-  pkg_lists->fix_styles[#key] = PACKAGE;
-#include "packages_fix.h"
-#undef FixStyle
-#undef FIX_CLASS
-#define IMPROPER_CLASS
-#define ImproperStyle(key,Class)                \
-  pkg_lists->improper_styles[#key] = PACKAGE;
-#include "packages_improper.h"
-#undef ImproperStyle
-#undef IMPROPER_CLASS
-#define INTEGRATE_CLASS
-#define IntegrateStyle(key,Class)               \
-  pkg_lists->integrate_styles[#key] = PACKAGE;
-#include "packages_integrate.h"
-#undef IntegrateStyle
-#undef INTEGRATE_CLASS
-#define KSPACE_CLASS
-#define KSpaceStyle(key,Class)                  \
-  pkg_lists->kspace_styles[#key] = PACKAGE;
-#include "packages_kspace.h"
-#undef KSpaceStyle
-#undef KSPACE_CLASS
-#define MINIMIZE_CLASS
-#define MinimizeStyle(key,Class)                \
-  pkg_lists->minimize_styles[#key] = PACKAGE;
-#include "packages_minimize.h"
-#undef MinimizeStyle
-#undef MINIMIZE_CLASS
-#define PAIR_CLASS
-#define PairStyle(key,Class)                    \
-  pkg_lists->pair_styles[#key] = PACKAGE;
-#include "packages_pair.h"
-#undef PairStyle
-#undef PAIR_CLASS
-#define READER_CLASS
-#define ReaderStyle(key,Class)                  \
-  pkg_lists->reader_styles[#key] = PACKAGE;
-#include "packages_reader.h"
-#undef ReaderStyle
-#undef READER_CLASS
-#define REGION_CLASS
-#define RegionStyle(key,Class)                  \
-  pkg_lists->region_styles[#key] = PACKAGE;
-#include "packages_region.h"
-#undef RegionStyle
-#undef REGION_CLASS
-}
-
-/** Return true if a LAMMPS package is enabled in this binary
- *
- * \param pkg name of package
- * \return true if yes, else false
- */
-bool LAMMPS::is_installed_pkg(const char *pkg)
-{
-  for (int i=0; installed_packages[i] != nullptr; ++i)
-    if (strcmp(installed_packages[i],pkg) == 0) return true;
-
-  return false;
-}
-
 #define check_for_match(style,list,name)                                \
   if (strcmp(list,#style) == 0) {                                       \
-    std::map<std::string,std::string> &styles(pkg_lists-> style ## _styles); \
+    std::map<std::string,std::string> &styles(package_styles(). style ## _styles); \
     if (styles.find(name) != styles.end()) {                            \
       return styles[name].c_str();                                      \
     }                                                                   \
@@ -1128,7 +1051,7 @@ bool LAMMPS::is_installed_pkg(const char *pkg)
 /** \brief Return name of package that a specific style belongs to
  *
  * This function checks the given name against all list of styles
- * for all type of styles and if the name and the style match, it
+ * for all types of styles and if the name and the style match, it
  * returns which package this style belongs to.
  *
  * \param style Type of style (e.g. atom, pair, fix, etc.)
@@ -1143,9 +1066,9 @@ const char *LAMMPS::match_style(const char *style, const char *name)
   check_for_match(bond,style,name);
   check_for_match(command,style,name);
   check_for_match(compute,style,name);
+  check_for_match(dihedral,style,name);
   check_for_match(dump,style,name);
   check_for_match(fix,style,name);
-  check_for_match(compute,style,name);
   check_for_match(improper,style,name);
   check_for_match(integrate,style,name);
   check_for_match(kspace,style,name);
@@ -1155,6 +1078,8 @@ const char *LAMMPS::match_style(const char *style, const char *name)
   check_for_match(region,style,name);
   return nullptr;
 }
+
+#undef check_for_match
 
 /** \brief  Return suffix for non-pair styles depending on pair_only_flag
  *
@@ -1177,7 +1102,7 @@ const char *LAMMPS::non_pair_suffix() const
 }
 
 /* ----------------------------------------------------------------------
-   help message for command line options and styles present in executable
+   help message for command-line options and styles present in executable
 ------------------------------------------------------------------------- */
 
 void _noopt LAMMPS::help()
@@ -1188,9 +1113,13 @@ void _noopt LAMMPS::help()
   // if output is a console, use a pipe to a pager for paged output.
   // this will avoid the most important help text to rush past the
   // user. scrollback buffers are often not large enough. this is most
-  // beneficial to windows users, who are not used to command line.
+  // beneficial to windows users, who are not used to command-line.
 
   int use_pager = platform::is_console(fp);
+
+  // adapt to the terminal width when writing to a console, else use 80 columns
+  int width = LAMMPS_NS::platform::terminal_width(fp);
+  if ((width < 1) || !use_pager) width = 80;
 
   // cannot use this with OpenMPI since its console is non-functional
 
@@ -1210,7 +1139,7 @@ void _noopt LAMMPS::help()
     }
   }
 
-  // general help message about command line and flags
+  // general help message about command-line and flags
 
   if (has_git_info()) {
     fprintf(fp,"\nLarge-scale Atomic/Molecular Massively Parallel Simulator - "
@@ -1221,7 +1150,7 @@ void _noopt LAMMPS::help()
   }
   fprintf(fp,
           "Usage example: %s -var t 300 -echo screen -in in.alloy\n\n"
-          "List of command line options supported by this LAMMPS executable:\n\n"
+          "List of command-line options supported by this LAMMPS executable:\n\n"
           "-echo none/screen/log/both  : echoing of input script (-e)\n"
           "-help                       : print this help message (-h)\n"
           "-in none/filename           : read input from file or stdin (default) (-i)\n"
@@ -1239,126 +1168,76 @@ void _noopt LAMMPS::help()
           "-restart2data rfile dfile ... : convert restart to data file (-r2data)\n"
           "-restart2dump rfile dgroup dstyle dfile ... \n"
           "                            : convert restart to dump file (-r2dump)\n"
+          "-restart2info rfile         : print info about restart rfile (-r2info)\n"
           "-reorder topology-specs     : processor reordering (-r)\n"
           "-screen none/filename       : where to send screen output (-sc)\n"
           "-skiprun                    : skip loops in run and minimize (-sr)\n"
-          "-suffix gpu/intel/opt/omp   : style suffix to apply (-sf)\n"
+          "-suffix gpu/intel/kk/opt/omp: style suffix to apply (-sf)\n"
           "-var varname value          : set index style variable (-v)\n\n",
           exename);
 
-  print_config(fp);
-  fprintf(fp,"List of individual style options included in this LAMMPS executable\n\n");
+  print_config(fp, width);
+  fprintf(fp,"Lists of individual styles included in this LAMMPS executable\n");
+  fprintf(fp,"(a trailing * marks a style currently provided by a plugin)\n\n");
 
-  int pos = 80;
   fprintf(fp,"* Atom styles:\n");
-#define ATOM_CLASS
-#define AtomStyle(key,Class) print_style(fp,#key,pos);
-#include "style_atom.h"  // IWYU pragma: keep
-#undef ATOM_CLASS
+  print_styles(fp, Atom::avec_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
+  fprintf(fp,"* Body styles:\n");
+  print_styles(fp, AtomVecBody::body_styles(), width);
+  fprintf(fp,"\n\n");
+
   fprintf(fp,"* Integrate styles:\n");
-#define INTEGRATE_CLASS
-#define IntegrateStyle(key,Class) print_style(fp,#key,pos);
-#include "style_integrate.h"  // IWYU pragma: keep
-#undef INTEGRATE_CLASS
+  print_styles(fp, Update::integrate_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Minimize styles:\n");
-#define MINIMIZE_CLASS
-#define MinimizeStyle(key,Class) print_style(fp,#key,pos);
-#include "style_minimize.h"  // IWYU pragma: keep
-#undef MINIMIZE_CLASS
+  print_styles(fp, Update::minimize_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Pair styles:\n");
-#define PAIR_CLASS
-#define PairStyle(key,Class) print_style(fp,#key,pos);
-#include "style_pair.h"  // IWYU pragma: keep
-#undef PAIR_CLASS
+  print_styles(fp, Force::pair_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Bond styles:\n");
-#define BOND_CLASS
-#define BondStyle(key,Class) print_style(fp,#key,pos);
-#include "style_bond.h"  // IWYU pragma: keep
-#undef BOND_CLASS
+  print_styles(fp, Force::bond_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Angle styles:\n");
-#define ANGLE_CLASS
-#define AngleStyle(key,Class) print_style(fp,#key,pos);
-#include "style_angle.h"  // IWYU pragma: keep
-#undef ANGLE_CLASS
+  print_styles(fp, Force::angle_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Dihedral styles:\n");
-#define DIHEDRAL_CLASS
-#define DihedralStyle(key,Class) print_style(fp,#key,pos);
-#include "style_dihedral.h"  // IWYU pragma: keep
-#undef DIHEDRAL_CLASS
+  print_styles(fp, Force::dihedral_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Improper styles:\n");
-#define IMPROPER_CLASS
-#define ImproperStyle(key,Class) print_style(fp,#key,pos);
-#include "style_improper.h"  // IWYU pragma: keep
-#undef IMPROPER_CLASS
+  print_styles(fp, Force::improper_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* KSpace styles:\n");
-#define KSPACE_CLASS
-#define KSpaceStyle(key,Class) print_style(fp,#key,pos);
-#include "style_kspace.h"  // IWYU pragma: keep
-#undef KSPACE_CLASS
+  print_styles(fp, Force::kspace_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
-  fprintf(fp,"* Fix styles\n");
-#define FIX_CLASS
-#define FixStyle(key,Class) print_style(fp,#key,pos);
-#include "style_fix.h"  // IWYU pragma: keep
-#undef FIX_CLASS
+  fprintf(fp,"* Fix styles:\n");
+  print_styles(fp, Modify::fix_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Compute styles:\n");
-#define COMPUTE_CLASS
-#define ComputeStyle(key,Class) print_style(fp,#key,pos);
-#include "style_compute.h"  // IWYU pragma: keep
-#undef COMPUTE_CLASS
+  print_styles(fp, Modify::compute_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Region styles:\n");
-#define REGION_CLASS
-#define RegionStyle(key,Class) print_style(fp,#key,pos);
-#include "style_region.h"  // IWYU pragma: keep
-#undef REGION_CLASS
+  print_styles(fp, Domain::region_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Dump styles:\n");
-#define DUMP_CLASS
-#define DumpStyle(key,Class) print_style(fp,#key,pos);
-#include "style_dump.h"  // IWYU pragma: keep
-#undef DUMP_CLASS
+  print_styles(fp, Output::dump_styles(), width);
   fprintf(fp,"\n\n");
 
-  pos = 80;
   fprintf(fp,"* Command styles\n");
-#define COMMAND_CLASS
-#define CommandStyle(key,Class) print_style(fp,#key,pos);
-#include "style_command.h"  // IWYU pragma: keep
-#undef COMMAND_CLASS
+  print_styles(fp, Input::command_styles(), width);
   fprintf(fp,"\n\n");
 
   // close pipe to pager, if active
@@ -1366,90 +1245,58 @@ void _noopt LAMMPS::help()
   if (pager != nullptr) platform::pclose(fp);
 }
 
-/* ----------------------------------------------------------------------
-   print style names in columns
-   skip any internal style that starts with an upper-case letter
-   also skip "redundant" KOKKOS styles ending in kk/host or kk/device
-------------------------------------------------------------------------- */
-
-void print_style(FILE *fp, const char *str, int &pos)
-{
-  if (isupper(str[0]) || utils::strmatch(str,"/kk/host$")
-      || utils::strmatch(str,"/kk/device$")) return;
-
-  int len = strlen(str);
-  if (pos+len > 80) {
-    fprintf(fp,"\n");
-    pos = 0;
-  }
-
-  if (len < 16) {
-    fprintf(fp,"%-16s",str);
-    pos += 16;
-  } else if (len < 32) {
-    fprintf(fp,"%-32s",str);
-    pos += 32;
-  } else if (len < 48) {
-    fprintf(fp,"%-48s",str);
-    pos += 48;
-  } else if (len < 64) {
-    fprintf(fp,"%-64s",str);
-    pos += 64;
-  } else {
-    fprintf(fp,"%-80s",str);
-    pos += 80;
-  }
-}
-
-void LAMMPS::print_config(FILE *fp)
+void LAMMPS::print_config(FILE *fp, int width)
 {
   const char *pkg;
   int ncword, ncline = 0;
 
-  fmt::print(fp,"OS: {}\n\n",platform::os_info());
+  utils::print(fp,"OS: {}\n\n",platform::os_info());
 
-  fmt::print(fp,"Compiler: {} with {}\nC++ standard: {}\n",
+  utils::print(fp,"Compiler: {} with {}\nC++ standard: {}\n",
              platform::compiler_info(),platform::openmp_standard(),
              platform::cxx_standard());
+  fputs(Info::get_fmt_info().c_str(),fp);
+  fputs(Info::get_json_info().c_str(),fp);
 
   int major,minor;
   std::string infobuf = platform::mpi_info(major,minor);
-  fmt::print(fp,"MPI v{}.{}: {}\n\n",major,minor,infobuf);
+  utils::print(fp,"\nMPI v{}.{}: {}\n\n",major,minor,infobuf);
 
-  fmt::print(fp,"Accelerator configuration:\n\n{}\n",
+  utils::print(fp,"Accelerator configuration:\n\n{}\n",
              Info::get_accelerator_info());
 #if defined(LMP_GPU)
-  fmt::print(fp,"Compatible GPU present: {}\n\n",Info::has_gpu_device() ? "yes" : "no");
+  utils::print(fp,"Compatible GPU present: {}\n\n",Info::has_gpu_device() ? "yes" : "no");
 #endif
 
-  fputs("Active compile time flags:\n\n",fp);
+  fputs("FFT information:\n\n",fp);
+  fputs(Info::get_fft_info().c_str(),fp);
+
+  fputs("\nActive compile time flags:\n\n",fp);
   if (Info::has_gzip_support()) fputs("-DLAMMPS_GZIP\n",fp);
   if (Info::has_png_support()) fputs("-DLAMMPS_PNG\n",fp);
   if (Info::has_jpeg_support()) fputs("-DLAMMPS_JPEG\n",fp);
   if (Info::has_ffmpeg_support()) fputs("-DLAMMPS_FFMPEG\n",fp);
+  if (Info::has_curl_support()) fputs("-DLAMMPS_CURL\n",fp);
   if (Info::has_fft_single_support()) fputs("-DFFT_SINGLE\n",fp);
-  if (Info::has_exceptions()) fputs("-DLAMMPS_EXCEPTIONS\n",fp);
 #if defined(LAMMPS_BIGBIG)
   fputs("-DLAMMPS_BIGBIG\n",fp);
 #elif defined(LAMMPS_SMALLBIG)
   fputs("-DLAMMPS_SMALLBIG\n",fp);
-#else // defined(LAMMPS_SMALLSMALL)
-  fputs("-DLAMMPS_SMALLSMALL\n",fp);
 #endif
 
-  fmt::print(fp,"sizeof(smallint): {}-bit\n"
+  utils::print(fp,"sizeof(smallint): {}-bit\n"
              "sizeof(imageint): {}-bit\n"
              "sizeof(tagint):   {}-bit\n"
              "sizeof(bigint):   {}-bit\n",
              sizeof(smallint)*8, sizeof(imageint)*8,
              sizeof(tagint)*8, sizeof(bigint)*8);
 
-  if (Info::has_gzip_support()) fmt::print(fp,"\n{}\n",platform::compress_info());
+  if (Info::has_gzip_support()) utils::print(fp,"\n{}\n",platform::compress_info());
 
   fputs("\nInstalled packages:\n\n",fp);
   for (int i = 0; nullptr != (pkg = installed_packages[i]); ++i) {
     ncword = strlen(pkg);
-    if (ncline + ncword > 78) {
+    if ((ncline + ncword) > (width - 1)) {
       ncline = 0;
       fputs("\n",fp);
     }
@@ -1457,4 +1304,19 @@ void LAMMPS::print_config(FILE *fp)
     ncline += ncword + 1;
   }
   fputs("\n\n",fp);
+}
+
+/** Create vector of argv char pointers including terminating nullptr element
+ *
+ * \param args list of arguments
+ * \return vector of argument pointers
+ */
+std::vector<char*> LAMMPS::argv_pointers(argv &args){
+  std::vector<char*> r;
+  r.reserve(args.size()+1);
+  for(auto &a : args) {
+    r.push_back((char*)a.data());
+  }
+  r.push_back(nullptr);
+  return r;
 }

@@ -12,14 +12,14 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meißner (TUHH)
+   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meissner (TUHH)
 ------------------------------------------------------------------------- */
 
 #include "wire_dipole.h"
 
 #include "atom.h"
 #include "comm.h"
-#include "domain.h"
+#include "force.h"
 #include "math_const.h"
 
 using namespace LAMMPS_NS;
@@ -32,11 +32,12 @@ using namespace MathConst;
    704, 101). x and y are non-periodic.
 -------------------------------------------------------------------------
 */
-WireDipole::WireDipole(LAMMPS *lmp) : BoundaryCorrection(lmp){};
+WireDipole::WireDipole(LAMMPS *lmp) : BoundaryCorrection(lmp) {};
 
-void WireDipole::compute_corr(double /*qsum*/, double /*slab_volfactor*/, int eflag_atom,
-                              int eflag_global, double &energy, double *eatom)
+void WireDipole::compute_corr(double /*qsum*/, int eflag_atom, int eflag_global, double &energy,
+                              double *eatom)
 {
+  double const volume = get_volume();
   double *q = atom->q;
   double **x = atom->x;
   int nlocal = atom->nlocal;
@@ -72,7 +73,8 @@ void WireDipole::compute_corr(double /*qsum*/, double /*slab_volfactor*/, int ef
   // compute corrections
   const double e_wirecorr =
       MY_PI * (xdipole_all * xdipole_all + ydipole_all * ydipole_all) / volume;
-  const double qscale = qqrd2e * scale;
+  double const scale = 1.0;
+  const double qscale = force->qqrd2e * scale;
   if (eflag_global) energy += qscale * e_wirecorr;
 
   // per-atom energy
@@ -94,7 +96,8 @@ void WireDipole::compute_corr(double /*qsum*/, double /*slab_volfactor*/, int ef
 
 void WireDipole::vector_corr(double *vec, int sensor_grpbit, int source_grpbit, bool invert_source)
 {
-  int const nlocal = atom->nlocal;
+  double const volume = get_volume();
+  const int nlocal = atom->nlocal;
   double **x = atom->x;
   double *q = atom->q;
   int *mask = atom->mask;
@@ -113,6 +116,7 @@ void WireDipole::vector_corr(double *vec, int sensor_grpbit, int source_grpbit, 
 
 void WireDipole::matrix_corr(bigint *imat, double **matrix)
 {
+  double const volume = get_volume();
   int nlocal = atom->nlocal;
   double **x = atom->x;
 
@@ -138,10 +142,10 @@ void WireDipole::matrix_corr(bigint *imat, double **matrix)
   std::vector<int> displs = gather_displs(recvcounts);
   std::vector<double> xprd_all = std::vector<double>(ngroup);
   std::vector<double> yprd_all = std::vector<double>(ngroup);
-  MPI_Allgatherv(&xprd_local.front(), ngrouplocal, MPI_DOUBLE, &xprd_all.front(),
-                 &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
-  MPI_Allgatherv(&yprd_local.front(), ngrouplocal, MPI_DOUBLE, &yprd_all.front(),
-                 &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
+  MPI_Allgatherv(xprd_local.data(), ngrouplocal, MPI_DOUBLE, xprd_all.data(), recvcounts.data(),
+                 displs.data(), MPI_DOUBLE, world);
+  MPI_Allgatherv(yprd_local.data(), ngrouplocal, MPI_DOUBLE, yprd_all.data(), recvcounts.data(),
+                 displs.data(), MPI_DOUBLE, world);
 
   std::vector<bigint> jmat = gather_jmat(imat);
   const double prefac = MY_2PI / volume;

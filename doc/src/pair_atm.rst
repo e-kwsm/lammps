@@ -1,7 +1,10 @@
 .. index:: pair_style atm
+.. index:: pair_style atm/omp
 
 pair_style atm command
 ======================
+
+Accelerator Variants: *atm/omp*
 
 Syntax
 """"""
@@ -42,8 +45,9 @@ where :math:`\nu` is the three-body interaction strength.  The distances
 between pairs of atoms :math:`r_{12}`, :math:`r_{23}`, :math:`r_{31}` and the angles :math:`\gamma_1`, :math:`\gamma_2`,
 :math:`\gamma_3` are as shown in this diagram:
 
-.. image:: JPG/pair_atm_dia.jpg
+.. image:: JPG/pair_atm_dia.png
    :align: center
+   :width: 50%
 
 Note that for the interaction between a triplet of atoms :math:`I,J,K`, there
 is no "central" atom.  The interaction is symmetric with respect to
@@ -56,7 +60,7 @@ potential using the :doc:`pair_style hybrid/overlay <pair_hybrid>`
 command as in the example above.
 
 The potential for a triplet of atom is calculated only if all 3 distances
-:math:`r_{12}`, :math:`r_{23}`, :math:`r_{31}` between the 3 atoms satisfy
+:math:`r_{12}`, :math:`r_{23}`, :math:`r_{31}` between the three atoms satisfy
 :math:`r_{IJ} < \text{cutoff}`.  In addition, the product of the 3 distances
 :math:`r_{12} r_{23} r_{31}` < cutoff_triple :math:`^3` is required, which
 excludes from calculation the triplets with small contribution to the
@@ -70,8 +74,8 @@ above, or in the restart files read by the
 * :math:`K` = atom type of the third atom (1 to :math:`N_{\text{types}}`)
 * :math:`\nu` = prefactor (energy/distance\^9 units)
 
-:math:`K` can be specified in one of two ways.  An explicit numeric value can
-be used, as in the second example above.  :math:`J \leq K` is required.  LAMMPS
+:math:`K` can be specified in one of two ways.  An explicit numeric value
+or type label can be used, as in the second example above.   LAMMPS
 sets the coefficients for the other 5 symmetric interactions to the same
 values.  E.g. if :math:`I = 1`, :math:`J = 2`, :math:`K = 3`, then these 6
 values are set to the specified :math:`\nu`: :math:`\nu_{123}`,
@@ -137,6 +141,10 @@ specified, then there will be no 3-body ATM interactions for that
 combination and all its permutations.  However, as with all pair
 styles, it is required to specify a pair_coeff command for all :math:`I,J`
 combinations, else an error will result.
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 

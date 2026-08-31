@@ -6,6 +6,7 @@ Commands
 
    angle_coeff
    angle_style
+   angle_write
    atom_modify
    atom_style
    balance
@@ -27,21 +28,16 @@ Commands
    dielectric
    dihedral_coeff
    dihedral_style
+   dihedral_write
    dimension
    displace_atoms
-   dump
-   dump_adios
-   dump_cfg_uef
-   dump_h5md
-   dump_image
-   dump_modify
-   dump_molfile
-   dump_netcdf
-   dump_vtk
    dynamical_matrix
    echo
+   fenix
    fix
    fix_modify
+   fitpod_command
+   geturl
    group
    group2ndx
    hyper
@@ -87,10 +83,10 @@ Commands
    read_dump
    read_restart
    region
+   region2vmd
    replicate
    rerun
-   reset_atom_ids
-   reset_mol_ids
+   reset_atoms
    reset_timestep
    restart
    run
@@ -118,4 +114,5 @@ Commands
    write_coeff
    write_data
    write_dump
+   write_molecule
    write_restart

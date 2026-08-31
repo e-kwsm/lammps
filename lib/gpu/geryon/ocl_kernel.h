@@ -67,9 +67,22 @@ class UCL_Program {
   /** \note Must call init() after each clear **/
   inline void clear() {
     if (_init_done) {
+      #ifdef CL_VERSION_2_0
+      cl_context ctx_from_queue = nullptr;
+      cl_int err = clGetCommandQueueInfo(_cq,
+                                  CL_QUEUE_CONTEXT,
+                                  sizeof(ctx_from_queue),
+                                  &ctx_from_queue,
+                                  nullptr);
+      if (err == CL_SUCCESS)
+        CL_DESTRUCT_CALL(clReleaseCommandQueue(_cq));
+      CL_DESTRUCT_CALL(clReleaseProgram(_program));
+      CL_DESTRUCT_CALL(clReleaseContext(_context));
+      #else
       CL_DESTRUCT_CALL(clReleaseProgram(_program));
       CL_DESTRUCT_CALL(clReleaseContext(_context));
       CL_DESTRUCT_CALL(clReleaseCommandQueue(_cq));
+      #endif
       _init_done=false;
     }
   }
@@ -95,7 +108,8 @@ class UCL_Program {
 
   /// Load a program from a string and compile with flags
   inline int load_string(const void *program, const char *flags="",
-                         std::string *log=nullptr, FILE* foutput=nullptr) {
+                         std::string *log=nullptr, FILE* foutput=nullptr,
+                         const int compile_test=0) {
     cl_int error_flag;
     const char *prog=(const char *)program;
     _program=clCreateProgramWithSource(_context,1,&prog,nullptr,&error_flag);
@@ -130,6 +144,8 @@ class UCL_Program {
                 << std::endl << std::endl;
     }
     #endif
+
+    if (build_status != CL_SUCCESS && compile_test) return UCL_COMPILE_ERROR;
 
     if (build_status != CL_SUCCESS || log!=NULL) {
       size_t ms;

@@ -43,15 +43,14 @@ enum {CONSTANT,EQUAL,ATOM};
 enum {NO_FLIP, FLIP_RESCALE, FLIP_HARD, FLIP_SOFT};
 //#define FFL_DEBUG 1
 
-#define MAXLINE 1024
-
 /* syntax for fix_ffl:
  * fix nfix id-group ffl tau Tstart Tstop seed [flip_type]
  *                                                                        */
 
 /* ---------------------------------------------------------------------- */
 
-FixFFL::FixFFL(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
+FixFFL::FixFFL(LAMMPS *lmp, int narg, char **arg) :
+    Fix(lmp, narg, arg), step_respa(nullptr), vaux(nullptr)
 {
   if (narg < 7)
     error->all(FLERR,"Illegal fix ffl command. Expecting: fix <fix-ID>"
@@ -61,6 +60,7 @@ FixFFL::FixFFL(LAMMPS *lmp, int narg, char **arg) : Fix(lmp, narg, arg)
   restart_peratom = 1;
   time_integrate = 1;
   scalar_flag = 1;
+  extscalar = 1;
 
   //gamma = 1 / time constant(tau)
   gamma = utils::numeric(FLERR,arg[3],false,lmp);

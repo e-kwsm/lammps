@@ -1,51 +1,18 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_TEST_SCATTER_VIEW_HPP
 #define KOKKOS_TEST_SCATTER_VIEW_HPP
 
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_EXPERIMENTAL_CXX20_MODULES
+import kokkos.core;
+import kokkos.scatter_view;
+import kokkos.scatter_view_impl;
+#else
+#include <Kokkos_Core.hpp>
 #include <Kokkos_ScatterView.hpp>
+#endif
 #include <gtest/gtest.h>
 
 namespace Test {
@@ -61,11 +28,11 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
                                   NumberType> {
  public:
   using scatter_view_type =
-      Kokkos::Experimental::ScatterView<NumberType * [12], Layout, DeviceType,
+      Kokkos::Experimental::ScatterView<NumberType* [12], Layout, DeviceType,
                                         Kokkos::Experimental::ScatterSum,
                                         Duplication, Contribution>;
 
-  using orig_view_type = Kokkos::View<NumberType * [12], Layout, DeviceType>;
+  using orig_view_type = Kokkos::View<NumberType* [12], Layout, DeviceType>;
 
   using size_type = typename Kokkos::HostSpace::size_type;
 
@@ -106,52 +73,14 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
       scatter_access(k, 3)++;
       scatter_access(k, 4)--;
       scatter_access(k, 5) -= 5;
-// Workaround Intel 17 compiler bug which sometimes add random
-// instruction alignment which makes the lock instruction
-// illegal. Seems to be mostly just for unsigned int atomics.
-// Looking at the assembly the compiler
-// appears to insert cache line alignment for the instruction.
-// Isn't restricted to specific archs. Seen it on SNB and SKX, but for
-// different code. Another occurrence was with Desul atomics in
-// a different unit test. This one here happens without desul atomics.
-// Inserting an assembly nop instruction changes the alignment and
-// works round this.
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       scatter_access_atomic(k, 6) += 2;
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       scatter_access_atomic(k, 7)++;
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       scatter_access_atomic(k, 8)--;
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       --scatter_access_atomic(k, 9);
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       ++scatter_access_atomic(k, 10);
-#ifdef KOKKOS_COMPILER_INTEL
-#if (KOKKOS_COMPILER_INTEL < 1800)
-      asm volatile("nop\n");
-#endif
-#endif
       scatter_access(k, 11) -= 3;
+      scatter_access(k, 0).update(0);
+      scatter_access_atomic(k, 0).update(0);
     }
   }
 
@@ -202,11 +131,11 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
                                   NumberType> {
  public:
   using scatter_view_type =
-      Kokkos::Experimental::ScatterView<NumberType * [3], Layout, DeviceType,
+      Kokkos::Experimental::ScatterView<NumberType* [3], Layout, DeviceType,
                                         Kokkos::Experimental::ScatterProd,
                                         Duplication, Contribution>;
 
-  using orig_view_type = Kokkos::View<NumberType * [3], Layout, DeviceType>;
+  using orig_view_type = Kokkos::View<NumberType* [3], Layout, DeviceType>;
 
   using size_type = typename Kokkos::HostSpace::size_type;
 
@@ -248,6 +177,8 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
       scatter_access(k, 0) *= 4.0;
       scatter_access_atomic(k, 1) *= 2.0;
       scatter_access(k, 2) *= 1.0;
+      scatter_access(k, 2).update(1.0);
+      scatter_access_atomic(k, 1).update(1.0);
     }
   }
 
@@ -303,11 +234,11 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
                                   NumberType> {
  public:
   using scatter_view_type =
-      Kokkos::Experimental::ScatterView<NumberType * [3], Layout, DeviceType,
+      Kokkos::Experimental::ScatterView<NumberType* [3], Layout, DeviceType,
                                         Kokkos::Experimental::ScatterMin,
                                         Duplication, Contribution>;
 
-  using orig_view_type = Kokkos::View<NumberType * [3], Layout, DeviceType>;
+  using orig_view_type = Kokkos::View<NumberType* [3], Layout, DeviceType>;
 
   using size_type = typename Kokkos::HostSpace::size_type;
 
@@ -403,11 +334,11 @@ struct test_scatter_view_impl_cls<DeviceType, Layout, Duplication, Contribution,
                                   NumberType> {
  public:
   using scatter_view_type =
-      Kokkos::Experimental::ScatterView<NumberType * [3], Layout, DeviceType,
+      Kokkos::Experimental::ScatterView<NumberType* [3], Layout, DeviceType,
                                         Kokkos::Experimental::ScatterMax,
                                         Duplication, Contribution>;
 
-  using orig_view_type = Kokkos::View<NumberType * [3], Layout, DeviceType>;
+  using orig_view_type = Kokkos::View<NumberType* [3], Layout, DeviceType>;
 
   using size_type = typename Kokkos::HostSpace::size_type;
 
@@ -542,7 +473,12 @@ struct test_default_scatter_sub_view {
 
       scatter_view_test_impl.run_parallel(original_sub_view.extent(0));
 
-      Kokkos::Experimental::contribute(original_sub_view, scatter_view);
+      // purposefully using a rvalue below
+      // see https://github.com/kokkos/kokkos/issues/8588
+      Kokkos::Experimental::contribute(/*original_sub_view=*/
+                                       Kokkos::subview(original_view, rangeDim0,
+                                                       rangeDim1),
+                                       scatter_view);
       Kokkos::fence();
 
       scatter_view_test_impl.validateResultsForSubview(original_view, rangeDim0,
@@ -782,7 +718,7 @@ void test_scatter_view(int64_t n) {
     test_sv_config.run_test(n);
   }
 #ifdef KOKKOS_ENABLE_SERIAL
-  if (!std::is_same<DeviceType, Kokkos::Serial>::value) {
+  if (!std::is_same_v<DeviceType, Kokkos::Serial>) {
 #endif
     test_scatter_view_config<DeviceType, Kokkos::LayoutRight,
                              Kokkos::Experimental::ScatterNonDuplicated,
@@ -794,9 +730,9 @@ void test_scatter_view(int64_t n) {
   }
 #endif
   // with hundreds of threads we were running out of memory.
-  // limit (n) so that duplication doesn't exceed 4GB
+  // limit (n) so that duplication doesn't exceed 1GB
   constexpr std::size_t maximum_allowed_total_bytes =
-      4ull * 1024ull * 1024ull * 1024ull;
+      1ull * 1024ull * 1024ull * 1024ull;
   std::size_t const maximum_allowed_copy_bytes =
       maximum_allowed_total_bytes /
       std::size_t(execution_space().concurrency());
@@ -838,9 +774,18 @@ TEST(TEST_CATEGORY, scatterview) {
   int big_n = 100 * 1000;
 #else
 
-#ifdef KOKKOS_ENABLE_SERIAL
-  bool is_serial = std::is_same<TEST_EXECSPACE, Kokkos::Serial>::value;
-  int big_n      = is_serial ? 100 * 1000 : 10000 * 1000;
+#if defined(KOKKOS_ENABLE_SERIAL) || defined(KOKKOS_ENABLE_OPENMP)
+#if defined(KOKKOS_ENABLE_SERIAL)
+  bool is_serial = std::is_same_v<TEST_EXECSPACE, Kokkos::Serial>;
+#else
+  bool is_serial = false;
+#endif
+#if defined(KOKKOS_ENABLE_OPENMP)
+  bool is_openmp = std::is_same_v<TEST_EXECSPACE, Kokkos::OpenMP>;
+#else
+  bool is_openmp = false;
+#endif
+  int big_n      = is_serial || is_openmp ? 100 * 1000 : 10000 * 1000;
 #else
   int big_n = 10000 * 1000;
 #endif
@@ -872,11 +817,11 @@ TEST(TEST_CATEGORY, scatterview_devicetype) {
   using device_memory_space    = Kokkos::CudaSpace;
   using host_accessible_space  = Kokkos::CudaUVMSpace;
 #else
-  using device_execution_space = Kokkos::Experimental::HIP;
-  using device_memory_space    = Kokkos::Experimental::HIPSpace;
-  using host_accessible_space  = Kokkos::Experimental::HIPManagedSpace;
+  using device_execution_space = Kokkos::HIP;
+  using device_memory_space    = Kokkos::HIPSpace;
+  using host_accessible_space  = Kokkos::HIPManagedSpace;
 #endif
-  if (std::is_same<TEST_EXECSPACE, device_execution_space>::value) {
+  if (std::is_same_v<TEST_EXECSPACE, device_execution_space>) {
     using device_device_type =
         Kokkos::Device<device_execution_space, device_memory_space>;
     test_scatter_view<device_device_type, Kokkos::Experimental::ScatterSum,

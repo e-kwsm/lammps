@@ -28,7 +28,6 @@ class PairGayBerneGPU : public PairGayBerne {
  public:
   PairGayBerneGPU(LAMMPS *lmp);
   ~PairGayBerneGPU() override;
-  void cpu_compute(int, int, int, int, int *, int *, int **);
   void compute(int, int) override;
   void init_style() override;
   double memory_usage() override;
@@ -37,9 +36,6 @@ class PairGayBerneGPU : public PairGayBerne {
 
  private:
   int gpu_mode;
-  double cpu_time;
-  int quat_nmax;
-  double **quat;
 };
 
 }    // namespace LAMMPS_NS

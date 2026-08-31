@@ -32,7 +32,6 @@
 #include "math_const.h"
 #include "memory.h"
 #include "modify.h"
-#include "neigh_request.h"
 #include "neighbor.h"
 #include "pair.h"
 #include "update.h"
@@ -85,8 +84,8 @@ void PairSpin::init_style()
 
   // check if newton pair is on
 
-  if ((force->newton_pair == 0) && (comm->me == 0))
-    error->all(FLERR,"Pair style spin requires newton pair on");
+  if (force->newton_pair == 0)
+    error->all(FLERR, Error::NOLASTLINE, "Pair style spin requires newton pair on");
 
   // need a full neighbor list
 
@@ -104,4 +103,13 @@ void PairSpin::init_style()
 
   nlocal_max = atom->nlocal;
   memory->grow(emag,nlocal_max,"pair/spin:emag");
+}
+
+/* ---------------------------------------------------------------------- */
+
+double PairSpin::memory_usage()
+{
+  double bytes = Pair::memory_usage();
+  bytes += (double) nlocal_max * sizeof(double);    // emag[nlocal_max]
+  return bytes;
 }

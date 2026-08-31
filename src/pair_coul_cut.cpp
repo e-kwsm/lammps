@@ -28,8 +28,9 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-PairCoulCut::PairCoulCut(LAMMPS *lmp) : Pair(lmp)
+PairCoulCut::PairCoulCut(LAMMPS *lmp) : Pair(lmp), cut(nullptr), scale(nullptr)
 {
+  born_matrix_enable = 1;
   writedata = 1;
 }
 
@@ -170,7 +171,7 @@ void PairCoulCut::settings(int narg, char **arg)
 
 void PairCoulCut::coeff(int narg, char **arg)
 {
-  if (narg < 2 || narg > 3) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (narg < 2 || narg > 3) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi, jlo, jhi;
@@ -190,7 +191,7 @@ void PairCoulCut::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -325,6 +326,31 @@ double PairCoulCut::single(int i, int j, int /*itype*/, int /*jtype*/, double rs
 
   phicoul = force->qqrd2e * atom->q[i] * atom->q[j] * rinv;
   return factor_coul * phicoul;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairCoulCut::born_matrix(int i, int j, int /*itype*/, int /*jtype*/, double rsq,
+                              double factor_coul, double /*factor_lj*/, double &dupair,
+                              double &du2pair)
+{
+  double rinv, r2inv, r3inv;
+  double du_coul, du2_coul;
+
+  double *q = atom->q;
+  double qqrd2e = force->qqrd2e;
+
+  r2inv = 1.0 / rsq;
+  rinv = sqrt(r2inv);
+  r3inv = r2inv * rinv;
+
+  // Reminder: qqrd2e converts  q^2/r to energy w/ dielectric constant
+
+  du_coul = -qqrd2e * q[i] * q[j] * r2inv;
+  du2_coul = 2.0 * qqrd2e * q[i] * q[j] * r3inv;
+
+  dupair = factor_coul * du_coul;
+  du2pair = factor_coul * du2_coul;
 }
 
 /* ---------------------------------------------------------------------- */

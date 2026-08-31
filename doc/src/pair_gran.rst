@@ -69,8 +69,8 @@ Description
 
 The *gran* styles use the following formulas for the frictional force
 between two granular particles, as described in
-:ref:`(Brilliantov) <Brilliantov>`, :ref:`(Silbert) <Silbert>`, and
-:ref:`(Zhang) <Zhang3>`, when the distance r between two particles of radii
+:ref:`(Brilliantov et al, 1996) <Brilliantov>`, :ref:`(Silbert, 2001) <Silbert>`, and
+:ref:`(Zhang4) <Zhang3>`, when the distance r between two particles of radii
 Ri and Rj is less than their contact distance d = Ri + Rj.  There is
 no force between the particles when r > d.
 
@@ -80,7 +80,7 @@ The two Hookean styles use this formula:
 
    F_{hk} = (k_n \delta \mathbf{n}_{ij} -
    m_{eff} \gamma_n\mathbf{ v}_n) -
-   (k_t \mathbf{ \Delta s}_t +
+   (k_t \boldsymbol{\Delta} \mathbf{s}_t +
    m_{eff} \gamma_t \mathbf{v}_t)
 
 The Hertzian style uses this formula:
@@ -91,7 +91,7 @@ The Hertzian style uses this formula:
      \sqrt{\delta} \sqrt{\frac{R_i R_j}{R_i + R_j}}
      \Big[ (k_n \delta \mathbf{n}_{ij} -
        m_{eff} \: \gamma_n \mathbf{ v}_n) -
-       (k_t \mathbf{ \Delta s}_t +
+       (k_t \boldsymbol{\Delta} \mathbf{s}_t +
        m_{eff} \: \gamma_t \mathbf{v}_t) \Big]
 
 In both equations the first parenthesized term is the normal force
@@ -114,7 +114,7 @@ The other quantities in the equations are as follows:
 * :math:`\gamma_n` = viscoelastic damping constant for normal contact
 * :math:`\gamma_t` = viscoelastic damping constant for tangential contact
 * :math:`m_{eff} = M_i M_j / (M_i + M_j) =` effective mass of 2 particles of mass M_i and M_j
-* :math:`\mathbf{\Delta s}_t =` tangential displacement vector between 2 particles       which is truncated to satisfy a frictional yield criterion
+* :math:`\boldsymbol{\Delta} \mathbf{s}_t =` tangential displacement vector between 2 particles which is truncated to satisfy a frictional yield criterion
 * :math:`n_{ij} =` unit vector along the line connecting the centers of the 2 particles
 * :math:`V_n =` normal component of the relative velocity of the 2 particles
 * :math:`V_t =` tangential component of the relative velocity of the 2 particles
@@ -152,7 +152,7 @@ units of (1/(time\*distance)), :math:`K_t` is in units of (pressure), and
 Note that in the Hookean case, :math:`K_n` can be thought of as a linear
 spring constant with units of force/distance.  In the Hertzian case,
 :math:`K_n` is like a non-linear spring constant with units of
-force/area or pressure, and as shown in the :ref:`(Zhang) <Zhang3>`
+force/area or pressure, and as shown in the :ref:`(Zhang4) <Zhang3>`
 paper, :math:`K_n = 4G / (3(1-\nu))` where :math:`\nu =` the Poisson ratio,
 G = shear modulus = :math:`E / (2(1+\nu))`, and E = Young's modulus.  Similarly,
 :math:`K_t = 4G / (2-\nu)`.  (NOTE: in an earlier version of the manual, we incorrectly
@@ -279,6 +279,11 @@ statistically similar results.  This is because the forces they
 compute depend on atom velocities.  See the
 :doc:`read_restart <read_restart>` command for more details.
 
+Accumulated values for individual contacts are saved to to restart
+files but are not saved to data files. Therefore, forces may
+differ significantly when a system is reloaded using A
+:doc:`read_data <read_data>` command.
+
 Related commands
 """"""""""""""""
 
@@ -293,14 +298,14 @@ none
 
 .. _Brilliantov:
 
-**(Brilliantov)** Brilliantov, Spahn, Hertzsch, Poschel, Phys Rev E, 53,
+**(Brilliantov et al, 1996)** Brilliantov, Spahn, Hertzsch, Poschel, Phys Rev E, 53,
 p 5382-5392 (1996).
 
 .. _Silbert:
 
-**(Silbert)** Silbert, Ertas, Grest, Halsey, Levine, Plimpton, Phys Rev
+**(Silbert, 2001)** Silbert, Ertas, Grest, Halsey, Levine, Plimpton, Phys Rev
 E, 64, p 051302 (2001).
 
 .. _Zhang3:
 
-**(Zhang)** Zhang and Makse, Phys Rev E, 72, p 011301 (2005).
+**(Zhang4)** Zhang and Makse, Phys Rev E, 72, p 011301 (2005).

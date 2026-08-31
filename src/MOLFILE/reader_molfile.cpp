@@ -26,11 +26,10 @@
 
 #include <cmath>
 using namespace LAMMPS_NS;
-typedef MolfileInterface MFI;
 using namespace MathConst;
+using MFI = MolfileInterface;
 
-enum{ID,TYPE,X,Y,Z,VX,VY,VZ};
-#define SMALL 1.0e-6
+static constexpr double SMALL = 1.0e-6;
 
 // true if the difference between two floats is "small".
 // cannot use fabsf() since it is not fully portable.
@@ -63,7 +62,7 @@ ReaderMolfile::~ReaderMolfile()
     memory->destroy(types);
     memory->destroy(coords);
     memory->destroy(vels);
-    if (mf) delete mf;
+    delete mf;
   }
 }
 
@@ -195,10 +194,10 @@ bigint ReaderMolfile::read_header(double box[3][3], int &boxinfo, int &triclinic
   // heuristics to determine if we have boxinfo (first if)
   // and whether we have an orthogonal box (second if)
 
-  if (!is_smalldiff(cell[0]*cell[1]*cell[2], 0.0f)) {
+  if (!is_smalldiff(cell[0]*cell[1]*cell[2], 0.0F)) {
     boxinfo = 1;
-    if (is_smalldiff(cell[3],90.0f) && is_smalldiff(cell[4],90.0f) &&
-        is_smalldiff(cell[5],90.0f)) {
+    if (is_smalldiff(cell[3],90.0F) && is_smalldiff(cell[4],90.0F) &&
+        is_smalldiff(cell[5],90.0F)) {
 
       triclinic = 0;
 
@@ -323,7 +322,7 @@ void ReaderMolfile::read_atoms(int n, int nfield, double **fields)
     ++nid;
 
     if (mf->property(MFI::P_TYPE,nid-1,buf) != MFI::P_NONE) {
-      mytype = atoi(buf);
+      mytype = std::stoi(buf);
     } else mytype = 0;
 
     for (m = 0; m < nfield; m++) {

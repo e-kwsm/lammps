@@ -1,10 +1,12 @@
 .. index:: pair_style mie/cut
 .. index:: pair_style mie/cut/gpu
+.. index:: pair_style mie/cut/kk
+.. index:: pair_style mie/cut/omp
 
 pair_style mie/cut command
 ==========================
 
-Accelerator Variants: *mie/cut/gpu*
+Accelerator Variants: *mie/cut/gpu*, *mie/cut/kk*, *mie/cut/omp*
 
 Syntax
 """"""
@@ -35,7 +37,7 @@ The *mie/cut* style computes the Mie potential, given by
    E =  C \epsilon \left[ \left(\frac{\sigma}{r}\right)^{\gamma_{rep}} - \left(\frac{\sigma}{r}\right)^{\gamma_{att}} \right]
                          \qquad r < r_c
 
-Rc is the cutoff and C is a function that depends on the repulsive and
+:math:`r_c` is the cutoff and C is a function that depends on the repulsive and
 attractive exponents, given by:
 
 .. math::
@@ -59,6 +61,10 @@ commands, or by mixing as described below:
 
 The last coefficient is optional.  If not specified, the global
 cutoff specified in the pair_style command is used.
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 

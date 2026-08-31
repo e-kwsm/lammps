@@ -1,11 +1,11 @@
-Using CMake with LAMMPS tutorial
-================================
+Using CMake with LAMMPS
+=======================
 
 The support for building LAMMPS with CMake is a recent addition to
 LAMMPS thanks to the efforts of Christoph Junghans (LANL) and Richard
-Berger (Temple U).  One of the key strengths of CMake is that it is not
-tied to a specific platform or build system and thus generate the files
-necessary to build and develop for different build systems and on
+Berger (LANL).  One of the key strengths of CMake is that it is not
+tied to a specific platform or build system. Instead it generates the
+files necessary to build and develop for different build systems and on
 different platforms.  Note, that this applies to the build system itself
 not the LAMMPS code. In other words, without additional porting effort,
 it is not possible - for example - to compile LAMMPS with Visual C++ on
@@ -14,7 +14,7 @@ necessary to program LAMMPS as a project in integrated development
 environments (IDE) like Eclipse, Visual Studio, QtCreator, Xcode,
 CodeBlocks, Kate and others.
 
-A second important feature of CMake is, that it can detect and validate
+A second important feature of CMake is that it can detect and validate
 available libraries, optimal settings, available support tools and so
 on, so that by default LAMMPS will take advantage of available tools
 without requiring to provide the details about how to enable/integrate
@@ -27,13 +27,15 @@ selected examples.  Please see the chapter about :doc:`building LAMMPS
 <Build>` for descriptions of specific flags and options for LAMMPS in
 general and for specific packages.
 
+.. versionchanged:: 10Sep2025
+
 CMake can be used through either the command-line interface (CLI)
 program ``cmake`` (or ``cmake3``), a text mode interactive user
 interface (TUI) program ``ccmake`` (or ``ccmake3``), or a graphical user
 interface (GUI) program ``cmake-gui``.  All of them are portable
 software available on all supported platforms and can be used
-interchangeably.  The minimum supported CMake version is 3.10 (3.12 or
-later is recommended).
+interchangeably.  Since LAMMPS version 10Sep2025, the minimum
+required CMake version is 3.20.
 
 All details about features and settings for CMake are in the `CMake
 online documentation <https://cmake.org/documentation/>`_. We focus
@@ -43,11 +45,20 @@ Prerequisites
 -------------
 
 This tutorial assumes that you are operating in a command-line environment
-using a shell like Bash.
+using a shell like Bash or Zsh.
 
-- Linux: any Terminal window will work
-- MacOS X: launch the Terminal application.
-- Windows 10: install and run the :doc:`Windows Subsystem for Linux <Howto_wsl>`
+- Linux: any Terminal window will work or text console
+- macOS: launch the Terminal application
+- Windows 10 or 11: install and run the :doc:`Windows Subsystem for Linux <Howto_wsl>`
+- other Unix-like operating systems like FreeBSD
+
+.. note::
+
+   It is also possible to use CMake on Windows 10 or 11 through either the Microsoft
+   Visual Studio IDE with the bundled CMake or from the Windows command prompt using
+   a separately installed CMake package, both using the native Microsoft Visual C++
+   compilers and (optionally) the Microsoft MPI SDK.  This tutorial, however, only
+   covers unix-like command-line interfaces.
 
 We also assume that you have downloaded and unpacked a recent LAMMPS source code package
 or used Git to create a clone of the LAMMPS sources on your compilation machine.
@@ -56,7 +67,7 @@ You should change into the top level directory of the LAMMPS source tree all
 paths mentioned in the tutorial are relative to that.  Immediately after downloading
 it should look like this:
 
-.. code-block:: bash
+.. code-block:: console
 
     $ ls
     bench  doc       lib      potentials  README  tools
@@ -89,7 +100,7 @@ different options (``build-parallel``, ``build-serial``) or with
 different compilers (``build-gnu``, ``build-clang``, ``build-intel``)
 and so on.  All the auxiliary files created by one build process
 (executable, object files, log files, etc) are stored in this directory
-or sub-directories within it that CMake creates.
+or subdirectories within it that CMake creates.
 
 
 Running CMake
@@ -104,7 +115,7 @@ the progress of the configuration printed to the screen followed by a
 summary of the enabled features, options and compiler settings. A typical
 summary screen will look like this:
 
-.. code-block::
+.. code-block:: console
 
    $ cmake ../cmake/
    -- The CXX compiler identification is GNU 8.2.0
@@ -133,7 +144,9 @@ summary screen will look like this:
    -- Performing Test COMPILER_SUPPORTS-march=native - Success
    -- Looking for C++ include cmath
    -- Looking for C++ include cmath - found
-   -- Generating style_angle.h...
+   -- Generating style headers...
+   -- Generating style source files...
+   -- Generating package registry...
    [...]
    -- Generating lmpinstalledpkgs.h...
    -- The following tools and libraries have been found and configured:
@@ -268,7 +281,7 @@ Setting options
 ---------------
 
 Options that enable, disable or modify settings are modified by setting
-the value of CMake variables. This is done on the command line with the
+the value of CMake variables. This is done on the command-line with the
 *-D* flag in the format ``-D VARIABLE=value``, e.g. ``-D
 CMAKE_BUILD_TYPE=Release`` or ``-D BUILD_MPI=on``.  There is one quirk:
 when used before the CMake directory, there may be a space between the
@@ -276,7 +289,7 @@ when used before the CMake directory, there may be a space between the
 can have boolean values (on/off, yes/no, or 1/0 are all valid) or are
 strings representing a choice, or a path, or are free format. If the
 string would contain whitespace, it must be put in quotes, for example
-``-D CMAKE_TUNE_FLAGS="-ftree-vectorize -ffast-math"``.
+``-D CMAKE_CXX_FLAGS="-O3 -Wall -ftree-vectorize -ffast-math"``.
 
 CMake variables fall into two categories: 1) common CMake variables that
 are used by default for any CMake configuration setup and 2) project
@@ -330,24 +343,22 @@ Some common LAMMPS specific variables
      - build LAMMPS with OpenMP support (default: ``on`` if compiler supports OpenMP fully, else ``off``)
    * - ``BUILD_TOOLS``
      - compile some additional executables from the ``tools`` folder (default: ``off``)
-   * - ``BUILD_LAMMPS_SHELL``
-     - compile the LAMMPS shell from the ``tools/lammps-shell`` folder (default: ``off``)
    * - ``BUILD_DOC``
      - include building the HTML format documentation for packaging/installing (default: ``off``)
-   * - ``CMAKE_TUNE_FLAGS``
-     - common compiler flags, for optimization or instrumentation (default:)
    * - ``LAMMPS_MACHINE``
      - when set to ``name`` the LAMMPS executable and library will be called ``lmp_name`` and ``liblammps_name.a``
-   * - ``LAMMPS_EXCEPTIONS``
-     - when set to ``on`` errors will throw a C++ exception instead of aborting (default: ``off``)
    * - ``FFT``
      - select which FFT library to use: ``FFTW3``, ``MKL``, ``KISS`` (default, unless FFTW3 is found)
+   * - ``FFT_KOKKOS``
+     - select which FFT library to use in Kokkos-enabled styles: ``FFTW3``, ``MKL``, ``HIPFFT``, ``CUFFT``, ``MKL_GPU``, ``KISS`` (default)
    * - ``FFT_SINGLE``
      - select whether to use single precision FFTs (default: ``off``)
    * - ``WITH_JPEG``
      - whether to support JPEG format in :doc:`dump image <dump_image>` (default: ``on`` if found)
    * - ``WITH_PNG``
      - whether to support PNG format in  :doc:`dump image <dump_image>` (default: ``on`` if found)
+   * - ``WITH_ZLIB``
+     - whether to use the zlib library for compression (default: ``on`` if found)
    * - ``WITH_GZIP``
      - whether to support reading and writing compressed files (default: ``on`` if found)
    * - ``WITH_FFMPEG``
@@ -369,15 +380,15 @@ Using presets
 -------------
 
 Since LAMMPS has a lot of optional features and packages, specifying
-them all on the command line can be tedious. Or when selecting a
-different compiler toolchain, multiple options have to be changed
+them all on the command-line can be tedious. Or when selecting a
+different compiler tool chain, multiple options have to be changed
 consistently and that is rather error prone. Or when enabling certain
 packages, they require consistent settings to be operated in a
 particular mode.  For this purpose, we are providing a selection of
 "preset files" for CMake in the folder ``cmake/presets``.  They
 represent a way to pre-load or override the CMake configuration cache by
 setting or changing CMake variables.  Preset files are loaded using the
-*-C* command line flag. You can combine loading multiple preset files or
+*-C* command-line flag. You can combine loading multiple preset files or
 change some variables later with additional *-D* flags.  A few examples:
 
 .. code-block:: bash
@@ -387,14 +398,14 @@ change some variables later with additional *-D* flags.  A few examples:
    cmake -C ../cmake/presets/basic.cmake -D BUILD_MPI=off ../cmake
 
 The first command will install the packages ``KSPACE``, ``MANYBODY``,
-``MOLECULE``, ``RIGID`` and ``MISC``; the first four from the preset
-file and the fifth from the explicit variable definition.  The second
-command will first switch the compiler toolchain to use the Clang
-compilers and install a large number of packages that are not depending
-on any special external libraries or tools and are not very unusual.
-The third command will enable the first four packages like above and
-then enforce compiling LAMMPS as a serial program (using the MPI STUBS
-library).
+``MOLECULE``, ``RIGID``, ``GRAPHICS``, and ``MISC``; the first five from
+the preset file and the sixth from the explicit variable definition.
+The second command will first switch the compiler tool chain to use the
+Clang compilers and install a large number of packages that are not
+depending on any special external libraries or tools and are not very
+unusual.  The third command will enable the first four packages like
+above and then enforce compiling LAMMPS as a serial program (using the
+MPI STUBS library).
 
 It is also possible to do this incrementally.
 
@@ -412,9 +423,9 @@ interface (``ccmake`` or ``cmake-gui``).
 
    Using a preset to select a compiler package (``clang.cmake``,
    ``gcc.cmake``, ``intel.cmake``, ``oneapi.cmake``, or ``pgi.cmake``)
-   are an exception to the mechanism of updating the configuration incrementally,
-   as they will trigger a reset of cached internal CMake settings and thus
-   reset settings to their default values.
+   are an exception to the mechanism of updating the configuration
+   incrementally, as they will trigger a reset of cached internal CMake
+   settings and thus reset settings to their default values.
 
 Compilation and build targets
 -----------------------------

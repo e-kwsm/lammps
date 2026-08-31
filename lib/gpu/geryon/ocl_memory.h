@@ -108,7 +108,7 @@ inline int _host_alloc(mat_type &mat, copy_type &cm, const size_t n,
     return UCL_MEMORY_ERROR;
   *mat.host_ptr() = (typename mat_type::data_type*)
     clEnqueueMapBuffer(cm.cq(),mat.cbegin(),CL_TRUE,
-		       map_perm,0,n,0,NULL,NULL,NULL);
+                       map_perm,0,n,0,NULL,NULL,NULL);
 
   mat.cq()=cm.cq();
   CL_SAFE_CALL(clRetainCommandQueue(mat.cq()));
@@ -128,7 +128,17 @@ inline int _host_view(mat_type &mat, copy_type &cm, const size_t o,
     mat.cbegin()=clCreateSubBuffer(cm.cbegin(), 0,
                                    CL_BUFFER_CREATE_TYPE_REGION, &subbuffer,
                                    &error_flag);
-    CL_CHECK_ERR(error_flag);
+    // OpenCL requires a sub-buffer origin to be a multiple of the device's
+    // CL_DEVICE_MEM_BASE_ADDR_ALIGN. A data-dependent, unaligned origin (e.g. an
+    // atom/neighbor count offset used by the manybody and ellipsoid styles) is
+    // rejected with CL_MISALIGNED_SUB_BUFFER_OFFSET. In that case fall back to the
+    // same code path used for discrete device memory below (no aliasing sub-buffer):
+    // host<->device copies then route through the mapped host pointer instead of a
+    // device-side buffer alias, which is correct, just not zero-copy.
+    if (error_flag==CL_MISALIGNED_SUB_BUFFER_OFFSET)
+      mat.cbegin()=(cl_mem)0;
+    else
+      CL_CHECK_ERR(error_flag);
   } else
     mat.cbegin()=(cl_mem)0;
   CL_SAFE_CALL(clRetainCommandQueue(mat.cq()));
@@ -137,7 +147,7 @@ inline int _host_view(mat_type &mat, copy_type &cm, const size_t o,
 
 template <class mat_type>
 inline int _host_alloc(mat_type &mat, UCL_Device &dev, const size_t n,
-                       const enum UCL_MEMOPT kind, const enum UCL_MEMOPT kind2){
+                       const enum UCL_MEMOPT kind, const enum UCL_MEMOPT /*kind2*/){
   cl_mem_flags buffer_perm;
   cl_map_flags map_perm;
   if (kind==UCL_READ_ONLY) {
@@ -491,17 +501,17 @@ template<int mem1, int mem2> struct _ucl_memcpy;
 // Both are images
 template<> struct _ucl_memcpy<2,2> {
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const p2 &src, const size_t n,
-                        cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const p2 &/*src*/, const size_t /*n*/,
+                        cl_command_queue &/*cq*/, const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const size_t dpitch, const p2 &src,
-                        const size_t spitch, const size_t cols,
-                        const size_t rows, cl_command_queue &cq,
-                        const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const size_t /*dpitch*/, const p2 &/*src*/,
+                        const size_t /*spitch*/, const size_t /*cols*/,
+                        const size_t /*rows*/, cl_command_queue &/*cq*/,
+                        const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
 };
@@ -509,17 +519,17 @@ template<> struct _ucl_memcpy<2,2> {
 // Destination is texture, source on device
 template<> struct _ucl_memcpy<2,0> {
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const p2 &src, const size_t n,
-                        cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const p2 &/*src*/, const size_t /*n*/,
+                        cl_command_queue &/*cq*/, const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const size_t dpitch, const p2 &src,
-                        const size_t spitch, const size_t cols,
-                        const size_t rows, cl_command_queue &cq,
-                        const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const size_t /*dpitch*/, const p2 &/*src*/,
+                        const size_t /*spitch*/, const size_t /*cols*/,
+                        const size_t /*rows*/, cl_command_queue &/*cq*/,
+                        const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
 };
@@ -527,17 +537,17 @@ template<> struct _ucl_memcpy<2,0> {
 // Destination is texture, source on host
 template<> struct _ucl_memcpy<2,1> {
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const p2 &src, const size_t n,
-                        cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const p2 &/*src*/, const size_t /*n*/,
+                        cl_command_queue &/*cq*/, const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const size_t dpitch, const p2 &src,
-                        const size_t spitch, const size_t cols,
-                        const size_t rows, cl_command_queue &cq,
-                        const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const size_t /*dpitch*/, const p2 &/*src*/,
+                        const size_t /*spitch*/, const size_t /*cols*/,
+                        const size_t /*rows*/, cl_command_queue &/*cq*/,
+                        const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
 };
@@ -545,17 +555,17 @@ template<> struct _ucl_memcpy<2,1> {
 // Source is texture, dest on device
 template<> struct _ucl_memcpy<0,2> {
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const p2 &src, const size_t n,
-                        cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const p2 &/*src*/, const size_t /*n*/,
+                        cl_command_queue &/*cq*/, const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const size_t dpitch, const p2 &src,
-                        const size_t spitch, const size_t cols,
-                        const size_t rows, cl_command_queue &cq,
-                        const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const size_t /*dpitch*/, const p2 &/*src*/,
+                        const size_t /*spitch*/, const size_t /*cols*/,
+                        const size_t /*rows*/, cl_command_queue &/*cq*/,
+                        const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
 };
@@ -563,17 +573,17 @@ template<> struct _ucl_memcpy<0,2> {
 // Source is texture, dest on host
 template<> struct _ucl_memcpy<1,2> {
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const p2 &src, const size_t n,
-                        cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const p2 &/*src*/, const size_t /*n*/,
+                        cl_command_queue &/*cq*/, const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
   template <class p1, class p2>
-  static inline void mc(p1 &dst, const size_t dpitch, const p2 &src,
-                        const size_t spitch, const size_t cols,
-                        const size_t rows, cl_command_queue &cq,
-                        const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+  static inline void mc(p1 &/*dst*/, const size_t /*dpitch*/, const p2 &/*src*/,
+                        const size_t /*spitch*/, const size_t /*cols*/,
+                        const size_t /*rows*/, cl_command_queue &/*cq*/,
+                        const cl_bool /*block*/,
+                        const size_t /*dst_offset*/, const size_t /*src_offset*/) {
     assert(0==1);
   }
 };
@@ -583,7 +593,7 @@ template <> struct _ucl_memcpy<1,0> {
   template <class p1, class p2>
   static inline void mc(p1 &dst, const p2 &src, const size_t n,
                         cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+                        const size_t /*dst_offset*/, const size_t src_offset) {
     if (src.cbegin()==dst.cbegin()) {
       #ifdef UCL_DBG_MEM_TRACE
       std::cerr << "UCL_COPY 1S\n";
@@ -641,7 +651,7 @@ template <> struct _ucl_memcpy<0,1> {
   template <class p1, class p2>
   static inline void mc(p1 &dst, const p2 &src, const size_t n,
                         cl_command_queue &cq, const cl_bool block,
-                        const size_t dst_offset, const size_t src_offset) {
+                        const size_t dst_offset, const size_t /*src_offset*/) {
     if (src.cbegin()==dst.cbegin()) {
       if (block) ucl_sync(cq);
       #ifdef UCL_DBG_MEM_TRACE

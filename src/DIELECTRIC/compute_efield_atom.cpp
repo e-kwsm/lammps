@@ -27,6 +27,7 @@
 #include "pair_coul_cut_dielectric.h"
 #include "pair_coul_long_dielectric.h"
 #include "pair_lj_cut_coul_cut_dielectric.h"
+#include "pair_lj_cut_coul_debye_dielectric.h"
 #include "pair_lj_cut_coul_long_dielectric.h"
 #include "pair_lj_cut_coul_msm_dielectric.h"
 #include "pppm_dielectric.h"
@@ -39,7 +40,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeEfieldAtom::ComputeEfieldAtom(LAMMPS *_lmp, int narg, char **arg) :
-    Compute(_lmp, narg, arg), efield(nullptr)
+    Compute(_lmp, narg, arg), efield_pair(nullptr), efield_kspace(nullptr), efield(nullptr)
 {
   if (narg < 3) error->all(FLERR, "Illegal compute efield/atom command");
 
@@ -68,8 +69,6 @@ ComputeEfieldAtom::ComputeEfieldAtom(LAMMPS *_lmp, int narg, char **arg) :
   }
 
   nmax = 0;
-
-  comm_reverse = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -100,6 +99,10 @@ void ComputeEfieldAtom::setup()
   else if (strcmp(force->pair_style, "lj/cut/coul/cut/dielectric") == 0)
     efield_pair = (dynamic_cast<PairLJCutCoulCutDielectric *>(force->pair))->efield;
   else if (strcmp(force->pair_style, "lj/cut/coul/cut/dielectric/omp") == 0)
+    efield_pair = (dynamic_cast<PairLJCutCoulDebyeDielectric *>(force->pair))->efield;
+  else if (strcmp(force->pair_style, "lj/cut/coul/debye/dielectric") == 0)
+    efield_pair = (dynamic_cast<PairLJCutCoulDebyeDielectric *>(force->pair))->efield;
+  else if (strcmp(force->pair_style, "lj/cut/coul/debye/dielectric/omp") == 0)
     efield_pair = (dynamic_cast<PairLJCutCoulCutDielectric *>(force->pair))->efield;
   else if (strcmp(force->pair_style, "coul/long/dielectric") == 0)
     efield_pair = (dynamic_cast<PairCoulLongDielectric *>(force->pair))->efield;
@@ -130,7 +133,7 @@ void ComputeEfieldAtom::compute_peratom()
 
   invoked_peratom = update->ntimestep;
   if (update->vflag_atom != invoked_peratom)
-    error->all(FLERR, "Per-atom virial was not tallied on needed timestep");
+    error->all(FLERR, Error::NOLASTLINE, "Per-atom virial was not tallied on needed timestep{}", utils::errorurl(22));
 
   // grow local stress array if necessary
   // needs to be atom->nmax in length

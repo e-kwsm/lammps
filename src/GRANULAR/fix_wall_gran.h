@@ -24,11 +24,12 @@ FixStyle(wall/gran,FixWallGran);
 
 namespace LAMMPS_NS {
 
+namespace Granular_NS {
+  class GranularModel;
+}
+
 class FixWallGran : public Fix {
  public:
-  enum { HOOKE, HOOKE_HISTORY, HERTZ_HISTORY, GRANULAR };
-  enum { NORMAL_NONE, NORMAL_HOOKE, NORMAL_HERTZ, HERTZ_MATERIAL, DMT, JKR };
-
   FixWallGran(class LAMMPS *, int, char **);
   ~FixWallGran() override;
   int setmask() override;
@@ -49,54 +50,39 @@ class FixWallGran : public Fix {
   int maxsize_restart() override;
   void reset_dt() override;
 
-  void hooke(double, double, double, double, double *, double *, double *, double *, double *,
-             double, double, double *);
-  void hooke_history(double, double, double, double, double *, double *, double *, double *,
-                     double *, double, double, double *, double *);
-  void hertz_history(double, double, double, double, double *, double, double *, double *, double *,
-                     double *, double, double, double *, double *);
-  void granular(double, double, double, double, double *, double, double *, double *, double *,
-                double *, double, double, double *, double *);
+  int image(int *&, double **&) override;
 
-  double pulloff_distance(double);
+  // for granular model choices
+  class Granular_NS::GranularModel *model;
 
  protected:
   int wallstyle, wiggle, wshear, axis;
-  int pairstyle, nlevels_respa;
+  int nlevels_respa;
   bigint time_origin;
-  double kn, kt, gamman, gammat, xmu;
 
-  // for granular model choices
-  int normal_model, damping_model;
-  int tangential_model, roll_model, twist_model;
-  int limit_damping;
-
-  // history flags
-  int normal_history, tangential_history, roll_history, twist_history;
-
-  // indices of history entries
-  int normal_history_index;
-  int tangential_history_index;
-  int roll_history_index;
-  int twist_history_index;
-
-  // material coefficients
-  double Emod, poiss, Gmod;
-
-  // contact model coefficients
-  double normal_coeffs[4];
-  double tangential_coeffs[3];
-  double roll_coeffs[3];
-  double twist_coeffs[3];
-
-  double lo, hi, cylradius;
+  double lo, hi;
   double amplitude, period, omega, vshear;
   double dt;
+  double Twall;
   char *idregion;
+
+  // wall positions set by equal-style variables
+
+  int xstyle[2], xvar[2];    // style and variable index for lo/hi wall position
+  char *xstr[2];             // variable names for lo/hi wall position
+  double velwall[2];         // current velocity of lo/hi wall
+  double prevwall[2];        // lo/hi wall position at previous evaluation
+  bigint velstep;            // timestep of last wall velocity update
+  int velflag;               // 1 if any wall position is set by a variable
+  int varflag;               // 1 if any wall attribute is set by a variable
 
   int use_history;       // if particle/wall interaction stores history
   int history_update;    // flag for whether shear history is updated
   int size_history;      // # of shear history values per contact
+  int heat_flag;
+
+  int tvar;
+  char *tstr;
 
   // shear history for single contact per particle
 
@@ -108,9 +94,15 @@ class FixWallGran : public Fix {
   double *mass_rigid;      // rigid mass for owned+ghost atoms
   int nmax;                // allocated size of mass_rigid
 
+  // dump image data
+
+  int numwalls;
+  int *imgobjs;
+  double **imgparms;
+
   // store particle interactions
 
-  int store;
+  int nsvector;
 
   void clear_stored_contacts();
 };

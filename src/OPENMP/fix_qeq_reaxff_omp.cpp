@@ -224,8 +224,9 @@ void FixQEqReaxFFOMP::compute_H()
   } // omp
 
   if (m_fill >= H.m)
-    error->all(FLERR,fmt::format("Fix qeq/reaxff: H matrix size has been "
-                                   "exceeded: m_fill={} H.m={}\n", m_fill, H.m));
+    error->all(FLERR,  Error::NOLASTLINE,
+               "Fix qeq/reaxff: H matrix size has been exceeded: m_fill={} H.m={}\n",
+               m_fill, H.m);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -467,9 +468,8 @@ int FixQEqReaxFFOMP::CG(double *b, double *x)
   }
 
   if ((i >= imax) && maxwarn && (comm->me == 0))
-    error->warning(FLERR,fmt::format("Fix qeq/reaxff/omp CG convergence failed "
-                                     "after {} iterations at step {}",
-                                     i,update->ntimestep));
+    error->warning(FLERR,"Fix qeq/reaxff/omp CG convergence failed after {} iterations at step {}",
+                   i,update->ntimestep);
   return i;
 }
 
@@ -796,9 +796,8 @@ int FixQEqReaxFFOMP::dual_CG(double *b1, double *b2, double *x1, double *x2)
   }
 
   if ((i >= imax) && maxwarn && (comm->me == 0))
-    error->warning(FLERR,fmt::format("Fix qeq/reaxff/omp CG convergence failed "
-                                     "after {} iterations at step {}",
-                                     i,update->ntimestep));
+    error->warning(FLERR,"Fix qeq/reaxff/omp CG convergence failed after {} iterations at step {}",
+                   i,update->ntimestep);
   return matvecs_s + matvecs_t;
 }
 
@@ -983,4 +982,15 @@ void FixQEqReaxFFOMP::dual_sparse_matvec(sparse_matrix *A, double *x, double *b)
       }
     }
   } // omp parallel
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixQEqReaxFFOMP::memory_usage()
+{
+  double bytes = FixQEqReaxFF::memory_usage();
+  int size = nmax;
+  if (dual_enabled) size *= 2;
+  bytes += (double) comm->nthreads * size * sizeof(double);    // b_temp[nthreads][nmax]
+  return bytes;
 }

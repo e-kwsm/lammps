@@ -18,6 +18,7 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "graphics.h"
 #include "memory.h"
 #include "modify.h"
 #include "neighbor.h"
@@ -32,22 +33,22 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define DELTA 16
+static constexpr int DELTA = 16;
 
 /* ---------------------------------------------------------------------- */
 
 FixBondBreak::FixBondBreak(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
   partner(nullptr), finalpartner(nullptr), distsq(nullptr), probability(nullptr),
-  broken(nullptr), copy(nullptr), random(nullptr)
+  broken(nullptr), copy(nullptr), random(nullptr), imgobjs(nullptr), imgparms(nullptr)
 {
   if (narg < 6) error->all(FLERR,"Illegal fix bond/break command");
 
   MPI_Comm_rank(world,&me);
   MPI_Comm_size(world,&nprocs);
 
-  nevery = utils::inumeric(FLERR,arg[3],false,lmp);
-  if (nevery <= 0) error->all(FLERR,"Illegal fix bond/break command");
+  nevery = utils::inumeric(FLERR, arg[3], false, lmp);
+  if (nevery <= 0) error->all(FLERR, "Illegal fix bond/break command");
 
   force_reneighbor = 1;
   next_reneighbor = -1;
@@ -56,8 +57,10 @@ FixBondBreak::FixBondBreak(LAMMPS *lmp, int narg, char **arg) :
   global_freq = 1;
   extvector = 0;
 
-  btype = utils::inumeric(FLERR,arg[4],false,lmp);
-  cutoff = utils::numeric(FLERR,arg[5],false,lmp);
+  vizsteps = 1000;
+
+  btype = utils::expand_type_int(FLERR, arg[4], Atom::BOND, lmp);
+  cutoff = utils::numeric(FLERR, arg[5], false, lmp);
 
   if (btype < 1 || btype > atom->nbondtypes)
     error->all(FLERR,"Invalid bond type in fix bond/break command");
@@ -131,7 +134,22 @@ FixBondBreak::~FixBondBreak()
   memory->destroy(finalpartner);
   memory->destroy(distsq);
   memory->destroy(broken);
-  delete [] copy;
+  delete[] copy;
+  memory->destroy(imgobjs);
+  memory->destroy(imgparms);
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixBondBreak::modify_param(int narg, char **arg)
+{
+  if (strcmp(arg[0],"vizsteps") == 0) {
+    if (narg < 2) utils::missing_cmd_args(FLERR, "fix_modify bond/break", error);
+    vizsteps = utils::inumeric(FLERR, arg[1], false, lmp);
+    return 2;
+  }
+
+  return 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -329,6 +347,12 @@ void FixBondBreak::post_integrate()
     finalpartner[i] = tag[j];
     finalpartner[j] = tag[i];
     if (tag[i] < tag[j]) nbreak++;
+
+    // record atoms involved in broken bond
+    if (vizsteps > 0) {
+      vizatoms[tag[i]] = vizsteps;
+      vizatoms[tag[j]] = vizsteps;
+    }
   }
 
   // tally stats
@@ -338,7 +362,7 @@ void FixBondBreak::post_integrate()
   atom->nbonds -= breakcount;
 
   // trigger reneighboring if any bonds were broken
-  // this insures neigh lists will immediately reflect the topology changes
+  // this ensures neigh lists will immediately reflect the topology changes
   // done if no bonds broken
 
   if (breakcount) next_reneighbor = update->ntimestep;
@@ -354,7 +378,7 @@ void FixBondBreak::post_integrate()
   //   even if between owned-ghost or ghost-ghost atoms
   // finalpartner is now set for owned and ghost atoms so loop over nall
   // OK if duplicates in broken list due to ghosts duplicating owned atoms
-  // check J < 0 to insure a broken bond to unknown atom is included
+  // check J < 0 to ensure a broken bond to unknown atom is included
   //   i.e. bond partner outside of cutoff length
 
   nbreak = 0;
@@ -377,12 +401,26 @@ void FixBondBreak::post_integrate()
 
   update_topology();
 
+  // if visualization support is enabled, age vizatoms and remove expired ones
+  if (vizsteps > 0) {
+    std::vector<tagint> eraseme;
+    for (const auto &[key, value] : vizatoms) {
+      int idx = atom->map(key);
+      if ((idx < 0) || (value < 0)) {
+        eraseme.push_back(key);
+        continue;
+      }
+      vizatoms[key] = value - nevery;
+    }
+    for (const auto &key : eraseme) vizatoms.erase(key);
+  }
+
   // DEBUG
   // print_bb();
 }
 
 /* ----------------------------------------------------------------------
-   insure all atoms 2 hops away from owned atoms are in ghost list
+   ensure all atoms 2 hops away from owned atoms are in ghost list
    this allows dihedral 1-2-3-4 to be properly deleted
      and special list of 1 to be properly updated
    if I own atom 1, but not 2,3,4, and bond 3-4 is deleted
@@ -438,11 +476,6 @@ void FixBondBreak::update_topology()
   nangles = 0;
   ndihedrals = 0;
   nimpropers = 0;
-
-  //printf("NBREAK %d: ",nbreak);
-  //for (i = 0; i < nbreak; i++)
-  //  printf(" %d %d,",broken[i][0],broken[i][1]);
-  //printf("\n");
 
   for (i = 0; i < nlocal; i++) {
     influenced = 0;
@@ -550,7 +583,7 @@ void FixBondBreak::rebuild_special_one(int m)
   nspecial[m][0] = cn1;
   nspecial[m][1] = cn2;
   nspecial[m][2] = cn3;
-  memcpy(special[m],copy,cn3*sizeof(int));
+  memcpy(special[m],copy,cn3*sizeof(tagint));
 }
 
 /* ----------------------------------------------------------------------
@@ -818,4 +851,40 @@ double FixBondBreak::memory_usage()
   double bytes = 2*nmax * sizeof(tagint);
   bytes += (double)nmax * sizeof(double);
   return bytes;
+}
+
+/* ----------------------------------------------------------------------
+   provide graphics information to dump image to render spheres
+   at the location of atoms that were involved in a reaction
+------------------------------------------------------------------------- */
+
+int FixBondBreak::image(int *&objs, double **&parms)
+{
+  memory->destroy(imgobjs);
+  memory->destroy(imgparms);
+
+  int numobjs = vizatoms.size();
+  int n = 0;
+  if (numobjs > 0) {
+    memory->create(imgobjs, numobjs, "bond/break:imgobjs");
+    memory->create(imgparms, numobjs, 5, "bond/break:imgparms");
+
+    int idx;
+    const auto *const type = atom->type;
+    const auto *const *const x = atom->x;
+    for (const auto &[key, value] : vizatoms) {
+      idx = atom->map(key);
+      if (idx < 0) continue;
+      imgobjs[n] = Graphics::SPHERE;
+      imgparms[n][0] = type[idx];
+      imgparms[n][1] = x[idx][0];
+      imgparms[n][2] = x[idx][1];
+      imgparms[n][3] = x[idx][2];
+      imgparms[n][4] = 0.0;     // radius is set with fflag2 in dump image
+      ++n;
+    }
+  }
+  objs = imgobjs;
+  parms = imgparms;
+  return n;
 }

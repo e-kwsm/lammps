@@ -9,28 +9,33 @@ atom_style full
 
 pair_style lj/class2 8
 
-angle_style class2 
+angle_style class2
 
-bond_style class2 
+bond_style class2
 
 dihedral_style class2
 
 improper_style class2
 
-read_data tiny_epoxy.data
+special_bonds lj/coul 0 0 1
+pair_modify tail yes mix sixthpower
+
+read_data tiny_epoxy.data &
+  extra/special/per/atom 25
 
 velocity all create 300.0 4928459 dist gaussian
 
-molecule mol1 rxn1_stp1_pre.data_template
-molecule mol2 rxn1_stp1_post.data_template
-molecule mol3 rxn1_stp2_post.data_template
-molecule mol4 rxn2_stp1_pre.data_template
-molecule mol5 rxn2_stp1_post.data_template
-molecule mol6 rxn2_stp2_post.data_template
+molecule mol1 rxn1_stp1_pre.molecule_template
+molecule mol2 rxn1_stp1_post.molecule_template
+molecule mol3 rxn1_stp2_post.molecule_template
+molecule mol4 rxn2_stp1_pre.molecule_template
+molecule mol5 rxn2_stp1_post.molecule_template
+molecule mol6 rxn2_stp2_post.molecule_template
 
 thermo 50
 
 # dump 1 all xyz 1 test_vis.xyz
+# dump_modify 1 types labels
 
 fix rxns all bond/react stabilization yes statted_grp .03 &
   react rxn1_stp1 all 1 0.0 5 mol1 mol2 rxn1_stp1.map &
@@ -41,7 +46,8 @@ fix rxns all bond/react stabilization yes statted_grp .03 &
 
 fix 1 statted_grp_REACT nvt temp 300 300 100
 
-thermo_style custom step temp f_rxns[1] f_rxns[2] f_rxns[3] f_rxns[4]
+thermo_style custom step temp f_rxns[*]
+thermo_modify colname auto
 
 run 2000
 

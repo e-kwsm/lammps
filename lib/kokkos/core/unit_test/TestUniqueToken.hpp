@@ -1,50 +1,14 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #include <gtest/gtest.h>
 
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_EXPERIMENTAL_CXX20_MODULES
+import kokkos.core;
+#else
 #include <Kokkos_Core.hpp>
+#endif
 
 namespace {
 
@@ -118,7 +82,7 @@ class TestUniqueToken {
       Kokkos::fence();
     }
 
-    typename view_type::HostMirror host_counts =
+    typename view_type::host_mirror_type host_counts =
         Kokkos::create_mirror_view(self.counts);
 
     Kokkos::deep_copy(host_counts, self.counts);
@@ -152,7 +116,7 @@ class TestUniqueToken {
     }
 #endif
 
-    typename view_type::HostMirror host_errors =
+    typename view_type::host_mirror_type host_errors =
         Kokkos::create_mirror_view(self.errors);
 
     Kokkos::deep_copy(host_errors, self.errors);
@@ -221,7 +185,7 @@ class TestAcquireTeamUniqueToken {
   }
 
   TestAcquireTeamUniqueToken(int team_size)
-      : tokens(execution_space::concurrency() / team_size, execution_space()),
+      : tokens(execution_space().concurrency() / team_size, execution_space()),
         verify("TestAcquireTeamUniqueTokenVerify", tokens.size()),
         counts("TestAcquireTeamUniqueTokenCounts", tokens.size()),
         errors("TestAcquireTeamUniqueTokenErrors", 1) {}
@@ -252,7 +216,7 @@ class TestAcquireTeamUniqueToken {
       Kokkos::fence();
     }
 
-    typename view_type::HostMirror host_counts =
+    typename view_type::host_mirror_type host_counts =
         Kokkos::create_mirror_view(self.counts);
 
     Kokkos::deep_copy(host_counts, self.counts);
@@ -266,7 +230,7 @@ class TestAcquireTeamUniqueToken {
       }
     }
 
-    typename view_type::HostMirror host_errors =
+    typename view_type::host_mirror_type host_errors =
         Kokkos::create_mirror_view(self.errors);
 
     Kokkos::deep_copy(host_errors, self.errors);
@@ -276,14 +240,7 @@ class TestAcquireTeamUniqueToken {
 };
 
 TEST(TEST_CATEGORY, unique_token_team_acquire) {
-#ifdef KOKKOS_ENABLE_OPENMPTARGET  // FIXME_OPENMPTARGET
-  if constexpr (std::is_same<TEST_EXECSPACE,
-                             Kokkos::Experimental::OpenMPTarget>::value) {
-    GTEST_SKIP() << "skipping because OpenMPTarget does not implement yet a "
-                    "specialization of AcquireTeamUniqueToken";
-  } else
-#endif
-    TestAcquireTeamUniqueToken<TEST_EXECSPACE>::run();
+  TestAcquireTeamUniqueToken<TEST_EXECSPACE>::run();
 }
 
 }  // namespace

@@ -12,7 +12,7 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meißner (TUHH)
+   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meissner (TUHH)
 ------------------------------------------------------------------------- */
 
 #ifndef LMP_BOUNDARY_CORRECTION_H
@@ -25,22 +25,14 @@ namespace LAMMPS_NS {
 class BoundaryCorrection : protected Pointers {
  public:
   BoundaryCorrection(LAMMPS *);
-  virtual void vector_corr(double *, int, int, bool){};
-  virtual void matrix_corr(bigint *, double **){};
-  virtual void compute_corr(double, double, int, int, double &, double *){};
-  void setup(double, double, double);
-  void setup(double, double, double, double);
+  ~BoundaryCorrection() override = default;
+
+  virtual void vector_corr(double *, int, int, bool) {};
+  virtual void matrix_corr(bigint *, double **) {};
+  virtual void compute_corr(double, int, int, double &, double *) {};
 
  protected:
-  double area;
-  double volume;
-  double xprd_wire;
-  double yprd_wire;
-  double zprd_slab;
-  double qqrd2e;
-  double scale;
-  double g_ewald;
-
+  double get_volume();
   std::vector<bigint> gather_jmat(bigint *);
   std::vector<int> gather_recvcounts(int);
   std::vector<int> gather_displs(const std::vector<int> &);

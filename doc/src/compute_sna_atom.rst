@@ -3,7 +3,9 @@
 .. index:: compute snav/atom
 .. index:: compute snap
 .. index:: compute sna/grid
+.. index:: compute sna/grid/kk
 .. index:: compute sna/grid/local
+.. index:: compute sna/grid/local/kk
 
 compute sna/atom command
 ========================
@@ -23,29 +25,31 @@ compute sna/grid command
 compute sna/grid/local command
 ==============================
 
+Accelerator Variants: *sna/grid/kk*, *sna/grid/local/kk*
+
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    compute ID group-ID sna/atom rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
    compute ID group-ID snad/atom rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
    compute ID group-ID snav/atom rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
    compute ID group-ID snap rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
    compute ID group-ID snap rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
-   compute ID group-ID sna/grid nx ny nz rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
-   compute ID group-ID sna/grid/local nx ny nz rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
+   compute ID group-ID sna/grid grid nx ny nz rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
+   compute ID group-ID sna/grid/local grid nx ny nz rcutfac rfac0 twojmax R_1 R_2 ... w_1 w_2 ... keyword values ...
 
 * ID, group-ID are documented in :doc:`compute <compute>` command
 * sna/atom = style name of this compute command
-* rcutfac = scale factor applied to all cutoff radii (positive real)
-* rfac0 = parameter in distance to angle conversion (0 < rcutfac < 1)
-* twojmax = band limit for bispectrum components (non-negative integer)
-* R_1, R_2,... = list of cutoff radii, one for each type (distance units)
-* w_1, w_2,... = list of neighbor weights, one for each type
-* nx, ny, nz = number of grid points in x, y, and z directions (positive integer)
+* *rcutfac* = scale factor applied to all cutoff radii (positive real)
+* *rfac0* = parameter in distance to angle conversion (0 < rcutfac < 1)
+* *twojmax* = band limit for bispectrum components (non-negative integer)
+* *R_1, R_2,...* = list of cutoff radii, one for each type (distance units)
+* *w_1, w_2,...* = list of neighbor weights, one for each type
+* *grid* values = nx, ny, nz, number of grid points in x, y, and z directions (positive integer)
 * zero or more keyword/value pairs may be appended
-* keyword = *rmin0* or *switchflag* or *bzeroflag* or *quadraticflag* or *chem* or *bnormflag* or *wselfallflag* or *bikflag* or *switchinnerflag* or *sinner* or *dinner* or *dgradflag*
+* keyword = *rmin0* or *switchflag* or *bzeroflag* or *quadraticflag* or *chem* or *bnormflag* or *wselfallflag* or *bikflag* or *switchinnerflag* or *sinner* or *dinner* or *dgradflag* or *nnn* or *wmode* or *delta*
 
   .. parsed-literal::
 
@@ -82,6 +86,16 @@ Syntax
           *0* = descriptor gradients are summed over atoms of each type
           *1* = descriptor gradients are listed separately for each atom pair
 
+* additional keyword = *nnn* or *wmode* or *delta*
+
+  .. parsed-literal::
+
+       *nnn* value = number of considered nearest neighbors to compute the bispectrum over a target specific number of neighbors (only implemented for compute sna/atom)
+       *wmode* value = weight function for finding optimal cutoff to match the target number of neighbors (required if nnn used, only implemented for compute sna/atom)
+          *0* = heavyside weight function
+          *1* = hyperbolic tangent weight function
+       *delta* value = transition interval centered at cutoff distance for hyperbolic tangent weight function (ignored if wmode=0, required if wmode=1, only implemented for compute sna/atom)
+
 Examples
 """"""""
 
@@ -93,7 +107,8 @@ Examples
    compute snap all snap 1.4 0.95 6 2.0 1.0
    compute snap all snap 1.0 0.99363 6 3.81 3.83 1.0 0.93 chem 2 0 1
    compute snap all snap 1.0 0.99363 6 3.81 3.83 1.0 0.93 switchinnerflag 1 sinner 1.35 1.6 dinner 0.25 0.3
-   compute bgrid all sna/grid/local 200 200 200 1.4 0.95 6 2.0 1.0
+   compute bgrid all sna/grid/local grid 200 200 200 1.4 0.95 6 2.0 1.0
+   compute bnnn all sna/atom 9.0 0.99363 8 0.5 1.0 rmin0 0.0 nnn 24 wmode 1 delta 0.2
 
 Description
 """""""""""
@@ -108,24 +123,24 @@ target data.
 Bispectrum components of an atom are order parameters characterizing the
 radial and angular distribution of neighbor atoms. The detailed
 mathematical definition is given in the paper by Thompson et
-al. :ref:`(Thompson) <Thompson20141>`
+al. :ref:`(Thompson2) <Thompson20141>`
 
 The position of a neighbor atom *i'* relative to a central atom *i* is a
 point within the 3D ball of radius :math:`R_{ii'}` = *rcutfac*
 :math:`(R_i + R_i')`
 
-Bartok et al. :ref:`(Bartok) <Bartok20101>`, proposed mapping this 3D
+Bartok et al. :ref:`(Bartok2010) <Bartok20101>`, proposed mapping this 3D
 ball onto the 3-sphere, the surface of the unit ball in a
 four-dimensional space.  The radial distance *r* within *R_ii'* is
 mapped on to a third polar angle :math:`\theta_0` defined by,
 
 .. math::
 
-  \theta_0 = {\sf rfac0} \frac{r-r_{min0}}{R_{ii'}-r_{min0}} \pi
+  \theta_0 = \mathsf{rfac0} \frac{r-r_{min0}}{R_{ii'}-r_{min0}} \pi
 
 In this way, all possible neighbor positions are mapped on to a subset
-of the 3-sphere.  Points south of the latitude :math:`\theta_0` =
-*rfac0* :math:`\pi` are excluded.
+of the 3-sphere.  Points south of the latitude
+:math:`\theta_0 = \mathsf{rfac0} \pi` are excluded.
 
 The natural basis for functions on the 3-sphere is formed by the
 representatives of *SU(2)*, the matrices :math:`U^j_{m,m'}(\theta, \phi,
@@ -157,7 +172,7 @@ The expansion coefficients :math:`u^j_{m,m'}` are complex-valued and
 they are not directly useful as descriptors, because they are not
 invariant under rotation of the polar coordinate frame. However, the
 following scalar triple products of expansion coefficients can be shown
-to be real-valued and invariant under rotation :ref:`(Bartok)
+to be real-valued and invariant under rotation :ref:`(Bartok2010)
 <Bartok20101>`.
 
 .. math::
@@ -186,7 +201,7 @@ components summed separately for each LAMMPS atom type:
 
 .. math::
 
-   -\sum_{i' \in I} \frac{\partial {B^{i'}_{j_1,j_2,j}  }}{\partial {\bf r}_i}
+   -\sum_{i' \in I} \frac{\partial {B^{i'}_{j_1,j_2,j}  }}{\partial \mathbf{r}_i}
 
 The sum is over all atoms *i'* of atom type *I*\ .  For each atom *i*,
 this compute evaluates the above expression for each direction, each
@@ -198,7 +213,7 @@ derivatives:
 
 .. math::
 
-  -{\bf r}_i \otimes \sum_{i' \in I} \frac{\partial {B^{i'}_{j_1,j_2,j}}}{\partial {\bf r}_i}
+  -\mathbf{r}_i \otimes \sum_{i' \in I} \frac{\partial {B^{i'}_{j_1,j_2,j}}}{\partial \mathbf{r}_i}
 
 Again, the sum is over all atoms *i'* of atom type *I*\ .  For each atom
 *i*, this compute evaluates the above expression for each of the six
@@ -241,7 +256,8 @@ for finite-temperature Kohn-Sham density functional theory (:ref:`Ellis
 et al. <Ellis2021>`) Neighbor atoms not in the group do not contribute
 to the bispectrum components of the grid points. The distance cutoff
 :math:`R_{ii'}` assumes that *i* has the same type as the neighbor atom
-*i'*.
+*i'*. Both computes can be hardware accelerated with Kokkos by using the
+*sna/grid/kk* and *sna/grid/local/kk* commands, respectively.
 
 Compute *sna/grid* calculates a global array containing bispectrum
 components for a regular grid of points.
@@ -259,7 +275,7 @@ layout in the global array.
 Compute *sna/grid/local* calculates bispectrum components of a regular
 grid of points similarly to compute *sna/grid* described above.
 However, because the array is local, it contains only rows for grid points
-that are local to the processor sub-domain. The global grid
+that are local to the processor subdomain. The global grid
 of :math:`nx \times ny \times nz` points is still laid out in space the same as for *sna/grid*,
 but grid points are strictly partitioned, so that every grid point appears in
 one and only one local array.  The array contains one row for each of the
@@ -433,6 +449,31 @@ requires that *bikflag=1*.
    The rerun script can use a :doc:`special_bonds <special_bonds>`
    command that includes all pairs in the neighbor list.
 
+The keyword *nnn* allows for the calculation of the bispectrum over a
+specific target number of neighbors. This option is only implemented for
+the compute *sna/atom*\ .  An optimal cutoff radius for defining the
+neighborhood of the central atom is calculated by means of a dichotomy
+algorithm.  This iterative process allows to assign weights to
+neighboring atoms in order to match the total sum of weights with the
+target number of neighbors.  Depending on the radial weight function
+used in that process, the cutoff radius can fluctuate a lot in the
+presence of thermal noise.  Therefore, in addition to the *nnn* keyword,
+the keyword *wmode* allows to choose whether a Heaviside (*wmode* = 0)
+function or a Hyperbolic tangent function (*wmode* = 1) should be used.
+If the Heaviside function is used, the cutoff radius exactly matches the
+distance between the central atom an its *nnn*'th neighbor.  However, in
+the case of the hyperbolic tangent function, the dichotomy algorithm
+allows to span the weights over a distance *delta* in order to reduce
+fluctuations in the resulting local atomic environment fingerprint.  The
+detailed formalism is given in the paper by Lafourcade et
+al. :ref:`(Lafourcade) <Lafourcade2023_2>`.
+
+----------
+
+
+.. include:: accel_styles.rst
+
+
 ----------
 
 Output info
@@ -451,7 +492,10 @@ piece of python code:
            for j in range(j1-j2,min(twojmax,j1+j2)+1,2):
                if (j>=j1): print j1/2.,j2/2.,j/2.
 
-For even twojmax = 2(*m*\ -1), :math:`K = m(m+1)(2m+1)/6`, the *m*\ -th pyramidal number. For odd twojmax = 2 *m*\ -1, :math:`K = m(m+1)(m+2)/3`, twice the *m*\ -th tetrahedral number.
+There are :math:`m(m+1)/2` descriptors with last index *j*,
+where *m* = :math:`\lfloor j \rfloor + 1`.
+Hence, for even *twojmax* = 2(*m*\ -1), :math:`K = m(m+1)(2m+1)/6`, the *m*\ -th pyramidal number,
+and for odd *twojmax* = 2 *m*\ -1, :math:`K = m(m+1)(m+2)/3`, twice the *m*\ -th tetrahedral number.
 
 .. note::
 
@@ -582,6 +626,7 @@ Related commands
 """"""""""""""""
 
 :doc:`pair_style snap <pair_snap>`
+:doc:`compute slcsa/atom <compute_slcsa_atom>`
 
 Default
 """""""
@@ -589,16 +634,17 @@ Default
 The optional keyword defaults are *rmin0* = 0,
 *switchflag* = 1, *bzeroflag* = 1, *quadraticflag* = 0,
 *bnormflag* = 0, *wselfallflag* = 0, *switchinnerflag* = 0,
+*nnn* = -1, *wmode* = 0, *delta* = 1.e-3
 
 ----------
 
 .. _Thompson20141:
 
-**(Thompson)** Thompson, Swiler, Trott, Foiles, Tucker, J Comp Phys, 285, 316, (2015).
+**(Thompson2)** Thompson, Swiler, Trott, Foiles, Tucker, J Comp Phys, 285, 316, (2015).
 
 .. _Bartok20101:
 
-**(Bartok)** Bartok, Payne, Risi, Csanyi, Phys Rev Lett, 104, 136403 (2010).
+**(Bartok2010)** Bartok, Payne, Kondor, Csanyi, Phys Rev Lett, 104, 136403 (2010).
 
 .. _Meremianin2006:
 
@@ -619,4 +665,9 @@ of Angular Momentum, World Scientific, Singapore (1987).
 
 .. _Ellis2021:
 
-**(Ellis)** Ellis, Fiedler, Popoola, Modine, Stephens, Thompson, Cangi, Rajamanickam,  Phys Rev B, 104, 035120, (2021)
+**(Ellis)** Ellis, Fiedler, Popoola, Modine, Stephens, Thompson, Cangi, Rajamanickam, `Phys. Rev. B, 104, 035120, (2021) <https://doi.org/10.1103/PhysRevB.104.035120>`_
+
+.. _Lafourcade2023_2:
+
+**(Lafourcade)** Lafourcade, Maillet, Denoual, Duval, Allera, Goryaeva, and Marinica,
+`Comp. Mat. Science, 230, 112534 (2023) <https://doi.org/10.1016/j.commatsci.2023.112534>`_

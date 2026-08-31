@@ -32,9 +32,11 @@ template<class DeviceType>
 class FixFreezeKokkos : public FixFreeze {
  public:
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
   struct OriginalForce {
     double values[3];
 
+// NOLINTNEXTLINE
     KOKKOS_INLINE_FUNCTION
     OriginalForce() {
       values[0] = 0;
@@ -42,6 +44,7 @@ class FixFreezeKokkos : public FixFreeze {
       values[2] = 0;
     }
 
+// NOLINTNEXTLINE
     KOKKOS_INLINE_FUNCTION
     OriginalForce &operator+=(const OriginalForce &rhs) {
       values[0] += rhs.values[0];
@@ -49,25 +52,19 @@ class FixFreezeKokkos : public FixFreeze {
       values[2] += rhs.values[2];
       return *this;
     }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator+=(const volatile OriginalForce &rhs) volatile {
-      values[0] += rhs.values[0];
-      values[1] += rhs.values[1];
-      values[2] += rhs.values[2];
-    }
   };
 
   FixFreezeKokkos(class LAMMPS *, int, char **);
   void post_force(int) override;
 
+// NOLINTNEXTLINE
   KOKKOS_INLINE_FUNCTION
   void operator()(const int i, OriginalForce &original) const;
 
  private:
-  typename ArrayTypes<DeviceType>::t_f_array f;
-  typename ArrayTypes<DeviceType>::t_f_array torque;
-  typename ArrayTypes<DeviceType>::t_int_1d mask;
+  typename AT::t_kkacc_1d_3 f;
+  typename AT::t_kkacc_1d_3 torque;
+  typename AT::t_int_1d mask;
 };
 
 } // namespace LAMMPS_NS

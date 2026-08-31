@@ -34,11 +34,8 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-enum{NOBIAS,BIAS};
-enum{CONSTANT,EQUAL,ATOM};
-
-#define SINERTIA 0.4          // moment of inertia prefactor for sphere
-#define EINERTIA 0.2          // moment of inertia prefactor for ellipsoid
+enum { NOBIAS, BIAS };
+enum { CONSTANT, EQUAL, ATOM };
 
 /* ---------------------------------------------------------------------- */
 
@@ -136,8 +133,7 @@ void FixLangevinEff::post_force_no_tally()
   int dof,fix_dof;
   dof = domain->dimension * particles;
   fix_dof = 0;
-  for (int i = 0; i < modify->nfix; i++)
-    fix_dof += modify->fix[i]->dof(igroup);
+  for (const auto &ifix : modify->get_fix_list()) fix_dof += (int)ifix->dof(igroup);
 
   // extra_dof = domain->dimension
   dof -= domain->dimension + fix_dof;
@@ -305,8 +301,7 @@ void FixLangevinEff::post_force_tally()
   int dof,fix_dof;
   dof = domain->dimension * particles;
   fix_dof = 0;
-  for (int i = 0; i < modify->nfix; i++)
-    fix_dof += modify->fix[i]->dof(igroup);
+  for (const auto &ifix : modify->get_fix_list()) fix_dof += (int)ifix->dof(igroup);
 
   // extra_dof = domain->dimension
   dof -= domain->dimension + fix_dof;
@@ -424,4 +419,13 @@ double FixLangevinEff::compute_scalar()
   double energy_all;
   MPI_Allreduce(&energy_me,&energy_all,1,MPI_DOUBLE,MPI_SUM,world);
   return -energy_all;
+}
+
+/* ---------------------------------------------------------------------- */
+
+double FixLangevinEff::memory_usage()
+{
+  double bytes = FixLangevin::memory_usage();
+  if (erforcelangevin) bytes += (double) atom->nmax * sizeof(double);    // erforcelangevin[nmax]
+  return bytes;
 }

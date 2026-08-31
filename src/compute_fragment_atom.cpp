@@ -31,7 +31,8 @@
 
 using namespace LAMMPS_NS;
 
-#define BIG 1.0e20
+static constexpr double BIG = 1.0e20;
+static constexpr int MAXLOOP = 100;
 
 /* ---------------------------------------------------------------------- */
 
@@ -40,7 +41,7 @@ ComputeFragmentAtom::ComputeFragmentAtom(LAMMPS *lmp, int narg, char **arg) :
   fragmentID(nullptr)
 {
   if (atom->avec->bonds_allow == 0)
-    error->all(FLERR,"Compute fragment/atom used when bonds are not allowed");
+    error->all(FLERR, Error::NOPOINTER, "Compute fragment/atom used when bonds are not allowed");
 
   peratom_flag = 1;
   size_peratom_cols = 0;
@@ -53,10 +54,10 @@ ComputeFragmentAtom::ComputeFragmentAtom(LAMMPS *lmp, int narg, char **arg) :
   int iarg = 3;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"single") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute fragment/atom command");
+      if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"compute fragment/atom", error);
       singleflag = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
-    } else error->all(FLERR,"Illegal compute fragment/atom command");
+    } else error->all(FLERR, iarg, "Unknown compute fragment/atom keyword {}", arg[iarg]);
   }
 
   nmax = 0;
@@ -80,15 +81,12 @@ ComputeFragmentAtom::~ComputeFragmentAtom()
 void ComputeFragmentAtom::init()
 {
   if (atom->tag_enable == 0)
-    error->all(FLERR,"Cannot use compute fragment/atom unless atoms have IDs");
+    error->all(FLERR, Error::NOLASTLINE, "Cannot use compute fragment/atom unless atoms have IDs");
   if (atom->molecular != Atom::MOLECULAR)
-    error->all(FLERR,"Compute fragment/atom requires a molecular system");
+    error->all(FLERR, Error::NOLASTLINE, "Compute fragment/atom requires a molecular system");
 
-  int count = 0;
-  for (int i = 0; i < modify->ncompute; i++)
-    if (strcmp(modify->compute[i]->style,"fragment/atom") == 0) count++;
-  if (count > 1 && comm->me == 0)
-    error->warning(FLERR,"More than one compute fragment/atom");
+  if ((comm->me == 0) && (modify->get_compute_by_style("^fragment/atom").size() > 1))
+    error->warning(FLERR, "More than one compute {}", style);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -117,7 +115,7 @@ void ComputeFragmentAtom::compute_peratom()
     vector_atom = fragmentID;
   }
 
-  // if group is dynamic, insure ghost atom masks are current
+  // if group is dynamic, ensure ghost atom masks are current
 
   if (group->dynamic[igroup]) {
     commflag = 0;
@@ -148,12 +146,11 @@ void ComputeFragmentAtom::compute_peratom()
 
   commflag = 1;
 
-  int iteration = 0;
-
-  while (true) {
-    iteration++;
-
+  int counter = 0;
+  // stop after MAXLOOP iterations
+  while (counter < MAXLOOP) {
     comm->forward_comm(this);
+    ++counter;
     done = 1;
 
     // set markflag = 0 for all owned atoms, for new iteration
@@ -230,6 +227,8 @@ void ComputeFragmentAtom::compute_peratom()
     MPI_Allreduce(&done,&alldone,1,MPI_INT,MPI_MIN,world);
     if (alldone) break;
   }
+  if ((comm->me == 0) && (counter >= MAXLOOP))
+    error->warning(FLERR, "Compute fragment/atom did not converge after {} iterations", MAXLOOP);
 }
 
 /* ---------------------------------------------------------------------- */

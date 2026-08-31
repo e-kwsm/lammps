@@ -10,7 +10,7 @@ Syntax
 
    dihedral_style style
 
-* style = *none* or *zero* or *hybrid* or *charmm* or *charmmfsw* or *class2* or *osine/shift/exp* or *fourier* or *harmonic* or *helix* or *multi/harmonic* or *nharmonic* or *opls* or *spherical* or *table* or *table/cut*
+* style = *none* or *zero* or *hybrid* or *charmm* or *charmmfsw* or *class2* or *class2xe* or *cosine/shift/exp* or *cosine/squared/restricted* or *fourier* or *harmonic* or *helix* or *lepton* or *multi/harmonic* or *nharmonic* or *opls* or *spherical* or *table* or *table/cut*
 
 Examples
 """"""""
@@ -57,11 +57,12 @@ In the formulas listed for each dihedral style, *phi* is the torsional
 angle defined by the quadruplet of atoms.  This angle has a sign
 convention as shown in this diagram:
 
-.. image:: JPG/dihedral_sign.jpg
+.. image:: JPG/dihedral_sign.png
    :align: center
+   :width: 50%
 
 where the :math:`I,J,K,L` ordering of the four atoms that define the dihedral
-is from left to right.
+is from left to right and the angle :math:`\varphi` points out of the page.
 
 This sign convention effects several of the dihedral styles listed
 below (e.g., charmm, helix) in the sense that the energy formula
@@ -104,10 +105,13 @@ exist.
 * :doc:`charmm <dihedral_charmm>` - CHARMM dihedral
 * :doc:`charmmfsw <dihedral_charmm>` - CHARMM dihedral with force switching
 * :doc:`class2 <dihedral_class2>` - COMPASS (class 2) dihedral
+* :doc:`class2xe <dihedral_class2>` - ClassII-xe (class 2) dihedral
 * :doc:`cosine/shift/exp <dihedral_cosine_shift_exp>` - dihedral with exponential in spring constant
+* :doc:`cosine/squared/restricted <dihedral_cosine_squared_restricted>` - squared cosine dihedral with restricted term
 * :doc:`fourier <dihedral_fourier>` - dihedral with multiple cosine terms
 * :doc:`harmonic <dihedral_harmonic>` - harmonic dihedral
 * :doc:`helix <dihedral_helix>` - helix dihedral
+* :doc:`lepton <dihedral_lepton>` - dihedral potential from evaluating a string
 * :doc:`multi/harmonic <dihedral_multi_harmonic>` - dihedral with 5 harmonic terms
 * :doc:`nharmonic <dihedral_nharmonic>` - same as multi-harmonic with N terms
 * :doc:`opls <dihedral_opls>` - OPLS dihedral

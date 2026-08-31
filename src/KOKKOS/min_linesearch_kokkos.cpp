@@ -38,13 +38,12 @@ using namespace LAMMPS_NS;
 // EMACH = machine accuracy limit of energy changes (1.0e-8)
 // EPS_QUAD = tolerance for quadratic projection
 
-#define ALPHA_MAX 1.0
-#define ALPHA_REDUCE 0.5
-#define BACKTRACK_SLOPE 0.4
-#define QUADRATIC_TOL 0.1
-//#define EMACH 1.0e-8
-#define EMACH 1.0e-8
-#define EPS_QUAD 1.0e-28
+static constexpr double ALPHA_MAX = 1.0;
+static constexpr double ALPHA_REDUCE = 0.5;
+static constexpr double BACKTRACK_SLOPE = 0.4;
+static constexpr double QUADRATIC_TOL = 0.1;
+static constexpr double EMACH = 1.0e-8;
+static constexpr double EPS_QUAD = 1.0e-28;
 
 /* ---------------------------------------------------------------------- */
 
@@ -59,8 +58,8 @@ MinLineSearchKokkos::MinLineSearchKokkos(LAMMPS *lmp) : MinKokkos(lmp)
 
 MinLineSearchKokkos::~MinLineSearchKokkos()
 {
-  delete [] gextra;
-  delete [] hextra;
+  delete[] gextra;
+  delete[] hextra;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -69,7 +68,7 @@ void MinLineSearchKokkos::init()
 {
   MinKokkos::init();
 
-  if (linestyle == 1) linemin = &MinLineSearchKokkos::linemin_quadratic;
+  if (linestyle == QUADRATIC) linemin = &MinLineSearchKokkos::linemin_quadratic;
   else error->all(FLERR,"Kokkos minimize only supports the 'min_modify line "
    "quadratic' option");
 }
@@ -103,11 +102,11 @@ void MinLineSearchKokkos::reset_vectors()
 
   nvec = 3 * atom->nlocal;
   atomKK->sync(Device,F_MASK|X_MASK);
-  auto d_x = atomKK->k_x.d_view;
-  auto d_f = atomKK->k_f.d_view;
+  auto d_x = atomKK->k_x.view_device();
+  auto d_f = atomKK->k_f.view_device();
 
-  if (nvec) xvec = DAT::t_ffloat_1d(d_x.data(),d_x.size());
-  if (nvec) fvec = DAT::t_ffloat_1d(d_f.data(),d_f.size());
+  if (nvec) xvec = DAT::t_kkfloat_1d(d_x.data(),nvec);
+  if (nvec) fvec = DAT::t_kkacc_1d(d_f.data(),nvec);
   x0 = fix_minimize_kk->request_vector_kokkos(0);
   g = fix_minimize_kk->request_vector_kokkos(1);
   h = fix_minimize_kk->request_vector_kokkos(2);
@@ -171,12 +170,12 @@ int MinLineSearchKokkos::linemin_quadratic(double eoriginal, double &alpha)
 {
   double fdothall,fdothme,hme,hmaxall;
   double de_ideal,de;
-  double delfh,engprev,relerr,alphaprev,fhprev,ff,fh,alpha0;
-  double dot[2],dotall[2];
+  double delfh,engprev,relerr,alphaprev,fhprev,fh,alpha0;
+  double dot,dotall;
   double alphamax;
 
-  fix_minimize_kk->k_vectors.sync<LMPDeviceType>();
-  fix_minimize_kk->k_vectors.modify<LMPDeviceType>();
+  fix_minimize_kk->k_vectors.sync_device();
+  fix_minimize_kk->k_vectors.modify_device();
 
   atomKK->sync(Device,X_MASK|F_MASK);
 
@@ -187,12 +186,22 @@ int MinLineSearchKokkos::linemin_quadratic(double eoriginal, double &alpha)
   {
     // local variables for lambda capture
 
-    auto l_fvec = fvec;
     auto l_h = h;
 
-    Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, double& fdothme) {
-      fdothme += l_fvec[i]*l_h[i];
-    },fdothme);
+    if constexpr (F_LAYOUTRIGHT) {
+      auto l_fvec = fvec;
+      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, double& fdothme) {
+        fdothme += static_cast<double>(l_fvec[i]*static_cast<KK_ACC_FLOAT>(l_h[i]));
+      },fdothme);
+    } else {
+      auto l_f = atomKK->k_f.view_device();
+      Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(const int& i, double& fdothme) {
+        const int j = i*3;
+        fdothme += static_cast<double>(l_f(i,0)*static_cast<KK_ACC_FLOAT>(l_h[j]));
+        fdothme += static_cast<double>(l_f(i,1)*static_cast<KK_ACC_FLOAT>(l_h[j+1]));
+        fdothme += static_cast<double>(l_f(i,2)*static_cast<KK_ACC_FLOAT>(l_h[j+2]));
+      },fdothme);
+    }
   }
   MPI_Allreduce(&fdothme,&fdothall,1,MPI_DOUBLE,MPI_SUM,world);
   if (nextra_global)
@@ -205,7 +214,7 @@ int MinLineSearchKokkos::linemin_quadratic(double eoriginal, double &alpha)
   // for atom coords, max amount = dmax
   // for extra per-atom dof, max amount = extra_max[]
   // for extra global dof, max amount is set by fix
-  // also insure alphamax <= ALPHA_MAX
+  // also ensure alphamax <= ALPHA_MAX
   // else will have to backtrack from huge value when forces are tiny
   // if all search dir components are already 0.0, exit with error
 
@@ -217,7 +226,7 @@ int MinLineSearchKokkos::linemin_quadratic(double eoriginal, double &alpha)
     auto l_h = h;
 
     Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, double& hme) {
-      hme = MAX(hme,fabs(l_h[i]));
+      hme = MAX(hme,fabs(static_cast<double>(l_h[i])));
     },Kokkos::Max<double>(hme));
   }
   MPI_Allreduce(&hme,&hmaxall,1,MPI_DOUBLE,MPI_MAX,world);
@@ -268,34 +277,42 @@ int MinLineSearchKokkos::linemin_quadratic(double eoriginal, double &alpha)
 
     // compute new fh, alpha, delfh
 
-    s_double2 sdot;
+    s_KK_double2 sdot;
     {
       // local variables for lambda capture
 
-      auto l_fvec = fvec;
       auto l_h = h;
 
-      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, s_double2& sdot) {
-        sdot.d0 += l_fvec[i]*l_fvec[i];
-        sdot.d1 += l_fvec[i]*l_h[i];
-      },sdot);
-    }
-    dot[0] = sdot.d0;
-    dot[1] = sdot.d1;
+      if constexpr (F_LAYOUTRIGHT) {
+        auto l_fvec = fvec;
+        Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, s_KK_double2& sdot) {
+          sdot.d0 += static_cast<KK_FLOAT>(l_fvec[i]*l_fvec[i]);
+          sdot.d1 += static_cast<KK_FLOAT>(l_fvec[i])*l_h[i];
+        },sdot);
+      } else {
+        auto l_f = atomKK->k_f.view_device();
+        Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(const int& i, s_KK_double2& sdot) {
+          sdot.d0 += static_cast<KK_FLOAT>(l_f(i,0)*l_f(i,0));
+          sdot.d0 += static_cast<KK_FLOAT>(l_f(i,1)*l_f(i,1));
+          sdot.d0 += static_cast<KK_FLOAT>(l_f(i,2)*l_f(i,2));
 
-    MPI_Allreduce(dot,dotall,2,MPI_DOUBLE,MPI_SUM,world);
-    if (nextra_global) {
-      for (int i = 0; i < nextra_global; i++) {
-        dotall[0] += fextra[i]*fextra[i];
-        dotall[1] += fextra[i]*hextra[i];
+          const int j = i*3;
+          sdot.d1 += static_cast<KK_FLOAT>(l_f(i,0))*l_h[j];
+          sdot.d1 += static_cast<KK_FLOAT>(l_f(i,1))*l_h[j+1];
+          sdot.d1 += static_cast<KK_FLOAT>(l_f(i,2))*l_h[j+2];
+        },sdot);
       }
     }
-    ff = dotall[0];
-    fh = dotall[1];
-    if (output->thermo->normflag) {
-      ff /= atom->natoms;
-      fh /= atom->natoms;
+    dot = static_cast<double>(sdot.d1);
+
+    MPI_Allreduce(&dot,&dotall,1,MPI_DOUBLE,MPI_SUM,world);
+    if (nextra_global) {
+      for (int i = 0; i < nextra_global; i++) {
+        dotall += fextra[i]*hextra[i];
+      }
     }
+    fh = dotall;
+    if (output->thermo->normflag) fh /= atom->natoms;
 
     delfh = fh - fhprev;
 
@@ -376,10 +393,14 @@ double MinLineSearchKokkos::alpha_step(double alpha, int resetflag)
     });
   }
 
+  atomKK->modified(Device,X_MASK);
+
   // step forward along h
 
   if (alpha > 0.0) {
     if (nextra_global) modify->min_step(alpha,hextra);
+
+  atomKK->sync(Device,X_MASK); // positions can be modified by fix box/relax
 
     // local variables for lambda capture
 
@@ -387,7 +408,7 @@ double MinLineSearchKokkos::alpha_step(double alpha, int resetflag)
     auto l_h = h;
 
     Kokkos::parallel_for(nvec, LAMMPS_LAMBDA(const int& i) {
-      l_xvec[i] += alpha*l_h[i];
+      l_xvec[i] += static_cast<KK_FLOAT>(alpha)*l_h[i];
     });
   }
 
@@ -412,20 +433,34 @@ double MinLineSearchKokkos::compute_dir_deriv(double &ff)
 
   // compute new fh, alpha, delfh
 
-  s_double2 sdot;
+  s_KK_double2 sdot;
   {
     // local variables for lambda capture
 
-    auto l_fvec = fvec;
     auto l_h = h;
 
-    Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, s_double2& sdot) {
-      sdot.d0 += l_fvec[i]*l_fvec[i];
-      sdot.d1 += l_fvec[i]*l_h[i];
-    },sdot);
+    if constexpr (F_LAYOUTRIGHT) {
+      auto l_fvec = fvec;
+      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(const int& i, s_KK_double2& sdot) {
+        sdot.d0 += static_cast<KK_FLOAT>(l_fvec[i]*l_fvec[i]);
+        sdot.d1 += static_cast<KK_FLOAT>(l_fvec[i])*l_h[i];
+      },sdot);
+    } else {
+      auto l_f = atomKK->k_f.view_device();
+      Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(const int& i, s_KK_double2& sdot) {
+        sdot.d0 += static_cast<KK_FLOAT>(l_f(i,0)*l_f(i,0));
+        sdot.d0 += static_cast<KK_FLOAT>(l_f(i,1)*l_f(i,1));
+        sdot.d0 += static_cast<KK_FLOAT>(l_f(i,2)*l_f(i,2));
+
+        const int j = i*3;
+        sdot.d1 += static_cast<KK_FLOAT>(l_f(i,0))*l_h[j];
+        sdot.d1 += static_cast<KK_FLOAT>(l_f(i,1))*l_h[j+1];
+        sdot.d1 += static_cast<KK_FLOAT>(l_f(i,2))*l_h[j+2];
+      },sdot);
+    }
   }
-  dot[0] = sdot.d0;
-  dot[1] = sdot.d1;
+  dot[0] = static_cast<double>(sdot.d0);
+  dot[1] = static_cast<double>(sdot.d1);
 
   MPI_Allreduce(dot,dotall,2,MPI_DOUBLE,MPI_SUM,world);
   if (nextra_global) {

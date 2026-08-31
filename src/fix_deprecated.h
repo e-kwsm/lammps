@@ -15,11 +15,15 @@
 // clang-format off
 // list all deprecated and removed fix styles here
 FixStyle(DEPRECATED,FixDeprecated);
+FixStyle(atc,FixDeprecated);
 FixStyle(ave/spatial,FixDeprecated);
 FixStyle(ave/spatial/sphere,FixDeprecated);
 FixStyle(lb/pc,FixDeprecated);
 FixStyle(lb/rigid/pc/sphere,FixDeprecated);
-FixStyle(client/md,FixDeprecated);
+FixStyle(nve/awpmd,FixDeprecated);
+FixStyle(poems,FixDeprecated);
+FixStyle(reax/c/bonds,FixDeprecated);
+FixStyle(reax/c/species,FixDeprecated);
 // clang-format on
 #else
 

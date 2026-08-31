@@ -45,7 +45,7 @@ PPPMT::~PPPM() {
   k_particle_map.clear();
   k_make_rho.clear();
   k_interp.clear();
-  if (pppm_program) delete pppm_program;
+  delete pppm_program;
 }
 
 template <class numtyp, class acctyp, class grdtyp, class grdtyp4>
@@ -78,6 +78,8 @@ grdtyp *PPPMT::init(const int nlocal, const int nall, FILE *_screen,
     flag=-4;
     return nullptr;
   }
+
+  if (ucl_device!=device->gpu) _compiled=false;
 
   ucl_device=device->gpu;
   atom=&device->atom;
@@ -310,8 +312,6 @@ int PPPMT::spread(const int ago, const int nlocal, const int nall,
                 delyinv,delzinv);
   }
 
-  device->stop_host_timer();
-
   if (!success || nlocal==0)
     return 0;
 
@@ -385,7 +385,7 @@ void PPPMT::compile_kernels(UCL_Device &dev) {
   if (sizeof(grdtyp)==sizeof(double)) flags+=std::string(" -DGRD_DBL");
   #endif
 
-  if (pppm_program) delete pppm_program;
+  delete pppm_program;
   pppm_program=new UCL_Program(dev);
 
   #ifdef USE_OPENCL

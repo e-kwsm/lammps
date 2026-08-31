@@ -32,7 +32,7 @@ Syntax
          group-ID = only build pair neighbor lists for atoms in this group
        *exclude* values:
          *type* M N
-           M,N = exclude if one atom in pair is type M, other is type N
+           M,N = exclude if one atom in pair is type M, other is type N (M and N may be type labels)
          *group* group1-ID group2-ID
            group1-ID,group2-ID = exclude if one atom is in 1st group, other in 2nd
          *molecule/intra* group-ID
@@ -53,6 +53,9 @@ Syntax
        *collection/interval* values = N arg1 ... argN
          N = number of custom collections
          arg = N separate cutoffs for intervals (see below)
+       *bin/hash* value = *yes* or *no*
+         *yes* = use a hash table to store atoms in bins
+         *no* = use a linked list to store atoms in bins
 
 Examples
 """"""""
@@ -87,6 +90,18 @@ only occurs if at least one atom has moved more than half the neighbor
 skin distance (specified in the :doc:`neighbor <neighbor>` command)
 since the last neighbor list build.
 
+Regardless of the *every*, *delay*, *check*, and *once* settings, a
+neighbor list rebuild is always forced on any timestep when a
+:doc:`restart <restart>` file is written, and on timesteps when a fix
+requests reneighboring (e.g. fixes that create or delete atoms, such as
+:doc:`fix deposit <fix_deposit>` or :doc:`fix evaporate
+<fix_evaporate>`).  This ensures that all atoms are correctly assigned
+to their owning subdomains before the operation is performed.  A
+consequence is that enabling :doc:`restart <restart>` output can change
+the total number of neighbor list builds reported at the end of a run
+(and thus, as noted below, subtly alter the trajectory) relative to an
+otherwise identical run without restart output.
+
 .. admonition:: Impact of neighbor list settings
    :class: note
 
@@ -110,10 +125,9 @@ since the last neighbor list build.
    - due to the limitations of floating-point math - the trajectory.
 
 If the *once* setting is yes, then the neighbor list is only built once
-at the beginning of each run, and never rebuilt, except on steps when a
-restart file is written, or steps when a fix forces a rebuild to occur
-(e.g. fixes that create or delete atoms, such as :doc:`fix deposit
-<fix_deposit>` or :doc:`fix evaporate <fix_evaporate>`).  This setting
+at the beginning of each run, and never rebuilt, except for the forced
+rebuilds described above (when a restart file is written or a fix
+requests reneighboring).  This setting
 should only be made if you are certain atoms will not move far enough
 that the neighbor list should be rebuilt, e.g. running a simulation of a
 cold crystal.  Note that it is not that expensive to check if neighbor
@@ -127,7 +141,7 @@ The *cluster* option does a sanity test every time neighbor lists are
 built for bond, angle, dihedral, and improper interactions, to check
 that each set of 2, 3, or 4 atoms is a cluster of nearby atoms.  It
 does this by computing the distance between pairs of atoms in the
-interaction and insuring they are not further apart than half the
+interaction and ensuring they are not further apart than half the
 periodic box length.  If they are, an error is generated, since the
 interaction would be computed between far-away atoms instead of their
 nearby periodic images.  The only way this should happen is if the
@@ -159,15 +173,19 @@ sample scenarios where this is useful:
 * When one or more rigid bodies are specified, interactions within each
   body can be turned off to save needless computation.  See the :doc:`fix rigid <fix_rigid>` command for more details.
 
-The *exclude type* option turns off the pairwise interaction if one
-atom is of type M and the other of type N.  M can equal N.  The
-*exclude group* option turns off the interaction if one atom is in the
-first group and the other is the second.  Group1-ID can equal
-group2-ID.  The *exclude molecule/intra* option turns off the
-interaction if both atoms are in the specified group and in the same
-molecule, as determined by their molecule ID.  The *exclude
-molecule/inter* turns off the interaction between pairs of atoms that
-have different molecule IDs and are both in the specified group.
+.. versionchanged:: 29Aug2024
+
+   Support for type labels was added.
+
+The *exclude type* option turns off the pairwise interaction if one atom
+is of type M and the other of type N.  M can equal N.  The *exclude
+group* option turns off the interaction if one atom is in the first
+group and the other is the second.  Group1-ID can equal group2-ID.  The
+*exclude molecule/intra* option turns off the interaction if both atoms
+are in the specified group and in the same molecule, as determined by
+their molecule ID.  The *exclude molecule/inter* turns off the
+interaction between pairs of atoms that have different molecule IDs and
+are both in the specified group.
 
 Each of the exclude options can be specified multiple times.  The
 *exclude type* option is the most efficient option to use; it requires
@@ -219,40 +237,61 @@ atom can have.
 The *binsize* option allows you to specify what size of bins will be
 used in neighbor list construction to sort and find neighboring atoms.
 By default, for :doc:`neighbor style bin <neighbor>`, LAMMPS uses bins
-that are 1/2 the size of the maximum pair cutoff.  For :doc:`neighbor style multi <neighbor>`,
-the bins are 1/2 the size of the collection interaction cutoff.
-Typically these are good values for minimizing the time for
-neighbor list construction.  This setting overrides the default.
-If you make it too big, there is little overhead due to
+that are 1/2 the size of the maximum pair cutoff.  For :doc:`neighbor
+style multi <neighbor>`, the bins are 1/2 the size of the collection
+interaction cutoff.  Typically these are good values for minimizing the
+time for neighbor list construction.  This setting overrides the
+default.  If you make it too big, there is little overhead due to
 looping over bins, but more atoms are checked.  If you make it too
-small, the optimal number of atoms is checked, but bin overhead goes
-up.  If you set the binsize to 0.0, LAMMPS will use the default
-binsize of 1/2 the cutoff.
+small, the optimal number of atoms is checked, but bin overhead goes up.
+If you set the binsize to 0.0, LAMMPS will use the default binsize of
+1/2 the cutoff.
 
 The *collection/type* option allows you to define collections of atom
-types, used by the *multi* neighbor mode. By grouping atom types with
-similar physical size or interaction cutoff lengths, one may be able
-to improve performance by reducing
-overhead. You must first specify the number of collections N to be
-defined followed by N lists of types. Each list consists of a series of type
-ranges separated by commas. The range can be specified as a
-single numeric value, or a wildcard asterisk can be used to specify a range
-of values.  This takes the form "\*" or "\*n" or "n\*" or "m\*n".  For
-example, if M = the number of atom types, then an asterisk with no numeric
-values means all types from 1 to M.  A leading asterisk means all types
-from 1 to n (inclusive).  A trailing asterisk means all types from n to M
-(inclusive).  A middle asterisk means all types from m to n (inclusive).
-Note that all atom types must be included in exactly one of the N collections.
+types, used by the *multi* neighbor mode.  By grouping atom types with
+similar physical size or interaction cutoff lengths, one may be able to
+improve performance by reducing overhead.  You must first specify the
+number of collections N to be defined followed by N lists of types.
+Each list consists of a series of type ranges separated by commas. The
+range can be specified as a single numeric value, or a wildcard asterisk
+can be used to specify a range of values.  This takes the form "\*" or
+"\*n" or "n\*" or "m\*n".  For example, if M = the number of atom types,
+then an asterisk with no numeric values means all types from 1 to M.  A
+leading asterisk means all types from 1 to n (inclusive).  A trailing
+asterisk means all types from n to M (inclusive).  A middle asterisk
+means all types from m to n (inclusive).  Note that all atom types must
+be included in exactly one of the N collections.
 
 The *collection/interval* option provides a similar capability.  This
 command allows a user to define collections by specifying a series of
-cutoff intervals. LAMMPS will automatically sort atoms into these
+cutoff intervals.  LAMMPS will automatically sort atoms into these
 intervals based on their type-dependent cutoffs or their finite size.
 You must first specify the number of collections N to be defined
 followed by N values representing the upper cutoff of each interval.
 This command is particularly useful for granular pair styles where the
 interaction distance of particles depends on their radius and may not
 depend on their atom type.
+
+.. versionadded:: 4Jul2026
+
+The *bin/hash* option toggles whether the atoms in a bin are stored in
+a linked list (default) or a hash table where each bin is a key that
+maps to a set of all atoms contained in that bin. This may be required
+when the simulation box is too large relative to the size of a neighbor
+bin (which will cause LAMMPS to error), but will also reduce memory usage
+and can improve performance in systems with lots of bins that do not
+contain atoms. For instance, in a binary system with a large disparity
+in atom sizes/cutoffs. Here, the total number of bins will be determined
+by the size of the smallest particle. However, almost all bins that lie
+within the span of the largest particle will be empty. The hash option
+is only available for the *multi* neighbor mode.
+
+If this option is used to avoid errors regarding the number of bins used
+to construct neighbor lists, one may need to additionally increase the
+size of the bin used to sort atoms using the :doc:`atom_modify
+<atom_modify>` command. If adjusted, it is recommended to keep the increase
+conservative such that bins are still reasonably small to preserve
+performance.
 
 Restrictions
 """"""""""""
@@ -264,8 +303,10 @@ The *molecule/intra* and *molecule/inter* exclusion options can only
 be used with atom styles that define molecule IDs.
 
 The value of the *page* setting must be at least 10x larger than the
-*one* setting.  This insures neighbor pages are not mostly empty
+*one* setting.  This ensures neighbor pages are not mostly empty
 space.
+
+The *exclude group* setting is currently not compatible with dynamic groups.
 
 Related commands
 """"""""""""""""
@@ -277,4 +318,4 @@ Default
 
 The option defaults are delay = 0, every = 1, check = yes, once = no,
 cluster = no, include = all (same as no include option defined),
-exclude = none, page = 100000, one = 2000, and binsize = 0.0.
+exclude = none, page = 100000, one = 2000, bin/hash no, and binsize = 0.0.

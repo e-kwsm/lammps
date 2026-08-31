@@ -1,7 +1,10 @@
 .. index:: fix addforce
+.. index:: fix addforce/kk
 
 fix addforce command
 ====================
+
+Accelerator Variants: *addforce/kk*
 
 Syntax
 """"""
@@ -106,7 +109,7 @@ for :math:`f_x`, :math:`f_y`, :math:`f_z`, the energy variable is specified as
 v_name, where name is the variable name.
 
 Note that when the *energy* keyword is used during an energy
-minimization, you must insure that the formula defined for the
+minimization, you must ensure that the formula defined for the
 atom-style :doc:`variable <variable>` is consistent with the force
 variable formulas (i.e., that :math:`-\vec\nabla E = \vec F`).
 For example, if the force were a spring-like, :math:`\vec F = -k\vec x`, then
@@ -116,6 +119,12 @@ correctly, the minimization will not converge properly.
 ----------
 
 .. include:: accel_styles.rst
+
+.. note::
+
+  The region keyword is supported by Kokkos, but a Kokkos-enabled
+  region must be used. See the region :doc:`region <region>` command for
+  more information.
 
 ----------
 
@@ -173,7 +182,7 @@ the iteration count during the minimization.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""

@@ -41,7 +41,6 @@
 
 #include <stdlib.h>
 
-
 liblammpsplugin_t *liblammpsplugin_load(const char *lib)
 {
   liblammpsplugin_t *lmp;
@@ -50,13 +49,14 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   if (lib == NULL) return NULL;
 
 #ifdef _WIN32
-  handle = (void *) LoadLibrary(lib);
+  handle = (void *) LoadLibraryA(lib);
 #else
   handle = dlopen(lib,RTLD_NOW|RTLD_GLOBAL);
 #endif
   if (handle == NULL) return NULL;
 
-  lmp = (liblammpsplugin_t *) malloc(sizeof(liblammpsplugin_t));
+  lmp = (liblammpsplugin_t *) calloc(1, sizeof(liblammpsplugin_t));
+  lmp->abiversion = LAMMPSPLUGIN_ABI_VERSION;
   lmp->handle = handle;
 
 #ifdef _WIN32
@@ -79,8 +79,10 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(mpi_finalize);
   ADDSYM(kokkos_finalize);
   ADDSYM(python_finalize);
+  ADDSYM(plugin_finalize);
 
   ADDSYM(error);
+  ADDSYM(expand);
 
   ADDSYM(file);
   ADDSYM(command);
@@ -89,6 +91,7 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
 
   ADDSYM(get_natoms);
   ADDSYM(get_thermo);
+  ADDSYM(last_thermo);
 
   ADDSYM(extract_box);
   ADDSYM(reset_box);
@@ -99,8 +102,12 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(extract_setting);
   ADDSYM(extract_global_datatype);
   ADDSYM(extract_global);
+  ADDSYM(extract_pair_dimension);
+  ADDSYM(extract_pair);
+  ADDSYM(map_atom);
 
   ADDSYM(extract_atom_datatype);
+  ADDSYM(extract_atom_size);
   ADDSYM(extract_atom);
 
   ADDSYM(extract_compute);
@@ -108,6 +115,13 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(extract_variable);
   ADDSYM(extract_variable_datatype);
   ADDSYM(set_variable);
+  ADDSYM(set_string_variable);
+  ADDSYM(set_internal_variable);
+  ADDSYM(variable_info);
+  ADDSYM(eval);
+  ADDSYM(clearstep_compute);
+  ADDSYM(addstep_compute);
+  ADDSYM(addstep_compute_all);
 
   ADDSYM(gather_atoms);
   ADDSYM(gather_atoms_concat);
@@ -116,6 +130,9 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(scatter_atoms_subset);
 
   ADDSYM(gather_bonds);
+  ADDSYM(gather_angles);
+  ADDSYM(gather_dihedrals);
+  ADDSYM(gather_impropers);
 
   ADDSYM(gather);
   ADDSYM(gather_concat);
@@ -124,10 +141,12 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(scatter_subset);
 
   ADDSYM(create_atoms);
+  ADDSYM(create_molecule);
 
   ADDSYM(find_pair_neighlist);
   ADDSYM(find_fix_neighlist);
   ADDSYM(find_compute_neighlist);
+  ADDSYM(request_single_neighlist);
   ADDSYM(neighlist_num_elements);
   ADDSYM(neighlist_element_neighbors);
 
@@ -135,10 +154,12 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(get_os_info);
 
   ADDSYM(config_has_mpi_support);
+  ADDSYM(config_has_omp_support);
   ADDSYM(config_has_gzip_support);
   ADDSYM(config_has_png_support);
   ADDSYM(config_has_jpeg_support);
   ADDSYM(config_has_ffmpeg_support);
+  ADDSYM(config_has_curl_support);
   ADDSYM(config_has_exceptions);
 
   ADDSYM(config_has_package);
@@ -179,15 +200,18 @@ liblammpsplugin_t *liblammpsplugin_load(const char *lib)
   ADDSYM(is_running);
   ADDSYM(force_timeout);
 
-#ifdef LAMMPS_EXCEPTIONS
-  lmp->has_exceptions = 1;
-  ADDSYM(has_error);
-  ADDSYM(get_last_error_message);
-#else
-  lmp->has_exceptions = 0;
-  lmp->has_error = NULL;
-  lmp->get_last_error_message = NULL;
-#endif
+  // symbol not present: release the handle and storage before bailing out
+  if (!lmp->config_has_exceptions) {
+    liblammpsplugin_release(lmp);
+    return NULL;
+  }
+
+  lmp->has_exceptions = lmp->config_has_exceptions();
+  if (lmp->has_exceptions) {
+    ADDSYM(has_error);
+    ADDSYM(get_last_error_message);
+  }
+  ADDSYM(set_show_error);
 
   ADDSYM(python_api_version);
   return lmp;
@@ -199,7 +223,7 @@ int liblammpsplugin_release(liblammpsplugin_t *lmp)
   if (lmp->handle == NULL) return 2;
 
 #ifdef _WIN32
-  FreeLibrary((HINSTANCE) handle);
+  FreeLibrary((HINSTANCE) lmp->handle);
 #else
   dlclose(lmp->handle);
 #endif

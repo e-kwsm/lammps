@@ -23,6 +23,7 @@
 #include "memory.h"
 #include "mliap_data.h"
 #include "pair_mliap.h"
+#include "safe_pointers.h"
 #include "sna.h"
 #include "tokenizer.h"
 
@@ -31,8 +32,7 @@
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 1024
-#define MAXWORD 3
+static constexpr int MAXLINE = 1024;
 
 /* ---------------------------------------------------------------------- */
 
@@ -73,7 +73,7 @@ void MLIAPDescriptorSNAP::compute_descriptors(class MLIAPData *data)
   for (int ii = 0; ii < data->nlistatoms; ii++) {
     const int ielem = data->ielems[ii];
 
-    // insure rij, inside, wj, and rcutij are of size jnum
+    // ensure rij, inside, wj, and rcutij are of size jnum
 
     const int jnum = data->numneighs[ii];
     snaptr->grow_rij(jnum);
@@ -129,7 +129,7 @@ void MLIAPDescriptorSNAP::compute_forces(class MLIAPData *data)
     const int i = data->iatoms[ii];
     const int ielem = data->ielems[ii];
 
-    // insure rij, inside, wj, and rcutij are of size jnum
+    // ensure rij, inside, wj, and rcutij are of size jnum
 
     const int jnum = data->numneighs[ii];
     snaptr->grow_rij(jnum);
@@ -200,7 +200,7 @@ void MLIAPDescriptorSNAP::compute_force_gradients(class MLIAPData *data)
     const int i = data->iatoms[ii];
     const int ielem = data->ielems[ii];
 
-    // insure rij, inside, wj, and rcutij are of size jnum
+    // ensure rij, inside, wj, and rcutij are of size jnum
 
     const int jnum = data->numneighs[ii];
     snaptr->grow_rij(jnum);
@@ -270,7 +270,7 @@ void MLIAPDescriptorSNAP::compute_descriptor_gradients(class MLIAPData *data)
   for (int ii = 0; ii < data->nlistatoms; ii++) {
     const int ielem = data->ielems[ii];
 
-    // insure rij, inside, wj, and rcutij are of size jnum
+    // ensure rij, inside, wj, and rcutij are of size jnum
 
     const int jnum = data->numneighs[ii];
     snaptr->grow_rij(jnum);
@@ -364,15 +364,17 @@ void MLIAPDescriptorSNAP::read_paramfile(char *paramfilename)
   int sinnerflag = 0;
   int dinnerflag = 0;
 
-  for (int i = 0; i < nelements; i++) delete[] elements[i];
-  delete[] elements;
+  if (elements) {
+    for (int i = 0; i < nelements; i++) delete[] elements[i];
+    delete[] elements;
+  }
   memory->destroy(radelem);
   memory->destroy(wjelem);
   memory->destroy(cutsq);
 
   // open SNAP parameter file on proc 0
 
-  FILE *fpparam;
+  SafeFilePtr fpparam;
   if (comm->me == 0) {
     fpparam = utils::open_potential(paramfilename, lmp, nullptr);
     if (fpparam == nullptr)
@@ -380,7 +382,8 @@ void MLIAPDescriptorSNAP::read_paramfile(char *paramfilename)
                  utils::getsyserror());
   }
 
-  char line[MAXLINE], *ptr;
+  char line[MAXLINE] = {'\0'};
+  char *ptr;
   int eof = 0;
   int n;
 
@@ -389,7 +392,6 @@ void MLIAPDescriptorSNAP::read_paramfile(char *paramfilename)
       ptr = fgets(line, MAXLINE, fpparam);
       if (ptr == nullptr) {
         eof = 1;
-        fclose(fpparam);
       } else
         n = strlen(line) + 1;
     }
@@ -422,6 +424,7 @@ void MLIAPDescriptorSNAP::read_paramfile(char *paramfilename)
         for (int ielem = 0; ielem < nelements; ielem++)
           elements[ielem] = utils::strdup(words.next());
         elementsflag = 1;
+        allocated_elements = 1;
       } else if (keywd == "radelems") {
         for (int ielem = 0; ielem < nelements; ielem++)
           radelem[ielem] = utils::numeric(FLERR, words.next(), false, lmp);

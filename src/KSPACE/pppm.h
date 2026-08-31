@@ -21,7 +21,7 @@ KSpaceStyle(pppm,PPPM);
 #define LMP_PPPM_H
 
 #include "kspace.h"
-#include "lmpfftsettings.h"
+#include "lmpfftsettings.h"    // IWYU pragma: export
 
 namespace LAMMPS_NS {
 
@@ -32,7 +32,7 @@ class PPPM : public KSpace {
   void settings(int, char **) override;
   void init() override;
   void setup() override;
-  void setup_grid() override;
+  void reset_grid() override;
   void compute(int, int) override;
   int timing_1d(int, double &) override;
   int timing_3d(int, double &) override;
@@ -48,15 +48,16 @@ class PPPM : public KSpace {
   double volume;
   double delxinv, delyinv, delzinv, delvolinv;
   double h_x, h_y, h_z;
-  double shift, shiftone;
+  double shift, shiftone, shiftatom_lo, shiftatom_hi;
   int peratom_allocate_flag;
+  int g_ewald_ready;
 
   int nxlo_in, nylo_in, nzlo_in, nxhi_in, nyhi_in, nzhi_in;
   int nxlo_out, nylo_out, nzlo_out, nxhi_out, nyhi_out, nzhi_out;
   int nxlo_ghost, nxhi_ghost, nylo_ghost, nyhi_ghost, nzlo_ghost, nzhi_ghost;
   int nxlo_fft, nylo_fft, nzlo_fft, nxhi_fft, nyhi_fft, nzhi_fft;
   int nlower, nupper;
-  int ngrid, nfft, nfft_both;
+  int ngrid, nfft_brick, nfft, nfft_both;
 
   FFT_SCALAR ***density_brick;
   FFT_SCALAR ***vdx_brick, ***vdy_brick, ***vdz_brick;
@@ -80,7 +81,7 @@ class PPPM : public KSpace {
 
   class FFT3d *fft1, *fft2;
   class Remap *remap;
-  class GridComm *gc;
+  class Grid3d *gc;
 
   FFT_SCALAR *gc_buf1, *gc_buf2;
   int ngc_buf1, ngc_buf2, npergrid;
@@ -100,6 +101,7 @@ class PPPM : public KSpace {
   double qdist;        // distance from O site to negative charge
   double alpha;        // geometric factor
 
+  void init_tip4p();
   virtual void set_grid_global();
   virtual void set_grid_local();
   void adjust_gewald();
@@ -113,7 +115,7 @@ class PPPM : public KSpace {
   virtual void deallocate_peratom();
   int factorable(int);
   virtual double compute_df_kspace();
-  double estimate_ik_error(double, double, bigint);
+  virtual double estimate_ik_error(double, double, bigint);
   virtual double compute_qopt();
   virtual void compute_gf_denom();
   virtual void compute_gf_ik();
@@ -134,12 +136,13 @@ class PPPM : public KSpace {
 
   virtual void poisson_peratom();
   virtual void fieldforce_peratom();
-  void procs2grid2d(int, int, int, int *, int *);
+  void procs2grid2d(int, int, int, int &, int &);
   void compute_rho1d(const FFT_SCALAR &, const FFT_SCALAR &, const FFT_SCALAR &);
   void compute_drho1d(const FFT_SCALAR &, const FFT_SCALAR &, const FFT_SCALAR &);
   void compute_rho_coeff();
   virtual void slabcorr();
 
+ public:
   // grid communication
 
   void pack_forward_grid(int, void *, int, int *) override;
@@ -147,6 +150,7 @@ class PPPM : public KSpace {
   void pack_reverse_grid(int, void *, int, int *) override;
   void unpack_reverse_grid(int, void *, int, int *) override;
 
+ protected:
   // triclinic
 
   int triclinic;    // domain settings, orthog or triclinic
@@ -175,7 +179,7 @@ class PPPM : public KSpace {
    gf_b = denominator expansion coeffs
 ------------------------------------------------------------------------- */
 
-  inline double gf_denom(const double &x, const double &y, const double &z) const
+  [[nodiscard]] double gf_denom(const double &x, const double &y, const double &z) const
   {
     double sx, sy, sz;
     sz = sy = sx = 0.0;

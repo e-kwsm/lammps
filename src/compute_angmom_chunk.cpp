@@ -14,21 +14,24 @@
 #include "compute_angmom_chunk.h"
 
 #include "atom.h"
+#include "atom_vec_body.h"
+#include "atom_vec_ellipsoid.h"
+#include "atom_vec_line.h"
+#include "atom_vec_tri.h"
 #include "compute_chunk_atom.h"
 #include "domain.h"
 #include "error.h"
 #include "memory.h"
-#include "modify.h"
-#include "update.h"
-
-#include <cstring>
 
 using namespace LAMMPS_NS;
+
+static constexpr double SINERTIA = 0.4;          // moment of inertia prefactor for sphere
+static constexpr double LINERTIA = 1.0 / 12.0;   // moment of inertia prefactor for line
 
 /* ---------------------------------------------------------------------- */
 
 ComputeAngmomChunk::ComputeAngmomChunk(LAMMPS *lmp, int narg, char **arg) :
-    Compute(lmp, narg, arg), idchunk(nullptr), massproc(nullptr), masstotal(nullptr), com(nullptr),
+    ComputeChunk(lmp, narg, arg), massproc(nullptr), masstotal(nullptr), com(nullptr),
     comall(nullptr), angmom(nullptr), angmomall(nullptr)
 {
   if (narg != 4) error->all(FLERR, "Illegal compute angmom/chunk command");
@@ -39,24 +42,14 @@ ComputeAngmomChunk::ComputeAngmomChunk(LAMMPS *lmp, int narg, char **arg) :
   size_array_rows_variable = 1;
   extarray = 0;
 
-  // ID of compute chunk/atom
-
-  idchunk = utils::strdup(arg[3]);
-
   ComputeAngmomChunk::init();
-
-  // chunk-based data
-
-  nchunk = 1;
-  maxchunk = 0;
-  allocate();
+  ComputeAngmomChunk::allocate();
 }
 
 /* ---------------------------------------------------------------------- */
 
 ComputeAngmomChunk::~ComputeAngmomChunk()
 {
-  delete[] idchunk;
   memory->destroy(massproc);
   memory->destroy(masstotal);
   memory->destroy(com);
@@ -67,34 +60,14 @@ ComputeAngmomChunk::~ComputeAngmomChunk()
 
 /* ---------------------------------------------------------------------- */
 
-void ComputeAngmomChunk::init()
-{
-  cchunk = dynamic_cast<ComputeChunkAtom *>(modify->get_compute_by_id(idchunk));
-  if (!cchunk) error->all(FLERR, "Chunk/atom compute does not exist for compute angmom/chunk");
-  if (strcmp(cchunk->style, "chunk/atom") != 0)
-    error->all(FLERR, "Compute angmom/chunk does not use chunk/atom compute");
-}
-
-/* ---------------------------------------------------------------------- */
-
 void ComputeAngmomChunk::compute_array()
 {
+  ComputeChunk::compute_array();
+
   int i, index;
   double dx, dy, dz, massone;
   double unwrap[3];
-
-  invoked_array = update->ntimestep;
-
-  // compute chunk/atom assigns atoms to chunk IDs
-  // extract ichunk index vector from compute
-  // ichunk = 1 to Nchunk for included atoms, 0 for excluded atoms
-
-  nchunk = cchunk->setup_chunks();
-  cchunk->compute_ichunk();
   int *ichunk = cchunk->ichunk;
-
-  if (nchunk > maxchunk) allocate();
-  size_array_rows = nchunk;
 
   // zero local per-chunk values
 
@@ -141,14 +114,32 @@ void ComputeAngmomChunk::compute_array()
   }
 
   // compute angmom for each chunk
+  // finite-size particles add their own (spin) angular momentum:
+  //   ANGMOM-type (ellipsoid, superellipsoid, triangle, body) store it
+  //   directly; OMEGA-type (sphere, line) carry an angular velocity, so
+  //   L_spin = I_spin * omega. shape indices are checked before the sphere
+  //   (radius) case, since finite-shape particles also carry a radius
 
   double **v = atom->v;
+  double vunwrap[3];
+
+  auto *avec_ellipsoid = dynamic_cast<AtomVecEllipsoid *>(atom->style_match("ellipsoid"));
+  auto *avec_line = dynamic_cast<AtomVecLine *>(atom->style_match("line"));
+  auto *avec_tri = dynamic_cast<AtomVecTri *>(atom->style_match("tri"));
+  auto *avec_body = dynamic_cast<AtomVecBody *>(atom->style_match("body"));
+  double *radius = atom->radius;
+  double **omega = atom->omega;
+  double **angmom_one = atom->angmom;
+  int *ellipsoid = atom->ellipsoid;
+  int *line = atom->line;
+  int *tri = atom->tri;
+  int *body = atom->body;
 
   for (i = 0; i < nlocal; i++)
     if (mask[i] & groupbit) {
       index = ichunk[i] - 1;
       if (index < 0) continue;
-      domain->unmap(x[i], image[i], unwrap);
+      domain->unmap(x[i], v[i], image[i], mask[i], unwrap, vunwrap);
       dx = unwrap[0] - comall[index][0];
       dy = unwrap[1] - comall[index][1];
       dz = unwrap[2] - comall[index][2];
@@ -156,65 +147,44 @@ void ComputeAngmomChunk::compute_array()
         massone = rmass[i];
       else
         massone = mass[type[i]];
-      angmom[index][0] += massone * (dy * v[i][2] - dz * v[i][1]);
-      angmom[index][1] += massone * (dz * v[i][0] - dx * v[i][2]);
-      angmom[index][2] += massone * (dx * v[i][1] - dy * v[i][0]);
+      angmom[index][0] += massone * (dy * vunwrap[2] - dz * vunwrap[1]);
+      angmom[index][1] += massone * (dz * vunwrap[0] - dx * vunwrap[2]);
+      angmom[index][2] += massone * (dx * vunwrap[1] - dy * vunwrap[0]);
+
+      if (avec_ellipsoid && ellipsoid[i] >= 0) {
+        if (angmom_one) {
+          angmom[index][0] += angmom_one[i][0];
+          angmom[index][1] += angmom_one[i][1];
+          angmom[index][2] += angmom_one[i][2];
+        }
+      } else if (avec_tri && tri[i] >= 0) {
+        if (angmom_one) {
+          angmom[index][0] += angmom_one[i][0];
+          angmom[index][1] += angmom_one[i][1];
+          angmom[index][2] += angmom_one[i][2];
+        }
+      } else if (avec_body && body[i] >= 0) {
+        if (angmom_one) {
+          angmom[index][0] += angmom_one[i][0];
+          angmom[index][1] += angmom_one[i][1];
+          angmom[index][2] += angmom_one[i][2];
+        }
+      } else if (avec_line && line[i] >= 0) {
+        if (omega) {
+          double length = avec_line->bonus[line[i]].length;
+          angmom[index][2] += LINERTIA * massone * length * length * omega[i][2];
+        }
+      } else if (radius && radius[i] > 0.0) {
+        if (omega) {
+          double sphere = SINERTIA * massone * radius[i] * radius[i];
+          angmom[index][0] += sphere * omega[i][0];
+          angmom[index][1] += sphere * omega[i][1];
+          angmom[index][2] += sphere * omega[i][2];
+        }
+      }
     }
 
   MPI_Allreduce(&angmom[0][0], &angmomall[0][0], 3 * nchunk, MPI_DOUBLE, MPI_SUM, world);
-}
-
-/* ----------------------------------------------------------------------
-   lock methods: called by fix ave/time
-   these methods insure vector/array size is locked for Nfreq epoch
-     by passing lock info along to compute chunk/atom
-------------------------------------------------------------------------- */
-
-/* ----------------------------------------------------------------------
-   increment lock counter
-------------------------------------------------------------------------- */
-
-void ComputeAngmomChunk::lock_enable()
-{
-  cchunk->lockcount++;
-}
-
-/* ----------------------------------------------------------------------
-   decrement lock counter in compute chunk/atom, it if still exists
-------------------------------------------------------------------------- */
-
-void ComputeAngmomChunk::lock_disable()
-{
-  cchunk = dynamic_cast<ComputeChunkAtom *>(modify->get_compute_by_id(idchunk));
-  if (cchunk) cchunk->lockcount--;
-}
-
-/* ----------------------------------------------------------------------
-   calculate and return # of chunks = length of vector/array
-------------------------------------------------------------------------- */
-
-int ComputeAngmomChunk::lock_length()
-{
-  nchunk = cchunk->setup_chunks();
-  return nchunk;
-}
-
-/* ----------------------------------------------------------------------
-   set the lock from startstep to stopstep
-------------------------------------------------------------------------- */
-
-void ComputeAngmomChunk::lock(Fix *fixptr, bigint startstep, bigint stopstep)
-{
-  cchunk->lock(fixptr, startstep, stopstep);
-}
-
-/* ----------------------------------------------------------------------
-   unset the lock
-------------------------------------------------------------------------- */
-
-void ComputeAngmomChunk::unlock(Fix *fixptr)
-{
-  cchunk->unlock(fixptr);
 }
 
 /* ----------------------------------------------------------------------
@@ -245,7 +215,8 @@ void ComputeAngmomChunk::allocate()
 
 double ComputeAngmomChunk::memory_usage()
 {
-  double bytes = (bigint) maxchunk * 2 * sizeof(double);
+  double bytes = ComputeChunk::memory_usage();
+  bytes += (bigint) maxchunk * 2 * sizeof(double);
   bytes += (double) maxchunk * 2 * 3 * sizeof(double);
   bytes += (double) maxchunk * 2 * 3 * sizeof(double);
   return bytes;

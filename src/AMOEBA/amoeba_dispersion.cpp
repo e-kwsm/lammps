@@ -18,10 +18,8 @@
 #include "atom.h"
 #include "comm.h"
 #include "domain.h"
-#include "fft3d_wrap.h"
 #include "math_const.h"
 #include "math_special.h"
-#include "memory.h"
 #include "neigh_list.h"
 
 #include <cmath>
@@ -287,7 +285,7 @@ void PairAmoeba::dispersion_kspace()
   // gridpre = my portion of 3d grid in brick decomp w/ ghost values
   // zeroed by zero()
 
-  double ***gridpre = (double ***) d_kspace->zero();
+  auto ***gridpre = (FFT_SCALAR ***) d_kspace->zero();
 
   // map atoms to grid
 
@@ -296,7 +294,7 @@ void PairAmoeba::dispersion_kspace()
   // pre-convolution operations including forward FFT
   // gridfft = my portion of complex 3d grid in FFT decomposition
 
-  double *gridfft = d_kspace->pre_convolution();
+  FFT_SCALAR *gridfft = d_kspace->pre_convolution();
 
   // ---------------------
   // convolution operation
@@ -365,7 +363,7 @@ void PairAmoeba::dispersion_kspace()
   // post-convolution operations including backward FFT
   // gridppost = my portion of 3d grid in brick decomp w/ ghost values
 
-  double ***gridpost = (double ***) d_kspace->post_convolution();
+  auto ***gridpost = (double ***) d_kspace->post_convolution();
 
   // get first derivatives of the reciprocal space energy
 

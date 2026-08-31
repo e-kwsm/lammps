@@ -27,7 +27,7 @@
 #include "suffix.h"
 using namespace LAMMPS_NS;
 
-#define EPSILON 1.0e-10
+static constexpr double EPSILON = 1.0e-10;
 
 /* ---------------------------------------------------------------------- */
 
@@ -58,6 +58,10 @@ PairDPDOMP::~PairDPDOMP()
 void PairDPDOMP::compute(int eflag, int vflag)
 {
   ev_init(eflag,vflag);
+
+  // precompute random force scaling factors
+
+  for (int i = 0; i < 4; ++i) special_sqrt[i] = sqrt(force->special_lj[i]);
 
   const int nall = atom->nlocal + atom->nghost;
   const int inum = list->inum;
@@ -122,7 +126,7 @@ void PairDPDOMP::eval(int iifrom, int iito, ThrData * const thr)
   int i,j,ii,jj,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz,evdwl,fpair;
   double vxtmp,vytmp,vztmp,delvx,delvy,delvz;
-  double rsq,r,rinv,dot,wd,randnum,factor_dpd;
+  double rsq,r,rinv,dot,wd,randnum,factor_dpd,factor_sqrt;
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   evdwl = 0.0;
@@ -160,6 +164,7 @@ void PairDPDOMP::eval(int iifrom, int iito, ThrData * const thr)
     for (jj = 0; jj < jnum; jj++) {
       j = jlist[jj];
       factor_dpd = special_lj[sbmask(j)];
+      factor_sqrt = special_sqrt[sbmask(j)];
       j &= NEIGHMASK;
 
       delx = xtmp - x[j].x;
@@ -185,8 +190,9 @@ void PairDPDOMP::eval(int iifrom, int iito, ThrData * const thr)
 
         fpair = a0[itype][jtype]*wd;
         fpair -= gamma[itype][jtype]*wd*wd*dot*rinv;
-        fpair += sigma[itype][jtype]*wd*randnum*dtinvsqrt;
-        fpair *= factor_dpd*rinv;
+        fpair *= factor_dpd;
+        fpair += factor_sqrt*sigma[itype][jtype]*wd*randnum*dtinvsqrt;
+        fpair *= rinv;
 
         fxtmp += delx*fpair;
         fytmp += dely*fpair;

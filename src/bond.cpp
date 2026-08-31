@@ -18,8 +18,10 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "neighbor.h"
+#include "safe_pointers.h"
 #include "suffix.h"
 #include "update.h"
 
@@ -36,12 +38,13 @@ int Bond::instance_total = 0;
    a particular bond style can override this
 ------------------------------------------------------------------------- */
 
-Bond::Bond(LAMMPS *_lmp) : Pointers(_lmp)
+Bond::Bond(LAMMPS *_lmp) :
+    Pointers(_lmp), setflag(nullptr), virial{0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, eatom(nullptr),
+    vatom(nullptr), svector(nullptr)
 {
   instance_me = instance_total++;
 
   energy = 0.0;
-  virial[0] = virial[1] = virial[2] = virial[3] = virial[4] = virial[5] = 0.0;
   writedata = 1;
   reinitflag = 1;
 
@@ -53,18 +56,13 @@ Bond::Bond(LAMMPS *_lmp) : Pointers(_lmp)
   partial_flag = 0;
 
   single_extra = 0;
-  svector = nullptr;
 
   maxeatom = maxvatom = 0;
-  eatom = nullptr;
-  vatom = nullptr;
-  setflag = nullptr;
 
   execution_space = Host;
   datamask_read = ALL_MASK;
   datamask_modify = ALL_MASK;
-
-  copymode = 0;
+  copymode = kokkosable = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -83,9 +81,13 @@ Bond::~Bond()
 
 void Bond::init()
 {
-  if (!allocated && atom->nbondtypes) error->all(FLERR, "Bond coeffs are not set");
+  if (!allocated && atom->nbondtypes)
+    error->all(FLERR, Error::NOLASTLINE,
+               "Bond coeffs are not set. Status:\n" + Info::get_bond_coeff_status(lmp));
   for (int i = 1; i <= atom->nbondtypes; i++)
-    if (setflag[i] == 0) error->all(FLERR, "All bond coeffs are not set");
+    if (setflag[i] == 0)
+      error->all(FLERR, Error::NOLASTLINE,
+                 "All bond coeffs are not set. Status:\n" + Info::get_bond_coeff_status(lmp));
   init_style();
 }
 
@@ -103,11 +105,12 @@ void Bond::settings(int narg, char **args)
    see integrate::ev_set() for bitwise settings of eflag/vflag
    set the following flags, values are otherwise set to 0:
      evflag       != 0 if any bits of eflag or vflag are set
-     eflag_global != 0 if ENERGY_GLOBAL bit of eflag set
-     eflag_atom   != 0 if ENERGY_ATOM bit of eflag set
+     eflag_global != 0 if ENERGY_GLOBAL bit of eflag is set
+     eflag_atom   != 0 if ENERGY_ATOM bit of eflag is set
      eflag_either != 0 if eflag_global or eflag_atom is set
-     vflag_global != 0 if VIRIAL_PAIR or VIRIAL_FDOTR bit of vflag set
-     vflag_atom   != 0 if VIRIAL_ATOM or VIRIAL_CENTROID bit of vflag set
+     eflag_only   != 0 if ENERGY_GLOBAL and ENERGY_ONLY bits of eflag are set
+     vflag_global != 0 if VIRIAL_PAIR or VIRIAL_FDOTR bit of vflag is set
+     vflag_atom   != 0 if VIRIAL_ATOM or VIRIAL_CENTROID bit of vflag is set
                        two-body and centroid stress are identical for bonds
      vflag_either != 0 if vflag_global or vflag_atom is set
 ------------------------------------------------------------------------- */
@@ -118,9 +121,10 @@ void Bond::ev_setup(int eflag, int vflag, int alloc)
 
   evflag = 1;
 
-  eflag_either = eflag;
+  eflag_either = eflag & (ENERGY_GLOBAL | ENERGY_ATOM);
   eflag_global = eflag & ENERGY_GLOBAL;
   eflag_atom = eflag & ENERGY_ATOM;
+  eflag_only = eflag_global ? (eflag & ENERGY_ONLY) : 0;
 
   vflag_either = vflag;
   vflag_global = vflag & (VIRIAL_PAIR | VIRIAL_FDOTR);
@@ -349,24 +353,27 @@ void Bond::write_file(int narg, char **arg)
   if (narg == 8) {
     itype = utils::inumeric(FLERR, arg[6], false, lmp);
     jtype = utils::inumeric(FLERR, arg[7], false, lmp);
-    if (itype < 1 || itype > atom->ntypes || jtype < 1 || jtype > atom->ntypes)
-      error->all(FLERR, "Invalid atom types in bond_write command");
+    if ((itype < 1) || (itype > atom->ntypes))
+      error->all(FLERR, "Invalid atom type {} in bond_write command", itype);
+    if ((jtype < 1) || (jtype > atom->ntypes))
+      error->all(FLERR, "Invalid atom type {} in bond_write command", jtype);
   }
 
   int btype = utils::inumeric(FLERR, arg[0], false, lmp);
   int n = utils::inumeric(FLERR, arg[1], false, lmp);
   double inner = utils::numeric(FLERR, arg[2], false, lmp);
   double outer = utils::numeric(FLERR, arg[3], false, lmp);
-  if (inner <= 0.0 || inner >= outer)
-    error->all(FLERR, "Invalid rlo/rhi values in bond_write command");
+  if ((inner <= 0.0) || (inner >= outer))
+    error->all(FLERR, "Invalid rlo={} / rhi={} values in bond_write command.", inner, outer);
 
+  if (n < 2) error->all(FLERR, "Must have at least 2 table values");
   double r0 = equilibrium_distance(btype);
 
   // open file in append mode if exists
   // add line with DATE: and UNITS: tag when creating new file
   // print header in format used by bond_style table
 
-  FILE *fp = nullptr;
+  SafeFilePtr fp;
   if (comm->me == 0) {
     std::string table_file = arg[4];
 
@@ -389,7 +396,7 @@ void Bond::write_file(int narg, char **arg)
                      utils::current_date());
       fp = fopen(table_file.c_str(), "w");
       if (fp)
-        fmt::print(fp, "# DATE: {} UNITS: {} Created by bond_write\n", utils::current_date(),
+        utils::print(fp, "# DATE: {} UNITS: {} Created by bond_write\n", utils::current_date(),
                    update->unit_style);
     }
     if (fp == nullptr)
@@ -397,7 +404,7 @@ void Bond::write_file(int narg, char **arg)
   }
 
   // initialize potentials before evaluating bond potential
-  // insures all bond coeffs are set and force constants
+  // ensures all bond coeffs are set and force constants
   // also initialize neighbor so that neighbor requests are processed
   // NOTE: might be safest to just do lmp->init()
 
@@ -418,9 +425,8 @@ void Bond::write_file(int narg, char **arg)
     for (int i = 0; i < n; i++) {
       r = inner + dr * static_cast<double>(i);
       e = single(btype, r * r, itype, jtype, f);
-      fprintf(fp, "%d %.15g %.15g %.15g\n", i + 1, r, e, f * r);
+      fprintf(fp, "%8d %- 22.15g %- 22.15g %- 22.15g\n", i + 1, r, e, f * r);
     }
-    fclose(fp);
   }
 }
 

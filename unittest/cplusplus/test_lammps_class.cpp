@@ -2,11 +2,7 @@
 
 #include "comm.h"
 #include "info.h"
-#include "lammps.h"
-#include <cstdio>  // for stdin, stdout
-#include <cstdlib> // for setenv
-#include <mpi.h>
-#include <string>
+#include "library.h"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -21,9 +17,9 @@ protected:
     LAMMPS *lmp;
     LAMMPS_plain() : lmp(nullptr)
     {
-        const char *args[] = {"LAMMPS_test"};
+        const char *args[] = {"LAMMPS_test", nullptr};
         char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        int argc           = 1;
 
         int flag;
         MPI_Initialized(&flag);
@@ -34,12 +30,10 @@ protected:
 
     void SetUp() override
     {
-        const char *args[] = {"LAMMPS_test", "-log", "none", "-echo", "both", "-nocite"};
-        char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        LAMMPS::argv args = {"LAMMPS_test", "-log", "none", "-echo", "both", "-nocite"};
 
         ::testing::internal::CaptureStdout();
-        lmp                = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+        lmp                = new LAMMPS(args, MPI_COMM_WORLD);
         std::string output = ::testing::internal::GetCapturedStdout();
         EXPECT_THAT(output, StartsWith("LAMMPS ("));
     }
@@ -133,8 +127,6 @@ TEST_F(LAMMPS_plain, TestStyles)
     EXPECT_STREQ(found, "PERI");
     found = lmp->match_style("atom", "spin");
     EXPECT_STREQ(found, "SPIN");
-    found = lmp->match_style("atom", "wavepacket");
-    EXPECT_STREQ(found, "AWPMD");
     found = lmp->match_style("atom", "dpd");
     EXPECT_STREQ(found, "DPD-REACT");
     found = lmp->match_style("atom", "edpd");
@@ -159,9 +151,9 @@ protected:
     LAMMPS *lmp;
     LAMMPS_omp() : lmp(nullptr)
     {
-        const char *args[] = {"LAMMPS_test"};
+        const char *args[] = {"LAMMPS_test", nullptr};
         char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        int argc           = 1;
 
         int flag;
         MPI_Initialized(&flag);
@@ -172,15 +164,13 @@ protected:
 
     void SetUp() override
     {
-        const char *args[] = {"LAMMPS_test", "-log", "none", "-screen", "none", "-echo", "screen",
-                              "-pk",         "omp",  "2",    "neigh",   "yes",  "-sf",   "omp"};
-        char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        LAMMPS::argv args = {"LAMMPS_test", "-log", "none", "-screen", "none", "-echo", "screen",
+                             "-pk",         "omp",  "2",    "neigh",   "yes",  "-sf",   "omp"};
 
         // only run this test fixture with omp suffix if OPENMP package is installed
 
-        if (LAMMPS::is_installed_pkg("OPENMP"))
-            lmp = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+        if (Info::has_package("OPENMP"))
+            lmp = new LAMMPS(args, MPI_COMM_WORLD);
         else
             GTEST_SKIP();
     }
@@ -242,9 +232,9 @@ protected:
     LAMMPS *lmp;
     LAMMPS_kokkos() : lmp(nullptr)
     {
-        const char *args[] = {"LAMMPS_test"};
+        const char *args[] = {"LAMMPS_test", nullptr};
         char **argv        = (char **)args;
-        int argc           = sizeof(args) / sizeof(char *);
+        int argc           = 1;
 
         int flag;
         MPI_Initialized(&flag);
@@ -255,15 +245,22 @@ protected:
 
     void SetUp() override
     {
-        const char *args[] = {"LAMMPS_test", "-log", "none", "-echo", "none", "-screen", "none",
-                              "-k",          "on",   "t",    "1",     "-sf",  "kk"};
-        if (Info::has_accelerator_feature("KOKKOS", "api", "openmp")) args[10] = "2";
-        char **argv = (char **)args;
-        int argc    = sizeof(args) / sizeof(char *);
+        LAMMPS::argv args = {"LAMMPS_test", "-log", "none", "-echo", "none", "-screen", "none",
+                             "-k",          "on",   "t",    "1",     "-sf",  "kk"};
 
-        if (LAMMPS::is_installed_pkg("KOKKOS")) {
+        // when GPU support is enabled in KOKKOS, it *must* be used
+        if (Info::has_accelerator_feature("KOKKOS", "api", "hip") ||
+            Info::has_accelerator_feature("KOKKOS", "api", "cuda") ||
+            Info::has_accelerator_feature("KOKKOS", "api", "sycl")) {
+            args = {"LAMMPS_test", "-log", "none", "-echo", "none", "-screen", "none", "-k",
+                    "on",          "t",    "1",    "g",     "1",    "-sf",     "kk"};
+        }
+
+        if (Info::has_accelerator_feature("KOKKOS", "api", "openmp")) args[10] = "2";
+
+        if (Info::has_package("KOKKOS")) {
             ::testing::internal::CaptureStdout();
-            lmp = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+            lmp = new LAMMPS(args, MPI_COMM_WORLD);
             ::testing::internal::GetCapturedStdout();
         } else
             GTEST_SKIP();
@@ -326,19 +323,17 @@ TEST_F(LAMMPS_kokkos, InitMembers)
 
 TEST(LAMMPS_init, OpenMP)
 {
-    if (!LAMMPS::is_installed_pkg("OPENMP")) GTEST_SKIP();
+    if (!Info::has_package("OPENMP")) GTEST_SKIP();
     if (platform::openmp_standard() == "OpenMP not enabled") GTEST_SKIP();
 
     FILE *fp = fopen("in.lammps_empty", "w");
     fputs("\n", fp);
     fclose(fp);
 
-    const char *args[] = {"LAMMPS_init", "-in", "in.lammps_empty", "-log", "none", "-nocite"};
-    char **argv        = (char **)args;
-    int argc           = sizeof(args) / sizeof(char *);
+    LAMMPS::argv args = {"LAMMPS_init", "-in", "in.lammps_empty", "-log", "none", "-nocite"};
 
     ::testing::internal::CaptureStdout();
-    LAMMPS *lmp        = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+    auto *lmp          = new LAMMPS(args, MPI_COMM_WORLD);
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_THAT(output, ContainsRegex(".*using 2 OpenMP thread.*per MPI task.*"));
 
@@ -366,12 +361,10 @@ TEST(LAMMPS_init, NoOpenMP)
     fclose(fp);
     platform::unsetenv("OMP_NUM_THREADS");
 
-    const char *args[] = {"LAMMPS_init", "-in", "in.lammps_class_noomp", "-log", "none", "-nocite"};
-    char **argv        = (char **)args;
-    int argc           = sizeof(args) / sizeof(char *);
+    LAMMPS::argv args = {"LAMMPS_init", "-in", "in.lammps_class_noomp", "-log", "none", "-nocite"};
 
     ::testing::internal::CaptureStdout();
-    LAMMPS *lmp        = new LAMMPS(argc, argv, MPI_COMM_WORLD);
+    auto *lmp          = new LAMMPS(args, MPI_COMM_WORLD);
     std::string output = ::testing::internal::GetCapturedStdout();
     EXPECT_THAT(output, ContainsRegex(
                             ".*OMP_NUM_THREADS environment is not set.*Defaulting to 1 thread.*"));
@@ -382,3 +375,22 @@ TEST(LAMMPS_init, NoOpenMP)
 }
 
 } // namespace LAMMPS_NS
+
+int main(int argc, char **argv)
+{
+    int flag;
+    MPI_Initialized(&flag);
+    if (!flag) MPI_Init(&argc, &argv);
+    ::testing::InitGoogleMock(&argc, argv);
+
+    int rv = RUN_ALL_TESTS();
+
+    // finalize the KOKKOS package explicitly so Kokkos is torn down here while
+    // the GPU device is still valid.  Otherwise it is finalized by static
+    // destructors at program exit, which on a GPU build abort in a fence call
+    // (the OpenMP host space cleanup issues a HIP fence on an invalid device).
+    lammps_kokkos_finalize();
+
+    MPI_Finalize();
+    return rv;
+}

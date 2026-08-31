@@ -17,35 +17,25 @@
 ------------------------------------------------------------------------- */
 
 #include "pppm_stagger.h"
-#include <mpi.h>
-#include <cstring>
-#include <cmath>
-#include "atom.h"
-#include "gridcomm.h"
-#include "domain.h"
-#include "memory.h"
-#include "error.h"
 
+#include "atom.h"
+#include "domain.h"
+#include "error.h"
+#include "grid3d.h"
 #include "math_const.h"
 #include "math_special.h"
+#include "memory.h"
+
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define OFFSET 16384
-#define EPS_HOC 1.0e-7
-
-enum{REVERSE_RHO};
-enum{FORWARD_IK,FORWARD_AD,FORWARD_IK_PERATOM,FORWARD_AD_PERATOM};
-
-#ifdef FFT_SINGLE
-#define ZEROF 0.0f
-#define ONEF  1.0f
-#else
-#define ZEROF 0.0
-#define ONEF  1.0
-#endif
+static constexpr int OFFSET = 16384;
+static constexpr double EPS_HOC = 1.0e-7;
+static constexpr FFT_SCALAR ZEROF = 0.0;
 
 /* ---------------------------------------------------------------------- */
 
@@ -145,7 +135,7 @@ void PPPMStagger::compute(int eflag, int vflag)
   nstagger = 2;
 
   stagger = 0.0;
-  for (int n=0; n<nstagger; n++) {
+  for (int n = 0; n < nstagger; n++) {
 
     // find grid points for all my particles
     // map my particle charge onto my local 3d density grid
@@ -157,8 +147,8 @@ void PPPMStagger::compute(int eflag, int vflag)
     //   to fully sum contribution in their 3d bricks
     // remap from 3d decomposition to FFT decomposition
 
-    gc->reverse_comm(GridComm::KSPACE,this,1,sizeof(FFT_SCALAR),
-                     REVERSE_RHO,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+    gc->reverse_comm(Grid3d::KSPACE,this,REVERSE_RHO,1,sizeof(FFT_SCALAR),
+                     gc_buf1,gc_buf2,MPI_FFT_SCALAR);
     brick2fft();
 
     // compute potential gradient on my FFT grid and
@@ -172,21 +162,21 @@ void PPPMStagger::compute(int eflag, int vflag)
     // to fill ghost cells surrounding their 3d bricks
 
     if (differentiation_flag == 1)
-      gc->forward_comm(GridComm::KSPACE,this,1,sizeof(FFT_SCALAR),
-                       FORWARD_AD,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+      gc->forward_comm(Grid3d::KSPACE,this,FORWARD_AD,1,sizeof(FFT_SCALAR),
+                       gc_buf1,gc_buf2,MPI_FFT_SCALAR);
     else
-      gc->forward_comm(GridComm::KSPACE,this,3,sizeof(FFT_SCALAR),
-                       FORWARD_IK,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+      gc->forward_comm(Grid3d::KSPACE,this,FORWARD_IK,3,sizeof(FFT_SCALAR),
+                       gc_buf1,gc_buf2,MPI_FFT_SCALAR);
 
     // extra per-atom energy/virial communication
 
     if (evflag_atom) {
       if (differentiation_flag == 1 && vflag_atom)
-        gc->forward_comm(GridComm::KSPACE,this,6,sizeof(FFT_SCALAR),
-                         FORWARD_AD_PERATOM,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+        gc->forward_comm(Grid3d::KSPACE,this,FORWARD_AD_PERATOM,6,sizeof(FFT_SCALAR),
+                         gc_buf1,gc_buf2,MPI_FFT_SCALAR);
       else if (differentiation_flag == 0)
-        gc->forward_comm(GridComm::KSPACE,this,7,sizeof(FFT_SCALAR),
-                         FORWARD_IK_PERATOM,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+        gc->forward_comm(Grid3d::KSPACE,this,FORWARD_IK_PERATOM,7,sizeof(FFT_SCALAR),
+                         gc_buf1,gc_buf2,MPI_FFT_SCALAR);
     }
 
     // calculate the force on my particles
@@ -197,7 +187,7 @@ void PPPMStagger::compute(int eflag, int vflag)
 
     if (evflag_atom) fieldforce_peratom();
 
-    stagger += 1.0/float(nstagger);
+    stagger += 1.0/nstagger;
   }
 
   // update qsum and qsqsum, if atom count has changed and energy needed
@@ -216,7 +206,7 @@ void PPPMStagger::compute(int eflag, int vflag)
     MPI_Allreduce(&energy,&energy_all,1,MPI_DOUBLE,MPI_SUM,world);
     energy = energy_all;
 
-    energy *= 0.5*volume/float(nstagger);
+    energy *= 0.5*volume/double(nstagger);
     energy -= g_ewald*qsqsum/MY_PIS +
       MY_PI2*qsum*qsum / (g_ewald*g_ewald*volume);
     energy *= qscale;
@@ -228,7 +218,7 @@ void PPPMStagger::compute(int eflag, int vflag)
     double virial_all[6];
     MPI_Allreduce(virial,virial_all,6,MPI_DOUBLE,MPI_SUM,world);
     for (i = 0; i < 6; i++)
-      virial[i] = 0.5*qscale*volume*virial_all[i]/float(nstagger);
+      virial[i] = 0.5*qscale*volume*virial_all[i]/double(nstagger);
   }
 
   // per-atom energy/virial
@@ -302,7 +292,7 @@ double PPPMStagger::compute_qopt()
   // each proc calculates contributions from every Pth grid point
 
   bigint ngridtotal = (bigint) nx_pppm * ny_pppm * nz_pppm;
-  int nxy_pppm = nx_pppm * ny_pppm;
+  bigint nxy_pppm = (bigint) nx_pppm * ny_pppm;
 
   double qopt = 0.0;
 
@@ -398,7 +388,7 @@ double PPPMStagger::compute_qopt_ad()
   // each proc calculates contributions from every Pth grid point
 
   bigint ngridtotal = (bigint) nx_pppm * ny_pppm * nz_pppm;
-  int nxy_pppm = nx_pppm * ny_pppm;
+  bigint nxy_pppm = (bigint) nx_pppm * ny_pppm;
 
   double qopt = 0.0;
 
@@ -684,7 +674,7 @@ void PPPMStagger::particle_map()
   int nlocal = atom->nlocal;
 
   if (!std::isfinite(boxlo[0]) || !std::isfinite(boxlo[1]) || !std::isfinite(boxlo[2]))
-    error->one(FLERR,"Non-numeric box dimensions - simulation unstable");
+    error->one(FLERR,"Non-numeric box dimensions - simulation unstable" + utils::errorurl(6));
 
   int flag = 0;
   for (int i = 0; i < nlocal; i++) {
@@ -709,7 +699,7 @@ void PPPMStagger::particle_map()
       flag = 1;
   }
 
-  if (flag) error->one(FLERR,"Out of range atoms - cannot compute PPPM");
+  if (flag) error->one(FLERR, Error::NOLASTLINE, "Out of range atoms - cannot compute PPPM" + utils::errorurl(4));
 }
 
 /* ----------------------------------------------------------------------
@@ -816,7 +806,7 @@ void PPPMStagger::fieldforce_ik()
 
     // convert E-field to force
 
-    const double qfactor = qqrd2e * scale * q[i] / float(nstagger);
+    const double qfactor = qqrd2e * scale * q[i] / double(nstagger);
     f[i][0] += qfactor*ekx;
     f[i][1] += qfactor*eky;
     if (slabflag != 2) f[i][2] += qfactor*ekz;
@@ -887,7 +877,7 @@ void PPPMStagger::fieldforce_ad()
 
     // convert E-field to force and subtract self forces
 
-    const double qfactor = qqrd2e * scale / float(nstagger);
+    const double qfactor = qqrd2e * scale / double(nstagger);
 
     s1 = x[i][0]*hx_inv + stagger;
     s2 = x[i][1]*hy_inv + stagger;
@@ -962,14 +952,14 @@ void PPPMStagger::fieldforce_peratom()
       }
     }
 
-    if (eflag_atom) eatom[i] += q[i]*u/float(nstagger);
+    if (eflag_atom) eatom[i] += q[i]*u/double(nstagger);
     if (vflag_atom) {
-      vatom[i][0] += q[i]*v0/float(nstagger);
-      vatom[i][1] += q[i]*v1/float(nstagger);
-      vatom[i][2] += q[i]*v2/float(nstagger);
-      vatom[i][3] += q[i]*v3/float(nstagger);
-      vatom[i][4] += q[i]*v4/float(nstagger);
-      vatom[i][5] += q[i]*v5/float(nstagger);
+      vatom[i][0] += q[i]*v0/double(nstagger);
+      vatom[i][1] += q[i]*v1/double(nstagger);
+      vatom[i][2] += q[i]*v2/double(nstagger);
+      vatom[i][3] += q[i]*v3/double(nstagger);
+      vatom[i][4] += q[i]*v4/double(nstagger);
+      vatom[i][5] += q[i]*v5/double(nstagger);
     }
   }
 }

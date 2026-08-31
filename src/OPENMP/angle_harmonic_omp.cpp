@@ -18,17 +18,19 @@
 
 #include "omp_compat.h"
 #include "angle_harmonic_omp.h"
-#include <cmath>
+
 #include "atom.h"
 #include "comm.h"
 #include "force.h"
 #include "neighbor.h"
+#include "timer.h"
 
+#include <cmath>
 
 #include "suffix.h"
 using namespace LAMMPS_NS;
 
-#define SMALL 0.001
+static constexpr double SMALL = 0.001;
 
 /* ---------------------------------------------------------------------- */
 

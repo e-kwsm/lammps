@@ -1,10 +1,11 @@
 .. index:: compute ave/sphere/atom
 .. index:: compute ave/sphere/atom/kk
+.. index:: compute ave/sphere/atom/omp
 
 compute ave/sphere/atom command
 ================================
 
-Accelerator Variants: *ave/sphere/atom/kk*
+Accelerator Variants: *ave/sphere/atom/kk*, *ave/sphere/atom/omp*
 
 Syntax
 """"""
@@ -101,6 +102,8 @@ Restrictions
 This compute is part of the EXTRA-COMPUTE package.  It is only enabled
 if LAMMPS was built with that package.  See the :doc:`Build package
 <Build_package>` page for more info.
+
+This compute requires :doc:`neighbor styles 'bin' or 'nsq' <neighbor>`.
 
 Related commands
 """"""""""""""""

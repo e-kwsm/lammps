@@ -11,7 +11,7 @@ Syntax
    thermo_modify keyword value ...
 
 * one or more keyword/value pairs may be listed
-* keyword = *lost* or *lost/bond* or *warn* or *norm* or *flush* or *line* or *colname* or *format* or *temp* or *press*
+* keyword = *lost* or *lost/bond* or *warn* or *norm* or *flush* or *line* or *colname* or *format* or *temp* or *press* or *triclinic/general*
 
   .. parsed-literal::
 
@@ -21,7 +21,7 @@ Syntax
        *norm* value = *yes* or *no*
        *flush* value = *yes* or *no*
        *line* value = *one* or *multi* or *yaml*
-       *colname* values =  ID string, or *default*
+       *colname* values =  ID string, or *auto* or *default*
          string = new column header name
          ID = integer from 1 to N, or integer from -1 to -N, where N = # of quantities being output
               *or* a thermo keyword or reference to compute, fix, property or variable.
@@ -32,6 +32,8 @@ Syntax
               *or* a thermo keyword or reference to compute, fix, property or variable.
        *temp* value = compute ID that calculates a temperature
        *press* value = compute ID that calculates a pressure
+       *triclinic/general* arg = *yes* or *no*
+
 
 Examples
 """"""""
@@ -64,7 +66,7 @@ The *lost* keyword determines whether LAMMPS checks for lost atoms each
 time it computes thermodynamics and what it does if atoms are lost.  An
 atom can be "lost" if it moves across a non-periodic simulation box
 :doc:`boundary <boundary>` or if it moves more than a box length outside
-the simulation domain (or more than a processor sub-domain length)
+the simulation domain (or more than a processor subdomain length)
 before reneighboring occurs.  The latter case is typically due to bad
 dynamics (e.g., too large a time step and/or huge forces and velocities).  If
 the value is *ignore*, LAMMPS does not check for lost atoms.  If the
@@ -91,20 +93,20 @@ certain whether they are an indication of an error.
 
 Some warning messages are printed during a run (or immediately before)
 each time a specific MPI rank encounters the issue (e.g., bonds that are
-stretched too far or dihedrals in extreme configurations). These number
+stretched too far or dihedrals in extreme configurations).  The number
 of these can quickly blow up the size of the log file and screen output.
-Thus, a limit of 100 warning messages is applied by default.  The warning
-count is applied to the entire input unless reset with a ``thermo_modify
-warn reset`` command.  If there are more warnings than the limit, LAMMPS
-will print one final warning that it will not print any additional
-warning messages.
+A limit of 100 warning messages is therefore applied by default.  The
+warning count is applied to the entire input file, unless it is reset
+with a ``thermo_modify warn reset`` command.  If there are more warnings
+than the limit, LAMMPS will print one final warning that it will not
+print any additional warning messages.
 
 .. note::
 
    The warning limit is enforced on either the per-processor count or
-   the total count across all processors. For efficiency reasons,
+   the total count across all MPI processes.  For efficiency reasons,
    however, the total count is only updated at steps with thermodynamic
-   output. Thus when running on a large number of processors in
+   output.  Thus when running on a large number of MPI processes in
    parallel, the total number of warnings printed can be significantly
    larger than the given limit.
 
@@ -141,7 +143,7 @@ You can always include a divide by the number of atoms in the variable
 formula if this is not the case.
 
 The *flush* keyword invokes a flush operation after thermodynamic info
-is written to the screen and log file.  This insures the output is
+is written to the screen and log file.  This ensures the output is
 updated and not buffered (by the application) even if LAMMPS halts
 before the simulation completes.  Please note that this does not affect
 buffering by the OS or devices, so you may still lose data in case the
@@ -156,19 +158,37 @@ block ("yaml").  This modify option overrides the *one*, *multi*, or
 
 .. versionadded:: 4May2022
 
-The *colname* keyword can be used to change the default header keyword
-for a column or field of thermodynamic output.  The setting for *ID
-string* replaces the default text with the provided string.  *ID* can be
-a positive integer when it represents the column number counting from
-the left, a negative integer when it represents the column number from
-the right (i.e., :math:`-1` is the last column/keyword), or a thermo keyword
-(or compute, fix, property, or variable reference) and then it replaces the
-string for that specific thermo keyword.
+The *colname* keyword can be used to change the default header keyword for
+a column or field of thermodynamic output.  The column names can either be
+manually set by the user, or automatically generated for certain fixes and
+computes.
 
-The *colname* keyword can be used multiple times. If multiple *colname*
-settings refer to the same keyword, the last setting has precedence.  A
-setting of *default* clears all previous settings, reverting all values
-to their default values.
+The setting for *ID string* replaces the default text with the
+provided string.  *ID* can be a positive integer when it represents the
+column number counting from the left, a negative integer when it represents
+the column number from the right (i.e., :math:`-1` is the last
+column/keyword), or a thermo keyword (or compute, fix, property, or
+variable reference) and then it replaces the string for that specific
+thermo keyword.
+
+.. versionadded:: 10Dec2025
+
+With a setting of *auto*, certain fixes or computes will
+generate more descriptive strings as their thermo keywords, which are
+described in the 'output' section of their documentation.  Current commands
+that automatically generate descriptive thermo output strings include 'fix
+nvt', 'fix npt', 'fix nph', 'compute reduce', and 'fix bond/react'.
+
+With a *colname* setting of *default*, the default column names are used.
+The default column names follow the same convention as the arguments
+provided to the :doc:`thermo_style <thermo_style>` command.
+
+The *colname* keyword can be used multiple times.  If multiple *colname*
+settings refer to the same keyword, the last setting has precedence.  The
+*auto* keyword will only override user-provided strings for computes and
+fixes that support automatically generated column names.  A setting of
+*default* clears all previous settings, reverting all values to their
+default values.
 
 The *format* keyword can be used to change the default numeric format of
 any of quantities the :doc:`thermo_style <thermo_style>` command
@@ -240,6 +260,19 @@ command, thermo output uses a default compute for pressure with ID =
    keyword, then the new pressure compute specified by the *press*
    keyword will be unaffected by the *temp* setting.
 
+The *triclinic/general* keyword can only be used with a value of *yes*
+if the simulation box was created as a general triclinic box.  See the
+:doc:`Howto_triclinic <Howto_triclinic>` doc page for a detailed
+explanation of orthogonal, restricted triclinic, and general triclinic
+simulation boxes.
+
+If this keyword is *yes*, the output of the simulation box edge
+vectors and the pressure tensor components for the system are
+affected.  These are specified by the *avec,bvec,cvec* and
+*pxx,pyy,pzz,pxy,pxz,pyz* keywords of the :doc:`thermo_style
+<thermo_style>` command.  See the :doc:`thermo_style <thermo_style>`
+doc page for details.
+
 Restrictions
 """"""""""""
 none
@@ -253,8 +286,9 @@ Default
 """""""
 
 The option defaults are lost = error, warn = 100, norm = yes for unit
-style of *lj*, norm = no for unit style of *real* and *metal*,
-flush = no, and temp/press = compute IDs defined by thermo_style.
+style of *lj*, norm = no for unit style of *real* and *metal*, flush =
+no, temp/press = compute IDs defined by thermo_style, and
+triclinic/general = no.
 
 The defaults for the line and format options depend on the thermo style.
 For styles "one" and "custom", the line and format defaults are "one",

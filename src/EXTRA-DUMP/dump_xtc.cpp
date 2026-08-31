@@ -14,7 +14,7 @@
 
 /* ----------------------------------------------------------------------
    Contributing authors: Naveen Michaud-Agrawal (Johns Hopkins U)
-                         open-source XDR routines from
+                         Open Source XDR based I/O routines from
                            Frans van Hoesel (https://www.rug.nl/staff/f.h.j.van.hoesel/)
                            are included in this file
                          Axel Kohlmeyer (Temple U)
@@ -35,27 +35,28 @@
 #include "output.h"
 #include "update.h"
 
-#include <climits>
+#include "xdr_compat.h"
+
 #include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
 
-#define EPS 1e-5
-#define XTC_MAGIC 1995
+static constexpr double EPS = 1.0e-5;
+static constexpr int XTC_MAGIC = 1995;
 
 #define MYMIN(a,b) ((a) < (b) ? (a) : (b))
 #define MYMAX(a,b) ((a) > (b) ? (a) : (b))
 
-int xdropen(XDR *, const char *, const char *);
-int xdrclose(XDR *);
-void xdrfreebuf();
-int xdr3dfcoord(XDR *, float *, int *, float *);
+static int xdropen(XDR *, const char *, const char *);
+static int xdrclose(XDR *);
+static void xdrfreebuf();
+static int xdr3dfcoord(XDR *, float *, int *, float *);
 
 /* ---------------------------------------------------------------------- */
 
-DumpXTC::DumpXTC(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
-  coords(nullptr)
+DumpXTC::DumpXTC(LAMMPS *lmp, int narg, char **arg)
+  : Dump(lmp, narg, arg), coords(nullptr), xd(nullptr)
 {
   if (narg != 5) error->all(FLERR,"Illegal dump xtc command");
   if (binary || compressed || multifile || multiproc)
@@ -68,6 +69,7 @@ DumpXTC::DumpXTC(LAMMPS *lmp, int narg, char **arg) : Dump(lmp, narg, arg),
   flush_flag = 0;
   unwrap_flag = 0;
   precision = 1000.0;
+  xd = new XDR;
 
   // allocate global array for atom coords
 
@@ -105,9 +107,10 @@ DumpXTC::~DumpXTC()
   memory->destroy(coords);
 
   if (me == 0) {
-    xdrclose(&xd);
+    xdrclose(xd);
     xdrfreebuf();
   }
+  delete xd;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -146,11 +149,10 @@ void DumpXTC::init_style()
 void DumpXTC::openfile()
 {
   // XTC maintains it's own XDR file ptr
-  // set fp to a null pointer so parent dump class will not use it
 
-  fp = nullptr;
   if (me == 0)
-    if (xdropen(&xd,filename,"w") == 0) error->one(FLERR,"Cannot open dump file");
+    if (xdropen(xd,filename,"w") == 0)
+      error->one(FLERR,"Cannot open XTC format dump file {}: {}", filename, utils::getsyserror());
 }
 
 /* ---------------------------------------------------------------------- */
@@ -176,11 +178,11 @@ void DumpXTC::write_header(bigint nbig)
   if (me != 0) return;
 
   int tmp = XTC_MAGIC;
-  xdr_int(&xd,&tmp);
-  xdr_int(&xd,&n);
-  xdr_int(&xd,&ntimestep);
+  xdr_int(xd,&tmp);
+  xdr_int(xd,&n);
+  xdr_int(xd,&ntimestep);
   float time_value = ntimestep * tfactor * update->dt;
-  xdr_float(&xd,&time_value);
+  xdr_float(xd,&time_value);
 
   // cell basis vectors
   if (domain->triclinic) {
@@ -192,18 +194,18 @@ void DumpXTC::write_header(bigint nbig)
     float xz = sfactor * domain->xz;
     float yz = sfactor * domain->yz;
 
-    xdr_float(&xd,&xdim); xdr_float(&xd,&zero); xdr_float(&xd,&zero);
-    xdr_float(&xd,&xy  ); xdr_float(&xd,&ydim); xdr_float(&xd,&zero);
-    xdr_float(&xd,&xz  ); xdr_float(&xd,&yz  ); xdr_float(&xd,&zdim);
+    xdr_float(xd,&xdim); xdr_float(xd,&zero); xdr_float(xd,&zero);
+    xdr_float(xd,&xy  ); xdr_float(xd,&ydim); xdr_float(xd,&zero);
+    xdr_float(xd,&xz  ); xdr_float(xd,&yz  ); xdr_float(xd,&zdim);
   } else {
     float zero = 0.0;
     float xdim = sfactor * (domain->boxhi[0] - domain->boxlo[0]);
     float ydim = sfactor * (domain->boxhi[1] - domain->boxlo[1]);
     float zdim = sfactor * (domain->boxhi[2] - domain->boxlo[2]);
 
-    xdr_float(&xd,&xdim); xdr_float(&xd,&zero); xdr_float(&xd,&zero);
-    xdr_float(&xd,&zero); xdr_float(&xd,&ydim); xdr_float(&xd,&zero);
-    xdr_float(&xd,&zero); xdr_float(&xd,&zero); xdr_float(&xd,&zdim);
+    xdr_float(xd,&xdim); xdr_float(xd,&zero); xdr_float(xd,&zero);
+    xdr_float(xd,&zero); xdr_float(xd,&ydim); xdr_float(xd,&zero);
+    xdr_float(xd,&zero); xdr_float(xd,&zero); xdr_float(xd,&zdim);
   }
 }
 
@@ -328,7 +330,7 @@ double DumpXTC::memory_usage()
 
 void DumpXTC::write_frame()
 {
-  xdr3dfcoord(&xd,coords,&natoms,&precision);
+  xdr3dfcoord(xd,coords,&natoms,&precision);
 }
 
 // ----------------------------------------------------------------------
@@ -406,7 +408,7 @@ static int magicints[] = {
  |
  | xdropen - open xdr file
  |
- | This versions differs from xdrstdio_create, because I need to know
+ | This version differs from xdrstdio_create, because I need to know
  | the state of the file (read or write) so I can use xdr3dfcoord
  | in eigther read or write mode, and the file descriptor
  | so I can close the file (something xdr_destroy doesn't do).
@@ -529,7 +531,7 @@ static void sendbits(int buf[], int num_of_bits, int num)
   lastbits = buf[1];
   lastbyte =(unsigned int) buf[2];
   while (num_of_bits >= 8) {
-    lastbyte = (lastbyte << 8) | ((num >> (num_of_bits -8)) /* & 0xff*/);
+    lastbyte = (lastbyte << 8) | (num >> (num_of_bits -8));
     cbuf[cnt++] = lastbyte >> lastbits;
     num_of_bits -= 8;
   }
@@ -740,7 +742,7 @@ static void receiveints(int buf[], const int num_of_ints, int num_of_bits,
   }
   for (i = num_of_ints-1; i > 0; i--) {
     num = 0;
-    for (j = num_of_bytes-1; j >=0; j--) {
+    for (j = num_of_bytes-1; j >= 0; j--) {
       num = (num << 8) | bytes[j];
       p = num / sizes[i];
       bytes[j] = p;
@@ -864,7 +866,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
         lf = *lfp * *precision + 0.5;
       else
         lf = *lfp * *precision - 0.5;
-      if (fabs(lf) > MAXABS) {
+      if (fabsf(lf) > MAXABS) {
         /* scaling would cause overflow */
         errval = 0;
       }
@@ -877,7 +879,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
         lf = *lfp * *precision + 0.5;
       else
         lf = *lfp * *precision - 0.5;
-      if (fabs(lf) > MAXABS) {
+      if (fabsf(lf) > MAXABS) {
         /* scaling would cause overflow */
         errval = 0;
       }
@@ -890,7 +892,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
         lf = *lfp * *precision + 0.5;
       else
         lf = *lfp * *precision - 0.5;
-      if (fabs(lf) > MAXABS) {
+      if (fabsf(lf) > MAXABS) {
         /* scaling would cause overflow */
         errval = 0;
       }
@@ -951,7 +953,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
     i = 0;
     while (i < *size) {
       is_small = 0;
-      thiscoord = (int *)(luip) + i * 3;
+      thiscoord = (int *)luip + i * 3;
       if (smallidx < maxidx && i >= 1 &&
           abs(thiscoord[0] - prevcoord[0]) < larger &&
           abs(thiscoord[1] - prevcoord[1]) < larger &&
@@ -1046,9 +1048,9 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
         sizesmall[0] = sizesmall[1] = sizesmall[2] = magicints[smallidx];
       }
     }
-    if (buf[1] != 0) buf[0]++;;
+    if (buf[1] != 0) buf[0]++;
     xdr_int(xdrs, &(buf[0])); /* buf[0] holds the length in bytes */
-    return errval * (xdr_opaque(xdrs, (caddr_t)&(buf[3]), (u_int)buf[0]));
+    return errval * (xdr_opaque(xdrs, (char *)&(buf[3]), (unsigned int)buf[0]));
   } else {
 
     /* xdrs is open for reading */
@@ -1129,7 +1131,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
 
     if (xdr_int(xdrs, &(buf[0])) == 0)
       return 0;
-    if (xdr_opaque(xdrs, (caddr_t)&(buf[3]), (u_int)buf[0]) == 0)
+    if (xdr_opaque(xdrs, (char *)&(buf[3]), (unsigned int)buf[0]) == 0)
       return 0;
     buf[0] = buf[1] = buf[2] = 0;
 
@@ -1139,7 +1141,7 @@ int xdr3dfcoord(XDR *xdrs, float *fp, int *size, float *precision)
     i = 0;
     lip = ip;
     while (i < lsize) {
-      thiscoord = (int *)(lip) + i * 3;
+      thiscoord = (int *)lip + i * 3;
 
       if (bitsize == 0) {
         thiscoord[0] = receivebits(buf, bitsizeint[0]);

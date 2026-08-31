@@ -22,21 +22,22 @@
 #include "memory.h"
 #include "neighbor.h"
 #include "pair.h"
-#include "update.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define TOLERANCE 0.05
-#define SMALL     0.001
-
 /* ---------------------------------------------------------------------- */
 
-ImproperAmoeba::ImproperAmoeba(LAMMPS *lmp) : Improper(lmp)
+ImproperAmoeba::ImproperAmoeba(LAMMPS *lmp) : Improper(lmp), k(nullptr)
 {
   writedata = 1;
+
+  // the second atom in the quadruplet is the atom of symmetry
+
+  symmatoms[1] = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -257,7 +258,7 @@ void ImproperAmoeba::allocate()
 
 void ImproperAmoeba::coeff(int narg, char **arg)
 {
-  if (narg != 2) error->all(FLERR,"Incorrect args for improper coefficients");
+  if (narg != 2) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -274,7 +275,7 @@ void ImproperAmoeba::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for improper coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -286,8 +287,9 @@ void ImproperAmoeba::init_style()
   // check if PairAmoeba disabled improper terms
 
   Pair *pair = nullptr;
-  pair = force->pair_match("amoeba",1,0);
-  if (!pair) pair = force->pair_match("hippo",1,0);
+  pair = force->pair_match("^amoeba",0,0);
+  if (!pair) pair = force->pair_match("^hippo",0,0);
+
   if (!pair) error->all(FLERR,"Improper amoeba could not find pair amoeba/hippo");
 
   int tmp;
@@ -335,4 +337,15 @@ void ImproperAmoeba::write_data(FILE *fp)
 {
   for (int i = 1; i <= atom->nimpropertypes; i++)
     fprintf(fp,"%d %g\n",i,k[i]);
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *ImproperAmoeba::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k;
+  return nullptr;
 }

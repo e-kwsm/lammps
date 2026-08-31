@@ -6,7 +6,7 @@ fix rigid/meso command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID rigid/meso bodystyle args keyword values ...
 
@@ -156,7 +156,7 @@ included in each rigid body.
    To compute the initial center-of-mass position and other
    properties of each rigid body, the image flags for each particle in the
    body are used to "unwrap" the particle coordinates.  Thus you must
-   insure that these image flags are consistent so that the unwrapping
+   ensure that these image flags are consistent so that the unwrapping
    creates a valid rigid body (one where the particles are close together)
    , particularly if the particles in a single rigid body straddle a
    periodic boundary.  This means the input data file or restart file must
@@ -173,7 +173,7 @@ This may be useful if you wish a body to rotate but not translate, or
 vice versa, or if you wish it to rotate or translate continuously
 unaffected by interactions with other particles.  Note that if you
 expect a rigid body not to move or rotate by using these keywords, you
-must insure its initial center-of-mass translational or angular
+must ensure its initial center-of-mass translational or angular
 velocity is 0.0. Otherwise the initial translational or angular
 momentum, the body has, will persist.
 
@@ -352,6 +352,11 @@ This fix requires that atoms store density and internal energy as
 defined by the :doc:`atom_style sph <atom_style>` command.
 
 All particles in the group must be mesoscopic SPH/SDPD particles.
+
+.. versionchanged:: 29Aug2024
+
+This fix is incompatible with deformation controls that remap velocity,
+for instance the *remap v* option of :doc:`fix deform <fix_deform>`.
 
 Related commands
 """"""""""""""""

@@ -1,10 +1,11 @@
 .. index:: dihedral_style nharmonic
+.. index:: dihedral_style nharmonic/kk
 .. index:: dihedral_style nharmonic/omp
 
 dihedral_style nharmonic command
 ================================
 
-Accelerator Variants: *nharmonic/omp*
+Accelerator Variants: *nharmonic/kk*, *nharmonic/omp*
 
 Syntax
 """"""
@@ -28,7 +29,7 @@ The *nharmonic* dihedral style uses the potential:
 
 .. math::
 
-   E = \sum_{n=1,n} A_n  \cos^{n-1}(\phi)
+   E = \sum_{i=1,n} A_i  \cos^{i-1}(\phi)
 
 The following coefficients must be defined for each dihedral type via the
 :doc:`dihedral_coeff <dihedral_coeff>` command as in the example above, or in

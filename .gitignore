@@ -43,15 +43,31 @@ Thumbs.db
 
 #cmake
 /build*
-/CMakeCache.txt
-/CMakeFiles/
-/Testing
+CMakeCache.txt
+CMakeFiles
 /Makefile
-/Testing
-/cmake_install.cmake
+Testing
+Temporary
+cmake_install.cmake
 /lmp
 out/Debug
 out/RelWithDebInfo
 out/Release
 out/x86
 out/x64
+src/Makefile.package-e
+src/Makefile.package.settings-e
+/cmake/build/x64-Debug-Clang
+/install/x64-GUI-MSVC
+/install
+/NewTest
+/test
+/dev
+.Rhistory
+
+# Claude code generated/maintained files
+/CLAUDE.md
+/plans
+/CLAUDE.local.md
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock

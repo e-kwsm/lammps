@@ -13,7 +13,7 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-  Contributing authors: Martin Svoboda (ICPF, UJEP), Martin Lísal (ICPF, UJEP)
+  Contributing authors: Martin Svoboda (ICPF, UJEP), Martin Lisal (ICPF, UJEP)
   based on pair style dpd by: Kurt Smith (U Pittsburgh)
 ------------------------------------------------------------------------- */
 
@@ -23,6 +23,7 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "neigh_list.h"
 #include "neighbor.h"
@@ -33,11 +34,13 @@
 
 using namespace LAMMPS_NS;
 
-#define EPSILON 1.0e-10
+static constexpr double EPSILON = 1.0e-10;
 
 /* ---------------------------------------------------------------------- */
 
-PairDPDExt::PairDPDExt(LAMMPS *lmp) : Pair(lmp)
+PairDPDExt::PairDPDExt(LAMMPS *lmp) :
+    Pair(lmp), cut(nullptr), a0(nullptr), gamma(nullptr), gammaT(nullptr), sigma(nullptr),
+    sigmaT(nullptr), ws(nullptr), wsT(nullptr)
 {
   writedata = 1;
   random = nullptr;
@@ -63,7 +66,7 @@ PairDPDExt::~PairDPDExt()
     memory->destroy(wsT);
   }
 
-  if (random) delete random;
+  delete random;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -73,12 +76,17 @@ void PairDPDExt::compute(int eflag, int vflag)
   int i,j,ii,jj,inum,jnum,itype,jtype;
   double xtmp,ytmp,ztmp,delx,dely,delz,evdwl,fpairx,fpairy,fpairz,fpair;
   double vxtmp,vytmp,vztmp,delvx,delvy,delvz;
-  double rsq,r,rinv,dot,wd,wdPar,wdPerp,randnum,randnumx,randnumy,randnumz,factor_dpd;
+  double rsq,r,rinv,dot,wd,wdPar,wdPerp,randnum,randnumx,randnumy,randnumz;
+  double prefactor_g,prefactor_s,factor_dpd,factor_sqrt;
   double P[3][3];
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   evdwl = 0.0;
   ev_init(eflag,vflag);
+
+  // precompute random force scaling factors
+
+  for (int i = 0; i < 4; ++i) special_sqrt[i] = sqrt(force->special_lj[i]);
 
   double **x = atom->x;
   double **v = atom->v;
@@ -111,6 +119,7 @@ void PairDPDExt::compute(int eflag, int vflag)
     for (jj = 0; jj < jnum; jj++) {
       j = jlist[jj];
       factor_dpd = special_lj[sbmask(j)];
+      factor_sqrt = special_sqrt[sbmask(j)];
       j &= NEIGHMASK;
 
       delx = xtmp - x[j][0];
@@ -154,33 +163,26 @@ void PairDPDExt::compute(int eflag, int vflag)
 
         // drag force - parallel
         fpair -= gamma[itype][jtype]*wdPar*wdPar*dot*rinv;
+        fpair *= factor_dpd;
 
         // random force - parallel
-        fpair += sigma[itype][jtype]*wdPar*randnum*dtinvsqrt;
+        fpair += factor_sqrt*sigma[itype][jtype]*wdPar*randnum*dtinvsqrt;
 
         fpairx = fpair*rinv*delx;
         fpairy = fpair*rinv*dely;
         fpairz = fpair*rinv*delz;
 
         // drag force - perpendicular
-        fpairx -= gammaT[itype][jtype]*wdPerp*wdPerp*
-                  (P[0][0]*delvx + P[0][1]*delvy + P[0][2]*delvz);
-        fpairy -= gammaT[itype][jtype]*wdPerp*wdPerp*
-                  (P[1][0]*delvx + P[1][1]*delvy + P[1][2]*delvz);
-        fpairz -= gammaT[itype][jtype]*wdPerp*wdPerp*
-                  (P[2][0]*delvx + P[2][1]*delvy + P[2][2]*delvz);
+        prefactor_g = factor_dpd*gammaT[itype][jtype]*wdPerp*wdPerp;
+        fpairx -= prefactor_g * (P[0][0]*delvx + P[0][1]*delvy + P[0][2]*delvz);
+        fpairy -= prefactor_g * (P[1][0]*delvx + P[1][1]*delvy + P[1][2]*delvz);
+        fpairz -= prefactor_g * (P[2][0]*delvx + P[2][1]*delvy + P[2][2]*delvz);
 
         // random force - perpendicular
-        fpairx += sigmaT[itype][jtype]*wdPerp*
-                  (P[0][0]*randnumx + P[0][1]*randnumy + P[0][2]*randnumz)*dtinvsqrt;
-        fpairy += sigmaT[itype][jtype]*wdPerp*
-                  (P[1][0]*randnumx + P[1][1]*randnumy + P[1][2]*randnumz)*dtinvsqrt;
-        fpairz += sigmaT[itype][jtype]*wdPerp*
-                  (P[2][0]*randnumx + P[2][1]*randnumy + P[2][2]*randnumz)*dtinvsqrt;
-
-        fpairx *= factor_dpd;
-        fpairy *= factor_dpd;
-        fpairz *= factor_dpd;
+        prefactor_s = factor_sqrt * sigmaT[itype][jtype]*wdPerp * dtinvsqrt;
+        fpairx += prefactor_s * (P[0][0]*randnumx + P[0][1]*randnumy + P[0][2]*randnumz);
+        fpairy += prefactor_s * (P[1][0]*randnumx + P[1][1]*randnumy + P[1][2]*randnumz);
+        fpairz += prefactor_s * (P[2][0]*randnumx + P[2][1]*randnumy + P[2][2]*randnumz);
 
         f[i][0] += fpairx;
         f[i][1] += fpairy;
@@ -198,10 +200,8 @@ void PairDPDExt::compute(int eflag, int vflag)
           evdwl = 0.5*a0[itype][jtype]*cut[itype][jtype] * wd*wd;
           evdwl *= factor_dpd;
         }
-        if (evflag) ev_tally_xyz(i,j,nlocal,newton_pair,
-                      evdwl,0.0,
-                      fpairx, fpairy, fpairz,
-                      delx,dely,delz);
+        if (evflag) ev_tally_xyz(i,j,nlocal,newton_pair,evdwl,0.0,fpairx,fpairy,fpairz,
+                                 delx,dely,delz);
       }
     }
   }
@@ -282,7 +282,7 @@ void PairDPDExt::settings(int narg, char **arg)
 void PairDPDExt::coeff(int narg, char **arg)
 {
   if (narg < 7 || narg > 8)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -313,7 +313,7 @@ void PairDPDExt::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -340,7 +340,9 @@ void PairDPDExt::init_style()
 
 double PairDPDExt::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status:\n" + Info::get_pair_coeff_status(lmp));
 
   sigma[i][j] = sqrt(2.0*force->boltz*temperature*gamma[i][j]);
   sigmaT[i][j] = sqrt(2.0*force->boltz*temperature*gammaT[i][j]);
@@ -448,7 +450,7 @@ void PairDPDExt::read_restart_settings(FILE *fp)
   // initialize Marsaglia RNG with processor-unique seed
   // same seed that pair_style command initially specified
 
-  if (random) delete random;
+  delete random;
   random = new RanMars(lmp,seed + comm->me);
 }
 

@@ -29,7 +29,6 @@
 #include "label_map.h"
 #include "memory.h"
 #include "modify.h"
-#include "mpiio.h"
 #include "neighbor.h"
 #include "output.h"
 #include "pair.h"
@@ -50,7 +49,6 @@ WriteRestart::WriteRestart(LAMMPS *lmp) : Command(lmp)
   MPI_Comm_size(world,&nprocs);
   multiproc = 0;
   noinit = 0;
-  fp = nullptr;
 }
 
 /* ----------------------------------------------------------------------
@@ -60,7 +58,7 @@ WriteRestart::WriteRestart(LAMMPS *lmp) : Command(lmp)
 void WriteRestart::command(int narg, char **arg)
 {
   if (domain->box_exist == 0)
-    error->all(FLERR,"Write_restart command before simulation box is defined");
+    error->all(FLERR,"Write_restart command before simulation box is defined" + utils::errorurl(33));
   if (narg < 1) utils::missing_cmd_args(FLERR, "write_restart", error);
 
   // if filename contains a "*", replace with current timestep
@@ -74,16 +72,13 @@ void WriteRestart::command(int narg, char **arg)
 
   if (strchr(arg[0],'%')) multiproc = nprocs;
   else multiproc = 0;
-  if (utils::strmatch(arg[0],"\\.mpiio$")) mpiioflag = 1;
-  else mpiioflag = 0;
-
-  if ((comm->me == 0) && mpiioflag)
-    error->warning(FLERR,"MPI-IO output is unmaintained and unreliable. Use with caution.");
+  if (utils::strmatch(arg[0],"\\.mpiio$"))
+    error->all(FLERR,"MPI-IO files are no longer supported by LAMMPS");
 
   // setup output style and process optional args
   // also called by Output class for periodic restart files
 
-  multiproc_options(multiproc,mpiioflag,narg-1,&arg[1]);
+  multiproc_options(multiproc,narg-1,&arg[1]);
 
   // init entire system since comm->exchange is done
   // comm::init needs neighbor::init needs pair::init needs kspace::init, etc
@@ -119,21 +114,9 @@ void WriteRestart::command(int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
-void WriteRestart::multiproc_options(int multiproc_caller, int mpiioflag_caller, int narg, char **arg)
+void WriteRestart::multiproc_options(int multiproc_caller, int narg, char **arg)
 {
   multiproc = multiproc_caller;
-  mpiioflag = mpiioflag_caller;
-
-  // error checks
-
-  if (multiproc && mpiioflag)
-    error->all(FLERR,"Restart file MPI-IO output not allowed with % in filename");
-
-  if (mpiioflag) {
-    mpiio = new RestartMPIIO(lmp);
-    if (!mpiio->mpiio_exists)
-      error->all(FLERR,"Writing to MPI-IO filename when MPIIO package is not installed");
-  }
 
   // defaults for multiproc file writing
 
@@ -284,8 +267,7 @@ void WriteRestart::write(const std::string &file)
     if (me == 0 && fp) {
       magic_string();
       if (ferror(fp)) io_error = 1;
-      fclose(fp);
-      fp = nullptr;
+      fp = nullptr;             // implicitly closes file
     }
 
     std::string multiname = file;
@@ -298,6 +280,12 @@ void WriteRestart::write(const std::string &file)
       write_int(PROCSPERFILE,nclusterprocs);
     }
   }
+
+  // check for I/O error status
+
+  int io_all = 0;
+  MPI_Allreduce(&io_error,&io_all,1,MPI_INT,MPI_MAX,world);
+  if (io_all) error->all(FLERR,"I/O error while writing restart");
 
   // pack my atom data into buf
 
@@ -354,54 +342,39 @@ void WriteRestart::write(const std::string &file)
     }
   }
 
-  // MPI-IO output to single file
+  // output of one or more native files
+  // filewriter = 1 = this proc writes to file
+  // ping each proc in my cluster, receive its data, write data to file
+  // else wait for ping from fileproc, send my data to fileproc
 
-  if (mpiioflag) {
-    if (me == 0 && fp) {
-      magic_string();
-      if (ferror(fp)) io_error = 1;
-      fclose(fp);
-      fp = nullptr;
+  int tmp = 0;
+  int recv_size;
+
+  if (filewriter) {
+    MPI_Status status;
+    MPI_Request request;
+    for (int iproc = 0; iproc < nclusterprocs; iproc++) {
+      if (iproc) {
+        MPI_Irecv(buf,max_size,MPI_DOUBLE,me+iproc,0,world,&request);
+        MPI_Send(&tmp,0,MPI_INT,me+iproc,0,world);
+        MPI_Wait(&request,&status);
+        MPI_Get_count(&status,MPI_DOUBLE,&recv_size);
+      } else recv_size = send_size;
+
+      write_double_vec(PERPROC,recv_size,buf);
     }
-    mpiio->openForWrite(file.c_str());
-    mpiio->write(headerOffset,send_size,buf);
-    mpiio->close();
+    magic_string();
+    if (ferror(fp)) io_error = 1;
+    fp = nullptr;               // implicitly closes file
+
   } else {
-
-    // output of one or more native files
-    // filewriter = 1 = this proc writes to file
-    // ping each proc in my cluster, receive its data, write data to file
-    // else wait for ping from fileproc, send my data to fileproc
-
-    int tmp,recv_size;
-
-    if (filewriter) {
-      MPI_Status status;
-      MPI_Request request;
-      for (int iproc = 0; iproc < nclusterprocs; iproc++) {
-        if (iproc) {
-          MPI_Irecv(buf,max_size,MPI_DOUBLE,me+iproc,0,world,&request);
-          MPI_Send(&tmp,0,MPI_INT,me+iproc,0,world);
-          MPI_Wait(&request,&status);
-          MPI_Get_count(&status,MPI_DOUBLE,&recv_size);
-        } else recv_size = send_size;
-
-        write_double_vec(PERPROC,recv_size,buf);
-      }
-      magic_string();
-      if (ferror(fp)) io_error = 1;
-      fclose(fp);
-      fp = nullptr;
-
-    } else {
-      MPI_Recv(&tmp,0,MPI_INT,fileproc,0,world,MPI_STATUS_IGNORE);
-      MPI_Rsend(buf,send_size,MPI_DOUBLE,fileproc,0,world);
-    }
+    MPI_Recv(&tmp,0,MPI_INT,fileproc,0,world,MPI_STATUS_IGNORE);
+    MPI_Rsend(buf,send_size,MPI_DOUBLE,fileproc,0,world);
   }
 
-  // Check for I/O error status
+  // check again for I/O error status
 
-  int io_all = 0;
+  io_all = 0;
   MPI_Allreduce(&io_error,&io_all,1,MPI_INT,MPI_MAX,world);
   if (io_all) error->all(FLERR,"I/O error while writing restart");
 
@@ -411,7 +384,7 @@ void WriteRestart::write(const std::string &file)
 
   // invoke any fixes that write their own restart file
 
-  for (auto &fix : modify->get_fix_list())
+  for (const auto &fix : modify->get_fix_list())
     if (fix->restart_file)
       fix->write_restart_file(file.c_str());
 }
@@ -449,7 +422,7 @@ void WriteRestart::header()
 
   // write atom_style and its args
 
-  write_string(ATOM_STYLE,atom->atom_style);
+  write_string(ATOM_STYLE,utils::strip_style_suffix(atom->atom_style,lmp));
   fwrite(&atom->avec->nargcopy,sizeof(int),1,fp);
   for (int i = 0; i < atom->avec->nargcopy; i++) {
     int n = strlen(atom->avec->argcopy[i]) + 1;
@@ -479,6 +452,10 @@ void WriteRestart::header()
   write_double(XZ,domain->xz);
   write_double(YZ,domain->yz);
 
+  write_int(TRICLINIC_GENERAL,domain->triclinic_general);
+  if (domain->triclinic_general)
+    write_double_vec(ROTATE_G2R,9,&domain->rotate_g2r[0][0]);
+
   write_double_vec(SPECIAL_LJ,3,&force->special_lj[1]);
   write_double_vec(SPECIAL_COUL,3,&force->special_coul[1]);
 
@@ -499,6 +476,11 @@ void WriteRestart::header()
   write_int(EXTRA_DIHEDRAL_PER_ATOM,atom->extra_dihedral_per_atom);
   write_int(EXTRA_IMPROPER_PER_ATOM,atom->extra_improper_per_atom);
   write_int(ATOM_MAXSPECIAL,atom->maxspecial);
+
+  // write out AtomVec::maxexchange (extra storage for communicating
+  // per-atom bond, angle, dihedral, and improper data). added 25 Oct 2025
+
+  write_int(ATOM_MAXEXCHANGE,atom->avec->maxexchange);
 
   write_bigint(NELLIPSOIDS,atom->nellipsoids);
   write_bigint(NLINES,atom->nlines);
@@ -542,26 +524,26 @@ void WriteRestart::force_fields()
 {
   if (force->pair) {
     if (force->pair->restartinfo) {
-      write_string(PAIR,force->pair_style);
+      write_string(PAIR,utils::strip_style_suffix(force->pair_style,lmp));
       force->pair->write_restart(fp);
     } else {
-      write_string(NO_PAIR,force->pair_style);
+      write_string(NO_PAIR,utils::strip_style_suffix(force->pair_style,lmp));
     }
   }
   if (atom->avec->bonds_allow && force->bond) {
-    write_string(BOND,force->bond_style);
+    write_string(BOND,utils::strip_style_suffix(force->bond_style,lmp));
     force->bond->write_restart(fp);
   }
   if (atom->avec->angles_allow && force->angle) {
-    write_string(ANGLE,force->angle_style);
+    write_string(ANGLE,utils::strip_style_suffix(force->angle_style,lmp));
     force->angle->write_restart(fp);
   }
   if (atom->avec->dihedrals_allow && force->dihedral) {
-    write_string(DIHEDRAL,force->dihedral_style);
+    write_string(DIHEDRAL,utils::strip_style_suffix(force->dihedral_style,lmp));
     force->dihedral->write_restart(fp);
   }
   if (atom->avec->impropers_allow && force->improper) {
-    write_string(IMPROPER,force->improper_style);
+    write_string(IMPROPER,utils::strip_style_suffix(force->improper_style,lmp));
     force->improper->write_restart(fp);
   }
 
@@ -576,34 +558,15 @@ void WriteRestart::force_fields()
    all procs call this method, only proc 0 writes to file
 ------------------------------------------------------------------------- */
 
-void WriteRestart::file_layout(int send_size)
+void WriteRestart::file_layout(int /*send_size*/)
 {
-  if (me == 0) {
-    write_int(MULTIPROC,multiproc);
-    write_int(MPIIO,mpiioflag);
-  }
-
-  if (mpiioflag) {
-    int *all_send_sizes;
-    memory->create(all_send_sizes,nprocs,"write_restart:all_send_sizes");
-    MPI_Gather(&send_size, 1, MPI_INT, all_send_sizes, 1, MPI_INT, 0,world);
-    if (me == 0) fwrite(all_send_sizes,sizeof(int),nprocs,fp);
-    memory->destroy(all_send_sizes);
-  }
+  if (me == 0) write_int(MULTIPROC,multiproc);
 
   // -1 flag signals end of file layout info
 
   if (me == 0) {
     int flag = -1;
     fwrite(&flag,sizeof(int),1,fp);
-  }
-
-  // if MPI-IO file, broadcast the end of the header offste
-  // this allows all ranks to compute offset to their data
-
-  if (mpiioflag) {
-    if (me == 0) headerOffset = platform::ftell(fp);
-    MPI_Bcast(&headerOffset,1,MPI_LMP_BIGINT,0,world);
   }
 }
 
@@ -672,12 +635,12 @@ void WriteRestart::write_double(int flag, double value)
    byte) into the restart file
 ------------------------------------------------------------------------- */
 
-void WriteRestart::write_string(int flag, const char *value)
+void WriteRestart::write_string(int flag, const std::string &value)
 {
-  int n = strlen(value) + 1;
+  int n = value.size() + 1;
   fwrite(&flag,sizeof(int),1,fp);
   fwrite(&n,sizeof(int),1,fp);
-  fwrite(value,sizeof(char),n,fp);
+  fwrite(value.c_str(),sizeof(char),n,fp);
 }
 
 /* ----------------------------------------------------------------------

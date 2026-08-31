@@ -1,53 +1,12 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_RANDOM_ACCESS_ITERATOR_IMPL_HPP
 #define KOKKOS_RANDOM_ACCESS_ITERATOR_IMPL_HPP
 
 #include <iterator>
+#include <utility>  // declval
 #include <Kokkos_Macros.hpp>
-#include <Kokkos_View.hpp>
 #include "Kokkos_Constraints.hpp"
 
 namespace Kokkos {
@@ -58,38 +17,61 @@ template <class T>
 class RandomAccessIterator;
 
 template <class DataType, class... Args>
-class RandomAccessIterator< ::Kokkos::View<DataType, Args...> > {
+class RandomAccessIterator<::Kokkos::View<DataType, Args...>> {
  public:
   using view_type     = ::Kokkos::View<DataType, Args...>;
   using iterator_type = RandomAccessIterator<view_type>;
 
   using iterator_category = std::random_access_iterator_tag;
-  using value_type        = typename view_type::value_type;
+  using value_type        = typename view_type::non_const_value_type;
   using difference_type   = ptrdiff_t;
   using pointer           = typename view_type::pointer_type;
   using reference         = typename view_type::reference_type;
 
-  static_assert(view_type::rank == 1 &&
-                    (std::is_same<typename view_type::traits::array_layout,
-                                  Kokkos::LayoutLeft>::value ||
-                     std::is_same<typename view_type::traits::array_layout,
-                                  Kokkos::LayoutRight>::value ||
-                     std::is_same<typename view_type::traits::array_layout,
-                                  Kokkos::LayoutStride>::value),
-                "RandomAccessIterator only supports 1D Views with LayoutLeft, "
-                "LayoutRight, LayoutStride.");
+// oneDPL needs this alias in order not to assume the data is on the host but on
+// the device, see
+// https://github.com/uxlfoundation/oneDPL/blob/a045eac689f9107f50ba7b42235e9e927118e483/include/oneapi/dpl/pstl/hetero/dpcpp/utils_ranges_sycl.h#L210-L214
+#ifdef KOKKOS_ENABLE_ONEDPL
+  using is_passed_directly = std::true_type;
+#endif
 
+ private:
+  static constexpr bool view_is_always_strided =
+#ifdef KOKKOS_ENABLE_IMPL_MDSPAN
+      decltype(std::declval<view_type>().to_mdspan())::is_always_strided();
+#else
+      (std::is_same_v<typename view_type::traits::array_layout,
+                      Kokkos::LayoutLeft> ||
+       std::is_same_v<typename view_type::traits::array_layout,
+                      Kokkos::LayoutRight> ||
+       std::is_same_v<typename view_type::traits::array_layout,
+                      Kokkos::LayoutStride>);
+#endif
+
+  static_assert(view_type::rank == 1 && view_is_always_strided);
+
+ public:
   KOKKOS_DEFAULTED_FUNCTION RandomAccessIterator() = default;
 
   explicit KOKKOS_FUNCTION RandomAccessIterator(const view_type view)
-      : m_view(view) {}
+      : m_data(view.data()), m_stride(view.stride(0)) {}
   explicit KOKKOS_FUNCTION RandomAccessIterator(const view_type view,
                                                 ptrdiff_t current_index)
-      : m_view(view), m_current_index(current_index) {}
+      : m_data(view.data() + current_index * view.stride(0)),
+        m_stride(view.stride(0)) {}
+
+  template <class OtherViewType>
+    requires(std::is_constructible_v<view_type, OtherViewType>)
+  KOKKOS_FUNCTION explicit(!std::is_convertible_v<OtherViewType, view_type>)
+      RandomAccessIterator(const RandomAccessIterator<OtherViewType>& other)
+      : m_data(other.m_data), m_stride(other.m_stride) {}
 
   KOKKOS_FUNCTION
   iterator_type& operator++() {
-    ++m_current_index;
+    if constexpr (is_always_contiguous)
+      m_data++;
+    else
+      m_data += m_stride;
     return *this;
   }
 
@@ -102,7 +84,10 @@ class RandomAccessIterator< ::Kokkos::View<DataType, Args...> > {
 
   KOKKOS_FUNCTION
   iterator_type& operator--() {
-    --m_current_index;
+    if constexpr (is_always_contiguous)
+      m_data--;
+    else
+      m_data -= m_stride;
     return *this;
   }
 
@@ -115,78 +100,109 @@ class RandomAccessIterator< ::Kokkos::View<DataType, Args...> > {
 
   KOKKOS_FUNCTION
   reference operator[](difference_type n) const {
-    return m_view(m_current_index + n);
+    if constexpr (is_always_contiguous)
+      return *(m_data + n);
+    else
+      return *(m_data + n * m_stride);
   }
 
   KOKKOS_FUNCTION
   iterator_type& operator+=(difference_type n) {
-    m_current_index += n;
+    if constexpr (is_always_contiguous)
+      m_data += n;
+    else
+      m_data += n * m_stride;
     return *this;
   }
 
   KOKKOS_FUNCTION
   iterator_type& operator-=(difference_type n) {
-    m_current_index -= n;
+    if constexpr (is_always_contiguous)
+      m_data -= n;
+    else
+      m_data -= n * m_stride;
     return *this;
   }
 
   KOKKOS_FUNCTION
   iterator_type operator+(difference_type n) const {
-    return iterator_type(m_view, m_current_index + n);
+    auto it = *this;
+    it += n;
+    return it;
+  }
+
+  friend iterator_type operator+(difference_type n, iterator_type other) {
+    return other + n;
   }
 
   KOKKOS_FUNCTION
   iterator_type operator-(difference_type n) const {
-    return iterator_type(m_view, m_current_index - n);
+    auto it = *this;
+    it -= n;
+    return it;
   }
 
   KOKKOS_FUNCTION
   difference_type operator-(iterator_type it) const {
-    return m_current_index - it.m_current_index;
+    if constexpr (is_always_contiguous)
+      return m_data - it.m_data;
+    else
+      return (m_data - it.m_data) / m_stride;
   }
 
   KOKKOS_FUNCTION
   bool operator==(iterator_type other) const {
-    return m_current_index == other.m_current_index &&
-           m_view.data() == other.m_view.data();
+    return m_data == other.m_data && m_stride == other.m_stride;
   }
 
   KOKKOS_FUNCTION
   bool operator!=(iterator_type other) const {
-    return m_current_index != other.m_current_index ||
-           m_view.data() != other.m_view.data();
+    return m_data != other.m_data || m_stride != other.m_stride;
   }
 
   KOKKOS_FUNCTION
-  bool operator<(iterator_type other) const {
-    return m_current_index < other.m_current_index;
-  }
+  bool operator<(iterator_type other) const { return m_data < other.m_data; }
 
   KOKKOS_FUNCTION
-  bool operator<=(iterator_type other) const {
-    return m_current_index <= other.m_current_index;
-  }
+  bool operator<=(iterator_type other) const { return m_data <= other.m_data; }
 
   KOKKOS_FUNCTION
-  bool operator>(iterator_type other) const {
-    return m_current_index > other.m_current_index;
-  }
+  bool operator>(iterator_type other) const { return m_data > other.m_data; }
 
   KOKKOS_FUNCTION
-  bool operator>=(iterator_type other) const {
-    return m_current_index >= other.m_current_index;
-  }
+  bool operator>=(iterator_type other) const { return m_data >= other.m_data; }
 
   KOKKOS_FUNCTION
-  reference operator*() const { return m_view(m_current_index); }
+  reference operator*() const { return *m_data; }
+
+  KOKKOS_FUNCTION
+  pointer data() const { return m_data; }
+
+  KOKKOS_FUNCTION
+  int stride() const { return m_stride; }
 
  private:
-  view_type m_view;
-  ptrdiff_t m_current_index = 0;
+  pointer m_data;
+  int m_stride;
+  static constexpr bool is_always_contiguous =
+      (std::is_same_v<typename view_type::traits::array_layout,
+                      Kokkos::LayoutLeft> ||
+       std::is_same_v<typename view_type::traits::array_layout,
+                      Kokkos::LayoutRight>);
+
+  // Needed for the converting constructor accepting another iterator
+  template <class>
+  friend class RandomAccessIterator;
 };
 
 }  // namespace Impl
 }  // namespace Experimental
 }  // namespace Kokkos
+
+#ifdef KOKKOS_ENABLE_SYCL
+template <class T>
+struct sycl::is_device_copyable<
+    Kokkos::Experimental::Impl::RandomAccessIterator<T>> : std::true_type {};
+#endif
 
 #endif

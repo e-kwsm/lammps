@@ -13,14 +13,10 @@
 
 #include "compute_grid.h"
 
-#include "atom.h"
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
-#include "force.h"
 #include "memory.h"
-#include "modify.h"
-#include "update.h"
 
 #include <cstring>
 
@@ -29,7 +25,8 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeGrid::ComputeGrid(LAMMPS *lmp, int narg, char **arg) :
-    Compute(lmp, narg, arg), grid(nullptr), gridall(nullptr), gridlocal(nullptr)
+    Compute(lmp, narg, arg), grid(nullptr), gridall(nullptr), gridlocal(nullptr), boxlo(nullptr),
+    prd(nullptr), sublo(nullptr), subhi(nullptr)
 {
   if (narg < 6) error->all(FLERR, "Illegal compute grid command");
 
@@ -61,6 +58,7 @@ ComputeGrid::ComputeGrid(LAMMPS *lmp, int narg, char **arg) :
 
 ComputeGrid::~ComputeGrid()
 {
+  if (copymode) return;
   deallocate();
 }
 
@@ -115,7 +113,6 @@ void ComputeGrid::assign_coords_all()
 void ComputeGrid::allocate()
 {
   // allocate arrays
-
   memory->create(grid, size_array_rows, size_array_cols, "grid:grid");
   memory->create(gridall, size_array_rows, size_array_cols, "grid:gridall");
   if (nxlo <= nxhi && nylo <= nyhi && nzlo <= nzhi) {
@@ -190,7 +187,7 @@ void ComputeGrid::set_grid_local()
   // ixyz lo/hi = inclusive lo/hi bounds of global grid sub-brick I own
   // if proc owns no grid cells in a dim, then ilo > ihi
   // if 2 procs share a boundary a grid point is exactly on,
-  //   the 2 equality if tests insure a consistent decision
+  //   the 2 equality if tests ensure a consistent decision
   //   as to which proc owns it
 
   double xfraclo, xfrachi, yfraclo, yfrachi, zfraclo, zfrachi;

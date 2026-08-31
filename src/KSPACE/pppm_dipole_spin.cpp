@@ -23,9 +23,10 @@
 #include "domain.h"
 #include "error.h"
 #include "force.h"
-#include "gridcomm.h"
+#include "grid3d.h"
 #include "math_const.h"
 #include "memory.h"
+#include "neighbor.h"
 #include "pair.h"
 #include "update.h"
 
@@ -34,22 +35,8 @@
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define MAXORDER 7
-#define OFFSET 16384
-#define LARGE 10000.0
-#define SMALL 0.00001
-#define EPS_HOC 1.0e-7
-
-enum{REVERSE_MU};
-enum{FORWARD_MU,FORWARD_MU_PERATOM};
-
-#ifdef FFT_SINGLE
-#define ZEROF 0.0f
-#define ONEF  1.0f
-#else
-#define ZEROF 0.0
-#define ONEF  1.0
-#endif
+static constexpr int MAXORDER = 7;
+static constexpr FFT_SCALAR ZEROF = 0.0;
 
 /* ---------------------------------------------------------------------- */
 
@@ -61,7 +48,7 @@ PPPMDipoleSpin::PPPMDipoleSpin(LAMMPS *lmp) :
 
   hbar = force->hplanck/MY_2PI;                 // eV/(rad.THz)
   mub = 9.274e-4;                               // in A.Ang^2
-  mu_0 = 785.15;                                // in eV/Ang/A^2
+  mu_0 = 784.15;                                // in eV/Ang/A^2
   mub2mu0 = mub * mub * mu_0 / (4.0*MY_PI);     // in eV.Ang^3
   mub2mu0hbinv = mub2mu0 / hbar;                // in rad.THz
 }
@@ -136,7 +123,7 @@ void PPPMDipoleSpin::init()
   pair_check();
 
   int itmp = 0;
-  auto p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   // check the correct extract here
   if (p_cutoff == nullptr)
     error->all(FLERR,"KSpace style is incompatible with Pair style");
@@ -171,7 +158,7 @@ void PPPMDipoleSpin::init()
   //   or overlap is allowed, then done
   // else reduce order and try again
 
-  GridComm *gctmp = nullptr;
+  gc_dipole = nullptr;
   int iteration = 0;
 
   while (order >= minorder) {
@@ -184,23 +171,28 @@ void PPPMDipoleSpin::init()
     set_grid_local();
     if (overlap_allowed) break;
 
-    gctmp = new GridComm(lmp,world,nx_pppm,ny_pppm,nz_pppm,
-                         nxlo_in,nxhi_in,nylo_in,nyhi_in,nzlo_in,nzhi_in,
-                         nxlo_out,nxhi_out,nylo_out,nyhi_out,nzlo_out,nzhi_out);
+    gc_dipole = new Grid3d(lmp,world,nx_pppm,ny_pppm,nz_pppm);
+    gc_dipole->set_distance(0.5*neighbor->skin + qdist);
+    gc_dipole->set_stencil_atom(-nlower,nupper);
+    gc_dipole->set_shift_atom(shiftatom_lo,shiftatom_hi);
+    gc_dipole->set_zfactor(slab_volfactor);
+
+    gc_dipole->setup_grid(nxlo_in,nxhi_in,nylo_in,nyhi_in,nzlo_in,nzhi_in,
+                          nxlo_out,nxhi_out,nylo_out,nyhi_out,nzlo_out,nzhi_out);
 
     int tmp1,tmp2;
-    gctmp->setup(tmp1,tmp2);
-    if (gctmp->ghost_adjacent()) break;
-    delete gctmp;
+    gc_dipole->setup_comm(tmp1,tmp2);
+    if (gc_dipole->ghost_adjacent()) break;
+    delete gc_dipole;
 
     order--;
     iteration++;
   }
 
   if (order < minorder) error->all(FLERR,"PPPMDipoleSpin order < minimum allowed order");
-  if (!overlap_allowed && !gctmp->ghost_adjacent())
+  if (!overlap_allowed && !gc_dipole->ghost_adjacent())
     error->all(FLERR,"PPPMDipoleSpin grid stencil extends beyond nearest neighbor processor");
-  if (gctmp) delete gctmp;
+  delete gc_dipole;
 
   // adjust g_ewald
 
@@ -209,6 +201,19 @@ void PPPMDipoleSpin::init()
   // calculate the final accuracy
 
   double estimated_accuracy = final_accuracy_dipole();
+
+  // allocate K-space dependent memory
+  // don't invoke allocate peratom(), will be allocated when needed
+  // must happen before printing the stats below, since allocate()
+  // is what sets ngrid and nfft_both
+
+  allocate();
+
+  // pre-compute Green's function denominator expansion
+  // pre-compute 1d charge distribution coefficients
+
+  compute_gf_denom();
+  compute_rho_coeff();
 
   // print stats
 
@@ -229,17 +234,6 @@ void PPPMDipoleSpin::init()
                        ngrid_max,nfft_both_max);
     utils::logmesg(lmp,mesg);
   }
-
-  // allocate K-space dependent memory
-  // don't invoke allocate peratom(), will be allocated when needed
-
-  allocate();
-
-  // pre-compute Green's function denominator expansion
-  // pre-compute 1d charge distribution coefficients
-
-  compute_gf_denom();
-  compute_rho_coeff();
 }
 
 /* ----------------------------------------------------------------------
@@ -296,8 +290,8 @@ void PPPMDipoleSpin::compute(int eflag, int vflag)
   //   to fully sum contribution in their 3d bricks
   // remap from 3d decomposition to FFT decomposition
 
-  gc_dipole->reverse_comm(GridComm::KSPACE,this,3,sizeof(FFT_SCALAR),
-                          REVERSE_MU,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+  gc_dipole->reverse_comm(Grid3d::KSPACE,this,REVERSE_MU,4,sizeof(FFT_SCALAR),
+                          gc_buf1,gc_buf2,MPI_FFT_SCALAR);
   brick2fft_dipole();
 
   // compute potential gradient on my FFT grid and
@@ -310,14 +304,14 @@ void PPPMDipoleSpin::compute(int eflag, int vflag)
   // all procs communicate E-field values
   // to fill ghost cells surrounding their 3d bricks
 
-  gc_dipole->forward_comm(GridComm::KSPACE,this,9,sizeof(FFT_SCALAR),
-                          FORWARD_MU,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+  gc_dipole->forward_comm(Grid3d::KSPACE,this,FORWARD_MU,12,sizeof(FFT_SCALAR),
+                          gc_buf1,gc_buf2,MPI_FFT_SCALAR);
 
   // extra per-atom energy/virial communication
 
   if (evflag_atom)
-    gc->forward_comm(GridComm::KSPACE,this,18,sizeof(FFT_SCALAR),
-                     FORWARD_MU_PERATOM,gc_buf1,gc_buf2,MPI_FFT_SCALAR);
+    gc_dipole->forward_comm(Grid3d::KSPACE,this,FORWARD_MU_PERATOM,25,sizeof(FFT_SCALAR),
+                            gc_buf1,gc_buf2,MPI_FFT_SCALAR);
 
   // calculate the force on my particles
 
@@ -403,6 +397,8 @@ void PPPMDipoleSpin::make_rho_spin()
   memset(&(densityy_brick_dipole[nzlo_out][nylo_out][nxlo_out]),0,
          ngrid*sizeof(FFT_SCALAR));
   memset(&(densityz_brick_dipole[nzlo_out][nylo_out][nxlo_out]),0,
+         ngrid*sizeof(FFT_SCALAR));
+  memset(&(density_brick[nzlo_out][nylo_out][nxlo_out]),0,
          ngrid*sizeof(FFT_SCALAR));
 
   // loop over my charges, add their contribution to nearby grid points
@@ -523,11 +519,14 @@ void PPPMDipoleSpin::fieldforce_ik_spin()
     f[i][2] += spfactor*(vxz*spx + vyz*spy + vzz*spz);
 
     // store long-range mag. precessions
+    // fm_i = (g_i/hbar) * B_i, so weight the interpolated field by the
+    // per-atom spin norm sp[i][3] (sign follows the dipole torque
+    // convention t = +mufactor*(mu x E) used in fieldforce_ik_dipole)
 
     const double spfactorh = mub2mu0hbinv * scale;
-    fm_long[i][0] += spfactorh*ex;
-    fm_long[i][1] += spfactorh*ey;
-    fm_long[i][2] += spfactorh*ez;
+    fm_long[i][0] += sp[i][3]*spfactorh*ex;
+    fm_long[i][1] += sp[i][3]*spfactorh*ey;
+    fm_long[i][2] += sp[i][3]*spfactorh*ez;
   }
 }
 
@@ -650,8 +649,10 @@ void PPPMDipoleSpin::slabcorr()
   MPI_Allreduce(&spin,&spin_all,1,MPI_DOUBLE,MPI_SUM,world);
 
   // compute corrections
+  // the spin self term is E = (2pi/V) M_z^2 with M_z = sum sp_iz, which is
+  // consistent with the -4pi/V force/field acting on the spins below
 
-  const double e_slabcorr = MY_2PI*(spin_all*spin_all/12.0)/volume;
+  const double e_slabcorr = MY_2PI*(spin_all*spin_all)/volume;
   const double spscale = mub2mu0 * scale;
 
   if (eflag_global) energy += spscale * e_slabcorr;
@@ -659,7 +660,7 @@ void PPPMDipoleSpin::slabcorr()
   // per-atom energy
 
   if (eflag_atom) {
-    double efact = spscale * MY_2PI/volume/12.0;
+    double efact = spscale * MY_2PI/volume;
     for (int i = 0; i < nlocal; i++) {
       spz = sp[i][2]*sp[i][3];
       eatom[i] += efact * spz * spin_all;
@@ -667,11 +668,14 @@ void PPPMDipoleSpin::slabcorr()
   }
 
   // add on mag. force corrections
+  // fm_long is the precession vector, so use spscale2 (= mub2mu0hbinv)
+  // and weight by the per-atom spin norm sp[i][3]
 
-  double ffact = spscale * (-4.0*MY_PI/volume);
+  const double spscale2 = mub2mu0hbinv * scale;
+  double ffact = spscale2 * (-4.0*MY_PI/volume);
   double **fm_long = atom->fm_long;
   for (int i = 0; i < nlocal; i++) {
-    fm_long[i][2] += ffact * spin_all;
+    fm_long[i][2] += sp[i][3] * ffact * spin_all;
   }
 }
 
@@ -685,6 +689,11 @@ void PPPMDipoleSpin::spsum_spsq()
   const int nlocal = atom->nlocal;
 
   musum = musqsum = mu2 = 0.0;
+
+  // spin-only systems have no charge channel and qsum_qsq() is never
+  // called, but the inherited error estimates access these members
+
+  qsum = qsqsum = q2 = 0.0;
   if (atom->sp_flag) {
     double **sp = atom->sp;
     double spx, spy, spz;
@@ -705,10 +714,12 @@ void PPPMDipoleSpin::spsum_spsq()
     MPI_Allreduce(&spsum_local,&musum,1,MPI_DOUBLE,MPI_SUM,world);
     MPI_Allreduce(&spsqsum_local,&musqsum,1,MPI_DOUBLE,MPI_SUM,world);
 
-    //mu2 = musqsum * mub2mu0;
-    mu2 = musqsum;
+    // scale squared moment by the dipolar prefactor (analog of qqrd2e for
+    // charges/dipoles) so the g_ewald estimate and rms error are correct
+
+    mu2 = musqsum * mub2mu0;
   }
 
-  if (mu2 == 0 && comm->me == 0)
+  if (mu2 == 0)
     error->all(FLERR,"Using kspace solver PPPMDipoleSpin on system with no spins");
 }

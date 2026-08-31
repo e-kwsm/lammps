@@ -12,20 +12,23 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meißner (TUHH)
+   Contributing authors: Ludwig Ahrens-Iwers (TUHH), Shern Tee (UQ), Robert Meissner (TUHH)
 ------------------------------------------------------------------------- */
 
 #include "slab_dipole.h"
 
 #include "atom.h"
-#include "comm.h"
 #include "domain.h"
+#include "force.h"
+#include "kspace.h"
 #include "math_const.h"
+
+#include <cmath>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-#define SMALL 0.00001
+static constexpr double SMALL = 0.00001;
 
 /* ----------------------------------------------------------------------
    Slab-geometry correction term to dampen inter-slab interactions between
@@ -35,15 +38,16 @@ using namespace MathConst;
    extended to non-neutral systems (J. Chem. Phys. 131, 094107).
 -------------------------------------------------------------------------
 */
-SlabDipole::SlabDipole(LAMMPS *lmp) : BoundaryCorrection(lmp){};
+SlabDipole::SlabDipole(LAMMPS *lmp) : BoundaryCorrection(lmp) {};
 
-void SlabDipole::compute_corr(double qsum, double slab_volfactor, int eflag_atom, int eflag_global,
-                              double &energy, double *eatom)
+void SlabDipole::compute_corr(double qsum, int eflag_atom, int eflag_global, double &energy,
+                              double *eatom)
 {
   // compute local contribution to global dipole moment
+  double const volume = get_volume();
   double *q = atom->q;
   double **x = atom->x;
-  double zprd_slab = domain->zprd * slab_volfactor;
+  double zprd_slab = domain->zprd * force->kspace->slab_volfactor;
   int nlocal = atom->nlocal;
   double dipole = 0.0;
   for (int i = 0; i < nlocal; i++) dipole += q[i] * x[i][2];
@@ -67,7 +71,8 @@ void SlabDipole::compute_corr(double qsum, double slab_volfactor, int eflag_atom
   double const e_slabcorr = MY_2PI *
       (dipole_all * dipole_all - qsum * dipole_r2 - qsum * qsum * zprd_slab * zprd_slab / 12.0) /
       volume;
-  double const qscale = qqrd2e * scale;
+  double const scale = 1.0;
+  double const qscale = force->qqrd2e * scale;
   if (eflag_global) energy += qscale * e_slabcorr;
 
   // per-atom energy
@@ -87,7 +92,8 @@ void SlabDipole::compute_corr(double qsum, double slab_volfactor, int eflag_atom
 
 void SlabDipole::vector_corr(double *vec, int sensor_grpbit, int source_grpbit, bool invert_source)
 {
-  int const nlocal = atom->nlocal;
+  double const volume = get_volume();
+  const int nlocal = atom->nlocal;
   double **x = atom->x;
   double *q = atom->q;
   int *mask = atom->mask;
@@ -104,6 +110,7 @@ void SlabDipole::vector_corr(double *vec, int sensor_grpbit, int source_grpbit, 
 
 void SlabDipole::matrix_corr(bigint *imat, double **matrix)
 {
+  double const volume = get_volume();
   int nlocal = atom->nlocal;
   double **x = atom->x;
 
@@ -124,8 +131,8 @@ void SlabDipole::matrix_corr(bigint *imat, double **matrix)
   std::vector<int> recvcounts = gather_recvcounts(ngrouplocal);
   std::vector<int> displs = gather_displs(recvcounts);
   std::vector<double> nprd_all = std::vector<double>(ngroup);
-  MPI_Allgatherv(&nprd_local.front(), ngrouplocal, MPI_DOUBLE, &nprd_all.front(),
-                 &recvcounts.front(), &displs.front(), MPI_DOUBLE, world);
+  MPI_Allgatherv(nprd_local.data(), ngrouplocal, MPI_DOUBLE, nprd_all.data(), recvcounts.data(),
+                 displs.data(), MPI_DOUBLE, world);
 
   std::vector<bigint> jmat = gather_jmat(imat);
   const double prefac = MY_4PI / volume;
@@ -138,5 +145,4 @@ void SlabDipole::matrix_corr(bigint *imat, double **matrix)
       if (imat[i] != jmat[j]) matrix[jmat[j]][imat[i]] += aij;
     }
   }
-  // TODO add ELC corrections, needs sum over all kpoints but not (0,0)
 }

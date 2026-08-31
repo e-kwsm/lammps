@@ -21,6 +21,7 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "ewald_const.h"
 #include "force.h"
 #include "kspace.h"
 #include "memory.h"
@@ -33,18 +34,14 @@
 #include <cstring>
 
 using namespace LAMMPS_NS;
-
-#define EWALD_F   1.12837917
-#define EWALD_P   0.3275911
-#define A1        0.254829592
-#define A2       -0.284496736
-#define A3        1.421413741
-#define A4       -1.453152027
-#define A5        1.061405429
+using namespace EwaldConst;
 
 /* ---------------------------------------------------------------------- */
 
-PairLJCharmmCoulLong::PairLJCharmmCoulLong(LAMMPS *lmp) : Pair(lmp)
+PairLJCharmmCoulLong::PairLJCharmmCoulLong(LAMMPS *lmp) :
+    Pair(lmp), epsilon(nullptr), sigma(nullptr), eps14(nullptr), sigma14(nullptr), lj1(nullptr),
+    lj2(nullptr), lj3(nullptr), lj4(nullptr), offset(nullptr), lj14_1(nullptr), lj14_2(nullptr),
+    lj14_3(nullptr), lj14_4(nullptr)
 {
   respa_enable = 1;
   ewaldflag = pppmflag = 1;
@@ -154,7 +151,7 @@ void PairLJCharmmCoulLong::compute(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {
@@ -474,7 +471,7 @@ void PairLJCharmmCoulLong::compute_outer(int eflag, int vflag)
             rsq_lookup.f = rsq;
             itable = rsq_lookup.i & ncoulmask;
             itable >>= ncoulshiftbits;
-            fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+            fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
             table = ftable[itable] + fraction*dftable[itable];
             forcecoul = qtmp*q[j] * table;
             if (factor_coul < 1.0) {
@@ -672,7 +669,7 @@ void PairLJCharmmCoulLong::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -690,7 +687,7 @@ void PairLJCharmmCoulLong::init_style()
   int list_style = NeighConst::REQ_DEFAULT;
 
   if (update->whichflag == 1 && utils::strmatch(update->integrate_style, "^respa")) {
-    auto respa = dynamic_cast<Respa *>(update->integrate);
+    auto *respa = dynamic_cast<Respa *>(update->integrate);
     if (respa->level_inner >= 0) list_style = NeighConst::REQ_RESPA_INOUT;
     if (respa->level_middle >= 0) list_style = NeighConst::REQ_RESPA_ALL;
   }
@@ -734,7 +731,7 @@ void PairLJCharmmCoulLong::init_style()
       error->all(FLERR,"Pair inner cutoff < Respa interior cutoff");
   } else cut_respa = nullptr;
 
-  // insure use of KSpace long-range solver, set g_ewald
+  // ensure use of KSpace long-range solver, set g_ewald
 
   if (force->kspace == nullptr)
     error->all(FLERR,"Pair style requires a KSpace style");
@@ -925,7 +922,7 @@ double PairLJCharmmCoulLong::single(int i, int j, int itype, int jtype,
       rsq_lookup.f = rsq;
       itable = rsq_lookup.i & ncoulmask;
       itable >>= ncoulshiftbits;
-      fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+      fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
       table = ftable[itable] + fraction*dftable[itable];
       forcecoul = atom->q[i]*atom->q[j] * table;
       if (factor_coul < 1.0) {
@@ -983,6 +980,8 @@ void *PairLJCharmmCoulLong::extract(const char *str, int &dim)
   if (strcmp(str,"lj14_2") == 0) return (void *) lj14_2;
   if (strcmp(str,"lj14_3") == 0) return (void *) lj14_3;
   if (strcmp(str,"lj14_4") == 0) return (void *) lj14_4;
+  if (strcmp(str,"sigma") == 0) return (void *) sigma;
+  if (strcmp(str,"epsilon") == 0) return (void *) epsilon;
 
   dim = 0;
   if (strcmp(str,"implicit") == 0) return (void *) &implicit;

@@ -1,7 +1,7 @@
 // clang-format off
 #ifndef LMP_INTEL_AIREBO_SCALAR
-# ifdef __INTEL_COMPILER
-#  if defined(__MIC__) || defined(__AVX512F__)
+# if defined(__INTEL_COMPILER) || defined(__INTEL_LLVM_COMPILER)
+#  if defined(__AVX512F__)
 #   define LMP_INTEL_AIREBO_512
 #  elif defined(__AVX__)
 #   define LMP_INTEL_AIREBO_256
@@ -639,8 +639,10 @@ public:
   AVEC_BINOP(-, sub)
 
   VEC_INLINE static void gather_prefetch0(const IVEC_NAME &a, void * mem) {
+#ifdef __AVX512PF__
     _mm512_mask_prefetch_i32gather_ps(a.val_, BVEC_NAME::full().val_, mem,
                                       sizeof(FVEC_SCAL_T), _MM_HINT_T0);
+#endif
   }
 };
 
@@ -697,8 +699,10 @@ public:
   AVEC2_BINOP(-, sub)
 
   VEC_INLINE static void gather_prefetch0(const IVEC_NAME &a, void * mem) {
+#ifdef __AVX512PF__
     _mm512_mask_prefetch_i32gather_ps(a.val_, BVEC_NAME::full().val_, mem,
                                       sizeof(double), _MM_HINT_T0);
+#endif
   }
 };
 #endif
@@ -749,7 +753,7 @@ struct intr_types<float,double> {
 
 #include <cassert>
 #include <immintrin.h>
-#include <stdint.h> // <cstdint> requires C++-11
+#include <cstdint>
 
 #define VEC_INLINE __attribute__((always_inline))
 
@@ -1395,7 +1399,7 @@ class FVEC_NAME {
   VEC_INLINE FVEC_NAME(const FVEC_VEC_T &v) : val_(v) {}
 public:
   static const int VL = FVEC_LEN;
-# if defined(__AVX2__) || defined(__MIC__) || defined(__AVX512F__)
+# if defined(__AVX2__) || defined(__AVX512F__)
   VEC_INLINE static bool fast_compress() { return true; }
 # else
   VEC_INLINE static bool fast_compress() { return false; }

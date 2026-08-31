@@ -1,44 +1,5 @@
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 /// \file Kokkos_Pair.hpp
 /// \brief Declaration and definition of Kokkos::pair.
@@ -54,6 +15,7 @@
 #endif
 
 #include <Kokkos_Macros.hpp>
+#include <Kokkos_Swap.hpp>
 #include <utility>
 
 namespace Kokkos {
@@ -88,8 +50,7 @@ struct pair {
   ///
   /// This calls the copy constructors of T1 and T2.  It won't compile
   /// if those copy constructors are not defined and public.
-#ifdef KOKKOS_COMPILER_NVHPC  // FIXME_NVHPC bug in NVHPC regarding constexpr
-                              // constructors used in device code
+#if defined(KOKKOS_COMPILER_NVHPC) && KOKKOS_COMPILER_NVHPC < 230700
   KOKKOS_FORCEINLINE_FUNCTION
 #else
   KOKKOS_FORCEINLINE_FUNCTION constexpr
@@ -101,8 +62,7 @@ struct pair {
   /// This calls the copy constructors of T1 and T2.  It won't compile
   /// if those copy constructors are not defined and public.
   template <class U, class V>
-#ifdef KOKKOS_COMPILER_NVHPC  // FIXME_NVHPC bug in NVHPC regarding constexpr
-                              // constructors used in device code
+#if defined(KOKKOS_COMPILER_NVHPC) && KOKKOS_COMPILER_NVHPC < 230700
   KOKKOS_FORCEINLINE_FUNCTION
 #else
   KOKKOS_FORCEINLINE_FUNCTION constexpr
@@ -110,14 +70,6 @@ struct pair {
   pair(const pair<U, V>& p)
       : first(p.first), second(p.second) {
   }
-
-  /// \brief Copy constructor.
-  ///
-  /// This calls the copy constructors of T1 and T2.  It won't compile
-  /// if those copy constructors are not defined and public.
-  template <class U, class V>
-  KOKKOS_FORCEINLINE_FUNCTION constexpr pair(const volatile pair<U, V>& p)
-      : first(p.first), second(p.second) {}
 
   /// \brief Assignment operator.
   ///
@@ -128,26 +80,6 @@ struct pair {
     first  = p.first;
     second = p.second;
     return *this;
-  }
-
-  /// \brief Assignment operator, for volatile <tt>*this</tt>.
-  ///
-  /// \param p [in] Input; right-hand side of the assignment.
-  ///
-  /// This calls the assignment operators of T1 and T2.  It will not
-  /// compile if the assignment operators are not defined and public.
-  ///
-  /// This operator returns \c void instead of <tt>volatile pair<T1,
-  /// T2>& </tt>.  See Kokkos Issue #177 for the explanation.  In
-  /// practice, this means that you should not chain assignments with
-  /// volatile lvalues.
-  template <class U, class V>
-  KOKKOS_FORCEINLINE_FUNCTION void operator=(
-      const volatile pair<U, V>& p) volatile {
-    first  = p.first;
-    second = p.second;
-    // We deliberately do not return anything here.  See explanation
-    // in public documentation above.
   }
 
   // from std::pair<U,V>
@@ -435,79 +367,7 @@ KOKKOS_FORCEINLINE_FUNCTION pair<T1&, T2&> tie(T1& x, T2& y) {
   return (pair<T1&, T2&>(x, y));
 }
 
-//
-// Specialization of Kokkos::pair for a \c void second argument.  This
-// is not actually a "pair"; it only contains one element, the first.
-//
-template <class T1>
-struct pair<T1, void> {
-  using first_type  = T1;
-  using second_type = void;
-
-  first_type first;
-  enum { second = 0 };
-
-  KOKKOS_DEFAULTED_FUNCTION constexpr pair() = default;
-
-  KOKKOS_FORCEINLINE_FUNCTION constexpr pair(const first_type& f) : first(f) {}
-
-  KOKKOS_FORCEINLINE_FUNCTION constexpr pair(const first_type& f, int)
-      : first(f) {}
-
-  template <class U>
-  KOKKOS_FORCEINLINE_FUNCTION constexpr pair(const pair<U, void>& p)
-      : first(p.first) {}
-
-  template <class U>
-  KOKKOS_FORCEINLINE_FUNCTION pair<T1, void>& operator=(
-      const pair<U, void>& p) {
-    first = p.first;
-    return *this;
-  }
-};
-
-//
-// Specialization of relational operators for Kokkos::pair<T1,void>.
-//
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator==(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return lhs.first == rhs.first;
-}
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator!=(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return !(lhs == rhs);
-}
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator<(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return lhs.first < rhs.first;
-}
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator<=(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return !(rhs < lhs);
-}
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator>(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return rhs < lhs;
-}
-
-template <class T1>
-KOKKOS_FORCEINLINE_FUNCTION constexpr bool operator>=(
-    const pair<T1, void>& lhs, const pair<T1, void>& rhs) {
-  return !(lhs < rhs);
-}
-
 namespace Impl {
-
 template <class T>
 struct is_pair_like : std::false_type {};
 template <class T, class U>

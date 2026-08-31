@@ -20,11 +20,11 @@ ComputeStyle(msd/chunk,ComputeMSDChunk);
 #ifndef LMP_COMPUTE_MSD_CHUNK_H
 #define LMP_COMPUTE_MSD_CHUNK_H
 
-#include "compute.h"
+#include "compute_chunk.h"
 
 namespace LAMMPS_NS {
 
-class ComputeMSDChunk : public Compute {
+class ComputeMSDChunk : public ComputeChunk {
  public:
   ComputeMSDChunk(class LAMMPS *, int, char **);
   ~ComputeMSDChunk() override;
@@ -32,27 +32,20 @@ class ComputeMSDChunk : public Compute {
   void setup() override;
   void compute_array() override;
 
-  void lock_enable() override;
-  void lock_disable() override;
-  int lock_length() override;
-  void lock(class Fix *, bigint, bigint) override;
-  void unlock(class Fix *) override;
-
   double memory_usage() override;
 
  private:
-  int nchunk;
-  char *idchunk;
-  class ComputeChunkAtom *cchunk;
+  int msdnchunk;
+
   char *id_fix;
   class FixStoreGlobal *fix;
-  int firstflag;
 
   double *massproc, *masstotal;
   double **com, **comall;
   double **msd;
 
-  void allocate();
+ protected:
+  void allocate() override;
 };
 }    // namespace LAMMPS_NS
 #endif

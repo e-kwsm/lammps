@@ -15,7 +15,8 @@
 #include "fix_nve_sphere_kokkos.h"
 #include "atom_masks.h"
 #include "atom_kokkos.h"
-#include "error.h"
+
+#include <cmath>
 
 using namespace LAMMPS_NS;
 
@@ -28,6 +29,7 @@ FixNVESphereKokkos<DeviceType>::FixNVESphereKokkos(LAMMPS *lmp, int narg, char *
   FixNVESphere(lmp, narg, arg)
 {
   kokkosable = 1;
+  fuse_integrate_flag = 1;
   atomKK = (AtomKokkos *)atom;
   execution_space = ExecutionSpaceFromDevice<DeviceType>::space;
 
@@ -50,10 +52,6 @@ template<class DeviceType>
 void FixNVESphereKokkos<DeviceType>::init()
 {
   FixNVESphere::init();
-
-  if (extra == DIPOLE) {
-    error->all(FLERR,"Fix nve/sphere/kk doesn't yet support dipole");
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -61,7 +59,10 @@ void FixNVESphereKokkos<DeviceType>::init()
 template<class DeviceType>
 void FixNVESphereKokkos<DeviceType>::initial_integrate(int /*vflag*/)
 {
-  atomKK->sync(execution_space, X_MASK | V_MASK | OMEGA_MASK| F_MASK | TORQUE_MASK | RMASS_MASK | RADIUS_MASK | MASK_MASK);
+  if (extra == DIPOLE)
+    atomKK->sync(execution_space, X_MASK | V_MASK | OMEGA_MASK| F_MASK | TORQUE_MASK | RMASS_MASK | RADIUS_MASK | MASK_MASK | MU_MASK);
+  else
+    atomKK->sync(execution_space, X_MASK | V_MASK | OMEGA_MASK| F_MASK | TORQUE_MASK | RMASS_MASK | RADIUS_MASK | MASK_MASK);
 
   x = atomKK->k_x.view<DeviceType>();
   v = atomKK->k_v.view<DeviceType>();
@@ -71,6 +72,7 @@ void FixNVESphereKokkos<DeviceType>::initial_integrate(int /*vflag*/)
   mask = atomKK->k_mask.view<DeviceType>();
   rmass = atomKK->k_rmass.view<DeviceType>();
   radius = atomKK->k_radius.view<DeviceType>();
+  mu = atomKK->k_mu.view<DeviceType>();
 
   int nlocal = atom->nlocal;
   if (igroup == atom->firstgroup) nlocal = atom->nfirst;
@@ -78,30 +80,48 @@ void FixNVESphereKokkos<DeviceType>::initial_integrate(int /*vflag*/)
   FixNVESphereKokkosInitialIntegrateFunctor<DeviceType> f(this);
   Kokkos::parallel_for(nlocal,f);
 
-  atomKK->modified(execution_space,  X_MASK | V_MASK | OMEGA_MASK);
+  if (extra == DIPOLE)
+    atomKK->modified(execution_space,  X_MASK | V_MASK | OMEGA_MASK | MU_MASK);
+  else
+    atomKK->modified(execution_space,  X_MASK | V_MASK | OMEGA_MASK);
 }
 
 /* ---------------------------------------------------------------------- */
 
 template <class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVESphereKokkos<DeviceType>::initial_integrate_item(const int i) const
 {
-  const double dtfrotate = dtf / inertia;
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
+  const KK_FLOAT inertia_kk = static_cast<KK_FLOAT>(inertia);
+  const KK_FLOAT dtfrotate = dtf_kk / inertia_kk;
 
   if (mask(i) & groupbit) {
-    const double dtfm = dtf / rmass(i);
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
-    x(i,0) += dtv * v(i,0);
-    x(i,1) += dtv * v(i,1);
-    x(i,2) += dtv * v(i,2);
+    const KK_FLOAT dtfm = dtf_kk / rmass(i);
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
 
-    const double dtirotate = dtfrotate / (radius(i)*radius(i)*rmass(i));
-    omega(i,0) += dtirotate * torque(i,0);
-    omega(i,1) += dtirotate * torque(i,1);
-    omega(i,2) += dtirotate * torque(i,2);
+    const KK_FLOAT dtirotate = dtfrotate / (radius(i)*radius(i)*rmass(i));
+    omega(i,0) += dtirotate * static_cast<KK_FLOAT>(torque(i,0));
+    omega(i,1) += dtirotate * static_cast<KK_FLOAT>(torque(i,1));
+    omega(i,2) += dtirotate * static_cast<KK_FLOAT>(torque(i,2));
+
+    if (extra == DIPOLE) {
+      const KK_FLOAT g0 = mu(i,0) + dtv_kk * (omega(i,1) * mu(i,2) - omega(i,2) * mu(i,1));
+      const KK_FLOAT g1 = mu(i,1) + dtv_kk * (omega(i,2) * mu(i,0) - omega(i,0) * mu(i,2));
+      const KK_FLOAT g2 = mu(i,2) + dtv_kk * (omega(i,0) * mu(i,1) - omega(i,1) * mu(i,0));
+      const KK_FLOAT msq = g0*g0 + g1*g1 + g2*g2;
+      const KK_FLOAT scale = mu(i,3)/Kokkos::sqrt(msq);
+      mu(i,0) = g0*scale;
+      mu(i,1) = g1*scale;
+      mu(i,2) = g2*scale;
+    }
   }
 }
 
@@ -132,21 +152,95 @@ void FixNVESphereKokkos<DeviceType>::final_integrate()
 /* ---------------------------------------------------------------------- */
 
 template <class DeviceType>
+// NOLINTNEXTLINE
 KOKKOS_INLINE_FUNCTION
 void FixNVESphereKokkos<DeviceType>::final_integrate_item(const int i) const
 {
-  const double dtfrotate = dtf / inertia;
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT inertia_kk = static_cast<KK_FLOAT>(inertia);
+  const KK_FLOAT dtfrotate = dtf_kk / inertia_kk;
 
   if (mask(i) & groupbit) {
-    const double dtfm = dtf / rmass(i);
-    v(i,0) += dtfm * f(i,0);
-    v(i,1) += dtfm * f(i,1);
-    v(i,2) += dtfm * f(i,2);
+    const KK_FLOAT dtfm = dtf_kk / rmass(i);
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
 
-    const double dtirotate = dtfrotate / (radius(i)*radius(i)*rmass(i));
-    omega(i,0) += dtirotate * torque(i,0);
-    omega(i,1) += dtirotate * torque(i,1);
-    omega(i,2) += dtirotate * torque(i,2);
+    const KK_FLOAT dtirotate = dtfrotate / (radius(i)*radius(i)*rmass(i));
+    omega(i,0) += dtirotate * static_cast<KK_FLOAT>(torque(i,0));
+    omega(i,1) += dtirotate * static_cast<KK_FLOAT>(torque(i,1));
+    omega(i,2) += dtirotate * static_cast<KK_FLOAT>(torque(i,2));
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
+template<class DeviceType>
+void FixNVESphereKokkos<DeviceType>::fused_integrate(int /*vflag*/)
+{
+  if (extra == DIPOLE)
+    atomKK->sync(execution_space, X_MASK | V_MASK | OMEGA_MASK| F_MASK | TORQUE_MASK | RMASS_MASK | RADIUS_MASK | MASK_MASK | MU_MASK);
+  else
+    atomKK->sync(execution_space, X_MASK | V_MASK | OMEGA_MASK| F_MASK | TORQUE_MASK | RMASS_MASK | RADIUS_MASK | MASK_MASK);
+
+  x = atomKK->k_x.view<DeviceType>();
+  v = atomKK->k_v.view<DeviceType>();
+  omega = atomKK->k_omega.view<DeviceType>();
+  f = atomKK->k_f.view<DeviceType>();
+  torque = atomKK->k_torque.view<DeviceType>();
+  mask = atomKK->k_mask.view<DeviceType>();
+  rmass = atomKK->k_rmass.view<DeviceType>();
+  radius = atomKK->k_radius.view<DeviceType>();
+  mu = atomKK->k_mu.view<DeviceType>();
+
+  int nlocal = atom->nlocal;
+  if (igroup == atom->firstgroup) nlocal = atom->nfirst;
+
+  FixNVESphereKokkosFusedIntegrateFunctor<DeviceType> f(this);
+  Kokkos::parallel_for(nlocal,f);
+
+  if (extra == DIPOLE)
+    atomKK->modified(execution_space,  X_MASK | V_MASK | OMEGA_MASK | MU_MASK);
+  else
+    atomKK->modified(execution_space,  X_MASK | V_MASK | OMEGA_MASK);
+}
+
+/* ---------------------------------------------------------------------- */
+
+template <class DeviceType>
+// NOLINTNEXTLINE
+KOKKOS_INLINE_FUNCTION
+void FixNVESphereKokkos<DeviceType>::fused_integrate_item(const int i) const
+{
+  const KK_FLOAT dtf_kk = static_cast<KK_FLOAT>(dtf);
+  const KK_FLOAT dtv_kk = static_cast<KK_FLOAT>(dtv);
+  const KK_FLOAT inertia_kk = static_cast<KK_FLOAT>(inertia);
+  const KK_FLOAT dtfrotate = dtf_kk / inertia_kk;
+
+  if (mask(i) & groupbit) {
+    const KK_FLOAT dtfm = static_cast<KK_FLOAT>(2.0) * dtf_kk / rmass(i);
+    v(i,0) += dtfm * static_cast<KK_FLOAT>(f(i,0));
+    v(i,1) += dtfm * static_cast<KK_FLOAT>(f(i,1));
+    v(i,2) += dtfm * static_cast<KK_FLOAT>(f(i,2));
+    x(i,0) += dtv_kk * v(i,0);
+    x(i,1) += dtv_kk * v(i,1);
+    x(i,2) += dtv_kk * v(i,2);
+
+    const KK_FLOAT dtirotate = static_cast<KK_FLOAT>(2.0) * dtfrotate / (radius(i)*radius(i)*rmass(i));
+    omega(i,0) += dtirotate * static_cast<KK_FLOAT>(torque(i,0));
+    omega(i,1) += dtirotate * static_cast<KK_FLOAT>(torque(i,1));
+    omega(i,2) += dtirotate * static_cast<KK_FLOAT>(torque(i,2));
+
+    if (extra == DIPOLE) {
+      const KK_FLOAT g0 = mu(i,0) + dtv_kk * (omega(i,1) * mu(i,2) - omega(i,2) * mu(i,1));
+      const KK_FLOAT g1 = mu(i,1) + dtv_kk * (omega(i,2) * mu(i,0) - omega(i,0) * mu(i,2));
+      const KK_FLOAT g2 = mu(i,2) + dtv_kk * (omega(i,0) * mu(i,1) - omega(i,1) * mu(i,0));
+      const KK_FLOAT msq = g0*g0 + g1*g1 + g2*g2;
+      const KK_FLOAT scale = mu(i,3)/Kokkos::sqrt(msq);
+      mu(i,0) = g0*scale;
+      mu(i,1) = g1*scale;
+      mu(i,2) = g2*scale;
+    }
   }
 }
 

@@ -10,7 +10,7 @@ fix wall/region/ees command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID style args
 
@@ -71,7 +71,7 @@ energy of wall-particle interactions E is given by:
    \sigma_{n}^5 \left(r^2-\sigma_{n}^2\right)} \right]\qquad \sigma_n
    < r < r_c
 
-Introduced by Babadi and Ejtehadi in :ref:`(Babadi)
+Introduced by Babadi and Ejtehadi in :ref:`(Babadi2)
 <BabadiEjtehadi>`. Here, *r* is the distance from the particle to the
 wall at position *coord*, and Rc is the *cutoff* distance at which
 the particle and wall no longer interact. Also, :math:`\sigma_n` is
@@ -104,7 +104,7 @@ respectively, in units of 1/volume.
 
 .. note::
 
-   You must insure that r is always bigger than :math:`\sigma_n` for
+   You must ensure that r is always bigger than :math:`\sigma_n` for
    all particles in the group, or LAMMPS will generate an error.  This
    means you cannot start your simulation with particles touching the wall
    position *coord* (:math:`r = \sigma_n`) or with particles penetrating
@@ -157,6 +157,41 @@ minimization, invoked by the :doc:`minimize <minimize>` command.
    minimized), you MUST enable the :doc:`fix_modify <fix_modify>` *energy*
    option for this fix.
 
+-----------------
+
+Dump image info
+"""""""""""""""
+
+.. versionadded:: 11Feb2026
+
+Fix *wall/ees* fix supports the *fix* keyword of :doc:`dump image
+<dump_image>`.  The fix will pass geometry information about the walls
+to *dump image* so that the walls will be included in the rendered
+image.  Please note, that for :doc:`2d systems <dimension>`, a wall
+rendered as a plane would be invisible and it is thus rendered as a
+cylinder.  Fix *wall/ees/region* does **not** support graphics info, but
+the region can be visualized with the *region* keyword of :doc:`dump
+image <dump_image>`.
+
+The color of the wall is by default that of the first atom type when
+using color styles "type" or "element".  With color style "const" the
+default value of "white" can be changed using :doc:`dump_modify fcolor
+<dump_image>`.  The transparency is by default fully opaque and can be
+changed with *dump\_modify ftrans*\ .
+
+For 2d systems, the *fflag1* setting determines whether the cylinder
+representing the wall is capped with a sphere at the ends: 0 means no caps, 1
+means the lower end is capped, 2 means the upper end is capped, and 3
+means both ends are capped.  The *fflag2* setting allows to adjust the
+radius of the rendered cylinder.  It should be set to a value > 0 or the
+cylinder will not be visible since the diameter is set internally to
+zero due to lack of a suitable heuristic for deriving a meaningful
+diameter for all types of walls and unit settings.
+
+For 3d systems, both *fflag1* and *fflag2* are ignored.
+
+------------
+
 Restrictions
 """"""""""""
 
@@ -182,4 +217,4 @@ none
 
 .. _BabadiEjtehadi:
 
-**(Babadi)** Babadi and Ejtehadi, EPL, 77 (2007) 23002.
+**(Babadi2)** Babadi and Ejtehadi, EPL, 77 (2007) 23002.

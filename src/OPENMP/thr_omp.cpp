@@ -1,4 +1,3 @@
-// clang-format off
 /* -------------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    https://www.lammps.org/, Sandia National Laboratories
@@ -17,42 +16,45 @@
    OpenMP based threading support for LAMMPS
 ------------------------------------------------------------------------- */
 
-#include <cstring>
-
-#include "atom.h"
-#include "comm.h"
-#include "error.h"
-#include "force.h"
-#include "modify.h"
-#include "neighbor.h"
-
-
 #include "thr_omp.h"
 
-#include "pair.h"
-#include "bond.h"
 #include "angle.h"
-#include "dihedral.h"
-#include "improper.h"
+#include "atom.h"
+#include "bond.h"
+#include "comm.h"
 #include "compute.h"
-
+#include "dihedral.h"
+#include "error.h"
+#include "force.h"
+#include "improper.h"
 #include "math_const.h"
+#include "modify.h"
+#include "neighbor.h"
+#include "pair.h"
+
+#include <cstring>
+
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
 
 using namespace LAMMPS_NS;
-using namespace MathConst;
+using MathConst::THIRD;
 
 /* ---------------------------------------------------------------------- */
 
-ThrOMP::ThrOMP(LAMMPS *ptr, int style)
-  : lmp(ptr), fix(nullptr), thr_style(style), thr_error(0)
+ThrOMP::ThrOMP(LAMMPS *ptr, int style) : lmp(ptr), fix(nullptr), thr_style(style), thr_error(0)
 {
   // register fix omp with this class
-  int ifix = lmp->modify->find_fix("package_omp");
-  if (ifix < 0)
-    lmp->error->all(FLERR,"The 'package omp' command is required for /omp styles");
-  fix = static_cast<FixOMP *>(lmp->modify->fix[ifix]);
+  fix = static_cast<FixOMP *>(lmp->modify->get_fix_by_id("package_omp"));
+  if (!fix) lmp->error->all(FLERR, Error::NOLASTLINE,
+                            "The 'package omp' command is required for /omp styles");
+#if defined(_OPENMP)
+  omp_set_num_threads(lmp->comm->nthreads);
+#endif
 }
 
+// clang-format off
 /* ----------------------------------------------------------------------
    Hook up per thread per atom arrays into the tally infrastructure
    ---------------------------------------------------------------------- */
@@ -112,7 +114,7 @@ void ThrOMP::ev_setup_thr(int eflag, int vflag, int nall, double *eatom,
       if (nall > 0)
         memset(&(thr->vatom_angle[0][0]),0,nall*6*sizeof(double));
     }
-    if (vflag & VIRIAL_CENTROID) {
+    if ((vflag & VIRIAL_CENTROID) && cvatom) {
       thr->cvatom_angle = cvatom + tid*nall;
       if (nall > 0)
         memset(&(thr->cvatom_angle[0][0]),0,nall*9*sizeof(double));
@@ -130,7 +132,7 @@ void ThrOMP::ev_setup_thr(int eflag, int vflag, int nall, double *eatom,
       if (nall > 0)
         memset(&(thr->vatom_dihed[0][0]),0,nall*6*sizeof(double));
     }
-    if (vflag & VIRIAL_CENTROID) {
+    if ((vflag & VIRIAL_CENTROID) && cvatom) {
       thr->cvatom_dihed = cvatom + tid*nall;
       if (nall > 0)
         memset(&(thr->cvatom_dihed[0][0]),0,nall*9*sizeof(double));
@@ -148,13 +150,12 @@ void ThrOMP::ev_setup_thr(int eflag, int vflag, int nall, double *eatom,
       if (nall > 0)
         memset(&(thr->vatom_imprp[0][0]),0,nall*6*sizeof(double));
     }
-    if (vflag & VIRIAL_CENTROID) {
+    if ((vflag & VIRIAL_CENTROID) && cvatom) {
       thr->cvatom_imprp = cvatom + tid*nall;
       if (nall > 0)
         memset(&(thr->cvatom_imprp[0][0]),0,nall*9*sizeof(double));
     }
   }
-
   // nothing to do for THR_KSPACE
 }
 
@@ -210,7 +211,7 @@ void ThrOMP::reduce_thr(void *style, const int eflag, const int vflag,
     }
 
     if (evflag) {
-      auto  const pair = (Pair *)style;
+      auto *const   pair = (Pair *)style;
 
 #if defined(_OPENMP)
 #pragma omp critical
@@ -308,6 +309,56 @@ void ThrOMP::reduce_thr(void *style, const int eflag, const int vflag,
         data_reduce_thr(&(angle->cvatom[0][0]), nall, nthreads, 9, tid);
       }
 
+    }
+    break;
+
+  case THR_ANGLE|THR_CHARMM: // special case for angle styles with a 1-3 pairwise term
+
+    if (evflag) {
+      Angle * const angle = lmp->force->angle;
+      Pair * const pair = lmp->force->pair;
+#if defined(_OPENMP)
+#pragma omp critical
+#endif
+      {
+        if (eflag & ENERGY_GLOBAL) {
+          angle->energy += thr->eng_angle;
+          pair->eng_vdwl += thr->eng_vdwl;
+          pair->eng_coul += thr->eng_coul;
+          thr->eng_angle = 0.0;
+          thr->eng_vdwl = 0.0;
+          thr->eng_coul = 0.0;
+        }
+
+        if (vflag & (VIRIAL_PAIR | VIRIAL_FDOTR)) {
+          for (int i=0; i < 6; ++i) {
+            angle->virial[i] += thr->virial_angle[i];
+            pair->virial[i] += thr->virial_pair[i];
+            thr->virial_angle[i] = 0.0;
+            thr->virial_pair[i] = 0.0;
+          }
+        }
+      }
+
+      if (eflag & ENERGY_ATOM) {
+        data_reduce_thr(&(angle->eatom[0]), nall, nthreads, 1, tid);
+        data_reduce_thr(&(pair->eatom[0]), nall, nthreads, 1, tid);
+      }
+      if (vflag & VIRIAL_ATOM) {
+        data_reduce_thr(&(angle->vatom[0][0]), nall, nthreads, 6, tid);
+      }
+      if (vflag & VIRIAL_CENTROID) {
+        data_reduce_thr(&(angle->cvatom[0][0]), nall, nthreads, 9, tid);
+      }
+      // per-atom virial and per-atom centroid virial are the same for two-body
+      // many-body pair styles not yet implemented
+      if (vflag & (VIRIAL_ATOM | VIRIAL_CENTROID)) {
+        data_reduce_thr(&(pair->vatom[0][0]), nall, nthreads, 6, tid);
+      }
+      // check cvatom_pair, because can't access centroidstressflag
+      if ((vflag & VIRIAL_CENTROID) && thr->cvatom_pair) {
+        data_reduce_thr(&(pair->cvatom[0][0]), nall, nthreads, 9, tid);
+      }
     }
     break;
 
@@ -1312,7 +1363,6 @@ void ThrOMP::ev_tally_thr(Dihedral * const dihed, const int i1, const int i2,
       if (i4 < nlocal) v_tally9(thr->cvatom_dihed[i4],v4);
     }
   }
-
 }
 
 /* ----------------------------------------------------------------------

@@ -13,11 +13,9 @@
 
 #include "../testing/core.h"
 #include "atom.h"
-#include "input.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-#include <cmath>
 #include <cstring>
 #include <vector>
 
@@ -61,10 +59,10 @@ protected:
 
 TEST_F(ImageFlagsTest, change_box)
 {
-    auto image = lmp->atom->image;
-    int imx    = (image[0] & IMGMASK) - IMGMAX;
-    int imy    = (image[0] >> IMGBITS & IMGMASK) - IMGMAX;
-    int imz    = (image[0] >> IMG2BITS) - IMGMAX;
+    auto *image = lmp->atom->image;
+    int imx     = (image[0] & IMGMASK) - IMGMAX;
+    int imy     = (image[0] >> IMGBITS & IMGMASK) - IMGMAX;
+    int imz     = (image[0] >> IMG2BITS) - IMGMAX;
 
     ASSERT_EQ(imx, -1);
     ASSERT_EQ(imy, 2);
@@ -153,10 +151,10 @@ TEST_F(ImageFlagsTest, read_data)
     command("read_data test_image_flags.data");
     END_HIDE_OUTPUT();
 
-    auto image = lmp->atom->image;
-    int imx    = (image[0] & IMGMASK) - IMGMAX;
-    int imy    = (image[0] >> IMGBITS & IMGMASK) - IMGMAX;
-    int imz    = (image[0] >> IMG2BITS) - IMGMAX;
+    auto *image = lmp->atom->image;
+    int imx     = (image[0] & IMGMASK) - IMGMAX;
+    int imy     = (image[0] >> IMGBITS & IMGMASK) - IMGMAX;
+    int imz     = (image[0] >> IMG2BITS) - IMGMAX;
 
     ASSERT_EQ(imx, -1);
     ASSERT_EQ(imy, 2);

@@ -45,19 +45,19 @@ int SWT::bytes_per_atom(const int max_nbors) const {
 template <class numtyp, class acctyp>
 int SWT::init(const int ntypes, const int nlocal, const int nall,
               const int max_nbors, const double cell_size,
-              const double gpu_split, FILE *_screen, double **ncutsq,
+                           FILE *_screen, double **ncutsq,
               double **ncut, double **sigma, double **powerp, double **powerq,
               double **sigma_gamma, double **c1, double **c2, double **c3,
               double **c4, double **c5, double **c6, double ***lambda_epsilon,
               double ***costheta, const int *map, int ***e2param) {
   _lj_types=ntypes;
 
-  int oldparam=-1;
   int onetype=-1;
   int onetype3=0;
   int spq=1;
-  int mtypes=0;
   #ifdef USE_OPENCL
+  int oldparam=-1;
+  int mtypes=0;
   for (int ii=1; ii<ntypes; ii++) {
     int i=map[ii];
     if (i<0) continue;
@@ -83,8 +83,8 @@ int SWT::init(const int ntypes, const int nlocal, const int nall,
   #endif
 
   int success;
-  success=this->init_three(nlocal,nall,max_nbors,0,cell_size,gpu_split,
-                           _screen,sw,"k_sw","k_sw_three_center",
+  success=this->init_three(nlocal,nall,max_nbors,0,cell_size,
+                            _screen,sw,"k_sw","k_sw_three_center",
                            "k_sw_three_end","k_sw_short_nbor",onetype,
                            onetype3,spq);
   if (success!=0)
@@ -150,7 +150,7 @@ double SWT::host_memory_usage() const {
 // ---------------------------------------------------------------------------
 template <class numtyp, class acctyp>
 int SWT::loop(const int eflag, const int vflag, const int evatom,
-              bool &success) {
+              bool & /*success*/) {
   const int nbor_pitch=this->nbor->nbor_pitch();
 
   // build the short neighbor list

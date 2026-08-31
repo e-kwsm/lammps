@@ -27,41 +27,64 @@ class KokkosLMP : protected Pointers {
   int neighflag;
   int neighflag_qeq;
   int neighflag_qeq_set;
-  int exchange_comm_classic;
-  int forward_comm_classic;
-  int forward_pair_comm_classic;
-  int reverse_pair_comm_classic;
-  int forward_fix_comm_classic;
-  int reverse_comm_classic;
+  int exchange_comm_legacy;
+  int forward_comm_legacy;
+  int reverse_comm_legacy;
+  int forward_pair_comm_legacy;
+  int reverse_pair_comm_legacy;
+  int forward_fix_comm_legacy;
+  int reverse_fix_comm_legacy;
+  int forward_compute_comm_legacy;
+  int sort_legacy;
+  int atom_map_legacy;
   int exchange_comm_on_host;
   int forward_comm_on_host;
   int reverse_comm_on_host;
   int exchange_comm_changed;
   int forward_comm_changed;
+  int reverse_comm_changed;
   int forward_pair_comm_changed;
   int reverse_pair_comm_changed;
   int forward_fix_comm_changed;
-  int reverse_comm_changed;
+  int reverse_fix_comm_changed;
+  int forward_compute_comm_changed;
+  int sort_changed;
+  int atom_map_changed;
   int nthreads,ngpus;
-  int numa;
+  int kk_fp32;
   int auto_sync;
   int gpu_aware_flag;
   int neigh_thread;
   int neigh_thread_set;
   int neigh_transpose;
   int newtonflag;
+  int allow_overlap;
   double binsize;
+  int threads_per_atom;
+  int threads_per_atom_set;
+  int pair_team_size;
+  int pair_team_size_set;
+  int nbin_atoms_per_bin;
+  int nbin_atoms_per_bin_set;
+  int nbor_chunk_size;
+  int nbor_chunk_size_set;
+  int bond_chunk_size;
+  int bond_chunk_size_set;
+  int autotuning;
+  int perf_nsamples;
+  int perf_mode;
+  double perf_rel_tol;
 
   static int is_finalized;
-  static Kokkos::InitArguments args;
   static int init_ngpus;
 
   KokkosLMP(class LAMMPS *, int, char **);
 
-  static void initialize(Kokkos::InitArguments, Error *);
+  static void initialize(const Kokkos::InitializationSettings&, Error *);
   static void finalize();
   void accelerator(int, char **);
-  int neigh_count(int);
+  void newton_check();
+  bigint neigh_count(int);
 
   template<class DeviceType>
   int need_dup(int qeq_flag = 0)
@@ -71,7 +94,7 @@ class KokkosLMP : protected Pointers {
     if (qeq_flag) neighflag = this->neighflag_qeq;
 
     if (neighflag == HALFTHREAD)
-      value = std::is_same<typename NeedDup<HALFTHREAD,DeviceType>::value,Kokkos::Experimental::ScatterDuplicated>::value;
+      value = std::is_same_v<NeedDup_v<HALFTHREAD,DeviceType>,Kokkos::Experimental::ScatterDuplicated>;
 
     return value;
   }

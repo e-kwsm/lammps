@@ -22,8 +22,8 @@ class Timer : protected Pointers {
  public:
   enum ttype {
     RESET = -2,
-    START = -1,
-    TOTAL = 0,
+    START,
+    TOTAL,
     PAIR,
     BOND,
     KSPACE,
@@ -41,7 +41,7 @@ class Timer : protected Pointers {
     REPOUT,
     NUM_TIMER
   };
-  enum tlevel { OFF = 0, LOOP, NORMAL, FULL };
+  enum tlevel { OFF = 0, LOOP, NORMAL, FULL, NUMLVL };
 
   Timer(class LAMMPS *);
 
@@ -59,19 +59,20 @@ class Timer : protected Pointers {
 
   // accessor methods for supported level of detail
 
-  bool has_loop() const { return (_level >= LOOP); }
-  bool has_normal() const { return (_level >= NORMAL); }
-  bool has_full() const { return (_level >= FULL); }
-  bool has_sync() const { return (_sync != OFF); }
+  [[nodiscard]] bool has_loop() const { return (_level >= LOOP); }
+  [[nodiscard]] bool has_normal() const { return (_level >= NORMAL); }
+  [[nodiscard]] bool has_full() const { return (_level >= FULL); }
+  [[nodiscard]] bool has_sync() const { return (_sync != OFF); }
+  [[nodiscard]] bool has_timeout() const { return (_timeout >= 0.0); }
 
   // flag if wallclock time is expired
-  bool is_timeout() const { return (_timeout == 0.0); }
+  [[nodiscard]] bool is_timeout() const { return (_timeout == 0.0); }
 
-  double elapsed(enum ttype);
-  double cpu(enum ttype);
+  [[nodiscard]] double elapsed(enum ttype) const;
+  [[nodiscard]] double cpu(enum ttype) const;
 
-  double get_cpu(enum ttype which) const { return cpu_array[which]; };
-  double get_wall(enum ttype which) const { return wall_array[which]; };
+  [[nodiscard]] double get_cpu(enum ttype which) const { return cpu_array[which]; };
+  [[nodiscard]] double get_wall(enum ttype which) const { return wall_array[which]; };
 
   void set_wall(enum ttype, double);
 
@@ -92,7 +93,7 @@ class Timer : protected Pointers {
 
   // check for timeout. inline wrapper around internal
   // function to reduce overhead in case there is no check.
-  bool check_timeout(int step)
+  [[nodiscard]] bool check_timeout(int step)
   {
     if (_timeout == 0.0) return true;
     if (_nextcheck != step)
@@ -109,12 +110,12 @@ class Timer : protected Pointers {
   double previous_cpu;
   double previous_wall;
   double timeout_start;
-  int _level;        // level of detail: off=0,loop=1,normal=2,full=3
-  int _sync;         // if nonzero, synchronize tasks before setting the timer
-  int _timeout;      // max allowed wall time in seconds. infinity if negative
-  int _s_timeout;    // copy of timeout for restoring after a forced timeout
-  int _checkfreq;    // frequency of timeout checking
-  int _nextcheck;    // loop number of next timeout check
+  double _timeout;      // max allowed wall time in seconds. infinity if negative
+  double _s_timeout;    // copy of timeout for restoring after a forced timeout
+  int _level;           // level of detail: off=0,loop=1,normal=2,full=3
+  int _sync;            // if nonzero, synchronize tasks before setting the timer
+  int _checkfreq;       // frequency of timeout checking
+  int _nextcheck;       // loop number of next timeout check
 
   // update one specific timer array
   void _stamp(enum ttype);

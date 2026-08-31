@@ -20,16 +20,17 @@ PairStyle(ilp/tmd,PairILPTMD);
 #ifndef LMP_PAIR_ILP_TMD_H
 #define LMP_PAIR_ILP_TMD_H
 
-#include "pair_ilp_graphene_hbn.h"
+#include "pair_ilp_graphene_hbn.h"    // IWYU pragma: export
 
 namespace LAMMPS_NS {
 
 class PairILPTMD : virtual public PairILPGrapheneHBN {
  public:
   PairILPTMD(class LAMMPS *);
+  void settings(int, char **) override;
+  double memory_usage() override;
 
  protected:
-  void settings(int, char **) override;
   void ILP_neigh() override;
   void calc_normal() override;
   void calc_FRep(int, int) override;

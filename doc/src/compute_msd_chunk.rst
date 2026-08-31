@@ -74,7 +74,7 @@ compute command was first invoked.
    This compute stores the original position (of the
    center-of-mass) of each chunk.  When a displacement is calculated on a
    later timestep, it is assumed that the same atoms are assigned to the
-   same chunk ID.  However LAMMPS has no simple way to insure this is the
+   same chunk ID.  However LAMMPS has no simple way to ensure this is the
    case, though you can use the *ids once* option when specifying the
    :doc:`compute chunk/atom <compute_chunk_atom>` command.  Note that if
    this is not the case, the MSD calculation does not have a sensible
@@ -126,12 +126,12 @@ distance\ :math:`^2` :doc:`units <units>`.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""
 
-:doc:`compute msd <compute_msd>`
+:doc:`compute msd <compute_msd>`, :doc:`compute vacf/chunk <compute_vacf_chunk>`
 
 Default
 """""""

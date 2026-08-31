@@ -26,7 +26,6 @@
 #include "mliap_model_python_couple.h"
 #include "pair_mliap.h"
 #include "python_compat.h"
-#include "utils.h"
 
 #include <Python.h>
 
@@ -34,10 +33,14 @@ using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-MLIAPModelPython::MLIAPModelPython(LAMMPS *lmp, char *coefffilename) :
+MLIAPModelPython::MLIAPModelPython(LAMMPS *lmp, char *coefffilename, bool is_child) :
     MLIAPModel(lmp, coefffilename)
 {
   model_loaded = 0;
+  nonlinearflag = 1;
+
+  if (is_child)
+    return;
   python->init();
   PyGILState_STATE gstate = PyGILState_Ensure();
 
@@ -59,25 +62,26 @@ MLIAPModelPython::MLIAPModelPython(LAMMPS *lmp, char *coefffilename) :
   // Recipe from lammps/src/pair_python.cpp :
   // add current directory to PYTHONPATH
   PyObject *py_path = PySys_GetObject((char *) "path");
-  PyList_Append(py_path, PY_STRING_FROM_STRING("."));
+  PyList_Append(py_path, PyUnicode_FromString("."));
 
   // if LAMMPS_POTENTIALS environment variable is set, add it to PYTHONPATH as well
   const char *potentials_path = getenv("LAMMPS_POTENTIALS");
   if (potentials_path != nullptr) {
-    PyList_Append(py_path, PY_STRING_FROM_STRING(potentials_path));
+    PyList_Append(py_path, PyUnicode_FromString(potentials_path));
   }
   PyGILState_Release(gstate);
-
   if (coefffilename) read_coeffs(coefffilename);
 
-  nonlinearflag = 1;
+
 }
 
 /* ---------------------------------------------------------------------- */
 
 MLIAPModelPython::~MLIAPModelPython()
 {
-  MLIAPPY_unload_model(this);
+  if (model_loaded!=0)
+    MLIAPPY_unload_model(this);
+  model_loaded=0;
 }
 
 /* ----------------------------------------------------------------------
@@ -93,7 +97,7 @@ void MLIAPModelPython::read_coeffs(char *fname)
 {
   PyGILState_STATE gstate = PyGILState_Ensure();
 
-  int loaded = MLIAPPY_load_model(this, fname);
+  model_loaded = MLIAPPY_load_model(this, fname);
   if (PyErr_Occurred()) {
     PyErr_Print();
     PyErr_Clear();
@@ -102,7 +106,7 @@ void MLIAPModelPython::read_coeffs(char *fname)
   }
   PyGILState_Release(gstate);
 
-  if (loaded) {
+  if (model_loaded) {
     this->connect_param_counts();
   } else {
     if (comm->me == 0) utils::logmesg(lmp, "Loading python model deferred.\n");
@@ -125,7 +129,7 @@ void MLIAPModelPython::connect_param_counts()
   }
   PyGILState_Release(gstate);
   model_loaded = 1;
-  utils::logmesg(lmp, "Loading python model complete.\n");
+  if (comm->me == 0) utils::logmesg(lmp, "Loading python model complete.\n");
 }
 
 /* ----------------------------------------------------------------------

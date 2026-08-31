@@ -34,7 +34,7 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define DELTA 4
+static constexpr int DELTA = 4;
 
 /* ----------------------------------------------------------------------
    Fermi-like smoothing function
@@ -72,7 +72,7 @@ PairTersoffZBLOMP::PairTersoffZBLOMP(LAMMPS *lmp) : PairTersoffOMP(lmp)
     global_a_0 = 0.529;
     global_epsilon_0 = 0.00552635 * 0.043365121;
     global_e = 1.0;
-  } else error->all(FLERR,"Pair tersoff/zbl requires metal or real units");
+  } else error->all(FLERR, Error::NOLASTLINE, "Pair tersoff/zbl/omp requires metal or real units");
 }
 
 /* ---------------------------------------------------------------------- */

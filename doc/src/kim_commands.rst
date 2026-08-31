@@ -87,7 +87,7 @@ The URL for the Model Page is constructed from the
 
 .. parsed-literal::
 
-   https://openkim.org/id/extended_KIM_ID
+   `<https://openkim.org/doc/schema/kim-ids/#extended-kim-ids>`_
 
 For example, for the Stillinger-Weber potential listed above the Model Page is
 located at:
@@ -416,7 +416,8 @@ Using OpenKIM Web Queries in LAMMPS (*kim query*)
 
 The *kim query* command performs a web query to retrieve the predictions of an
 IM set by *kim init* for material properties archived in
-`OpenKIM <https://openkim.org>`_.
+`OpenKIM <https://openkim.org>`_, or to obtain a list of available models
+that support a given set of atomic species.
 
 Syntax
 ------
@@ -428,7 +429,7 @@ Syntax
 * variable(s) = single name or list of names of (string style) LAMMPS
   variable(s) where a query result or parameter get result is stored.  Variables
   that do not exist will be created by the command
-* formatarg = *list, split, or index* (optional):
+* formatarg = *list* or *split* or *index* (optional)
 
   .. parsed-literal::
 
@@ -481,7 +482,13 @@ the format *keyword=value*, where *value* is always an array of one or more
 comma-separated items in brackets.  The list of supported keywords and the type
 and format of their values depend on the query function used.  The current list
 of query functions is available on the OpenKIM webpage at
-`https://openkim.org/doc/usage/kim-query <https://openkim.org/doc/usage/kim-query>`_.
+`https://openkim.org/doc/usage/kim-query <https://openkim.org/doc/usage/kim-query/>`_.
+
+.. note::
+
+   The *get_available_models* function's output is post-processed by LAMMPS so that
+   only the names of models that are currently installed are stored in the variable.
+   Matching models that are not installed are instead written to the LAMMPS log file.
 
 .. note::
 
@@ -697,17 +704,18 @@ Syntax
 * variable(s) = single name or list of names of (string style) LAMMPS
   variable(s) where a query result or parameter get result is stored.  Variables
   that do not exist will be created by the command
-* formatarg = *list, split, or explicit* (optional):
+* formatarg = *list* or *split* or *explicit* (optional)
+
   .. parsed-literal::
 
      *list* = returns a single string with a list of space separated values
             (e.g. "1.0 2.0 3.0"), which is placed in a LAMMPS variable as
-            defined by the *variable* argument.
+            defined by the *variable* argument
      *split* = returns the values separately in new variables with names based
             on the prefix specified in *variable* and a number appended to
             indicate which element in the list of values is in the variable
      *explicit* = returns the values separately in one more more variable names
-            provided as arguments that precede *formatarg*\ . [default]
+            provided as arguments that precede *formatarg* (default)
 * values = new value(s) to replace the current value(s) of a KIM portable model
   parameter
 
@@ -948,13 +956,13 @@ Syntax
 * instance_id = a positive integer identifying the KIM property instance;
   (note that the results file can contain multiple property instances)
 * property_id = identifier of a
-  `KIM Property Definition <https://openkim.org/properties>`_, which can be (1)
+  `KIM Property Definition <https://openkim.org/properties/>`_, which can be (1)
   a property short name, (2) the full unique ID of the property (including the
   contributor and date), (3) a file name corresponding to a local property
   definition file
 * key_name = one of the keys belonging to the specified KIM property definition
 * key_name_key = a key belonging to a key-value pair (standardized in the
-  `KIM Properties Framework <https://openkim.org/doc/schema/properties-framework>`__)
+  `KIM Properties Framework <https://openkim.org/doc/schema/properties-framework/>`__)
 * key_name_value = value to be associated with a key_name_key in a key-value
   pair
 * file = name of a file to write the currently defined set of KIM property
@@ -988,7 +996,7 @@ the *key_name* argument, that are defined as part of the relevant KIM Property
 Definition and include only lowercase alphanumeric characters and dashes.  The
 value paired with each property key is itself a map whose possible keys are
 defined as part of the `KIM Properties Framework
-<https://openkim.org/doc/schema/properties-framework>`__; these keys are
+<https://openkim.org/doc/schema/properties-framework/>`__; these keys are
 referred to by the *key_name_key* argument and their associated values by the
 *key_name_value* argument.  These values may either be scalars or arrays,
 as stipulated in the property definition.
@@ -1083,10 +1091,11 @@ the form of *key_name_key*-*key_name_value* pairs).  For example,
    kim property modify 1 key mass    source-value 26.98154
    kim property modify 1 key mass    source-unit  amu
 
-where the special keyword "key" is followed by a *key_name* ("species" or
-"mass" in the above) and one or more key-value pairs.  These key-value pairs
-may continue until either another "key" keyword is given or the end of the
-command line is reached.  Thus, the above could equivalently be written as
+where the special keyword "key" is followed by a *key_name* ("species"
+or "mass" in the above) and one or more key-value pairs.  These
+key-value pairs may continue until either another "key" keyword is given
+or the end of the line is reached.  Thus, the above could equivalently
+be written as
 
 .. code-block:: LAMMPS
 
@@ -1333,13 +1342,13 @@ For example,
 Citation of OpenKIM IMs
 """""""""""""""""""""""
 
-When publishing results obtained using OpenKIM IMs researchers are requested
-to cite the OpenKIM project :ref:`(Tadmor) <kim-mainpaper>`, KIM API
-:ref:`(Elliott) <kim-api>`, and the specific IM codes used in the simulations,
-in addition to the relevant scientific references for the IM. The citation
-format for an IM is displayed on its page on
-`OpenKIM <https://openkim.org>`_ along with the corresponding BibTex file, and
-is automatically added to the LAMMPS citation reminder.
+When publishing results obtained using OpenKIM IMs researchers are
+requested to cite the OpenKIM project :ref:`(Tadmor) <kim-mainpaper>`,
+KIM API :ref:`(Elliott) <kim-api>`, and the specific IM codes used in
+the simulations, in addition to the relevant scientific references for
+the IM. The citation format for an IM is displayed on its page on
+`OpenKIM <https://openkim.org>`_ along with the corresponding BibTex
+file, and is automatically added to the LAMMPS citation reminder.
 
 Citing the IM software (KIM infrastructure and specific PM or SM codes) used in
 the simulation gives credit to the researchers who developed them and enables
@@ -1348,15 +1357,15 @@ open source efforts like OpenKIM to function.
 Restrictions
 """"""""""""
 
-The *kim* command is part of the KIM package.  It is only enabled if LAMMPS is
-built with that package.  A requirement for the KIM package, is the KIM API
-library that must be downloaded from the
-`OpenKIM website <https://openkim.org/kim-api/>`_ and installed before LAMMPS is
+The *kim* command is part of the KIM package.  It is only enabled if
+LAMMPS is built with that package.  A requirement for the KIM package,
+is the KIM API library that must be downloaded from the `OpenKIM website
+<https://openkim.org/kim-api/>`_ and installed before LAMMPS is
 compiled.  When installing LAMMPS from binary, the kim-api package is a
-dependency that is automatically downloaded and installed.  The *kim query*
-command requires the *libcurl* library to be installed.  The *kim property*
-command requires *Python* 3.6 or later and the *kim-property* python package to
-be installed.  See the KIM section of the
+dependency that is automatically downloaded and installed.  The *kim
+query* command requires the *libcurl* library to be installed.  The *kim
+property* command requires *Python* 3.6 or later and the *kim-property*
+python package to be installed.  See the KIM section of the
 :doc:`Packages details <Packages_details>` for details.
 
 Furthermore, when using *kim* command to run KIM SMs, any packages required by
@@ -1377,5 +1386,5 @@ doi: `https://doi.org/10.1007/s11837-011-0102-6 <https://doi.org/10.1007/s11837-
 
 .. _kim-api:
 
-**(Elliott)** Elliott, Tadmor and Bernstein, `https://openkim.org/kim-api <https://openkim.org/kim-api>`_ (2011)
+**(Elliott)** Elliott, Tadmor and Bernstein, `https://openkim.org/kim-api/ <https://openkim.org/kim-api/>`_ (2011)
 doi: `https://doi.org/10.25950/FF8F563A <https://doi.org/10.25950/FF8F563A>`_

@@ -17,11 +17,15 @@
 #define LMP_READER_H
 
 #include "pointers.h"
+#include "safe_pointers.h"
 
 namespace LAMMPS_NS {
 
 class Reader : protected Pointers {
  public:
+  enum { ID, TYPE, X, Y, Z, VX, VY, VZ, Q, IX, IY, IZ, FX, FY, FZ, MOL, APIP_LAMBDA };
+  enum { UNSET, NOSCALE_NOWRAP, NOSCALE_WRAP, SCALE_NOWRAP, SCALE_WRAP };
+
   Reader(class LAMMPS *);
   ~Reader() override;
 
@@ -37,9 +41,8 @@ class Reader : protected Pointers {
   virtual void close_file();
 
  protected:
-  FILE *fp;           // pointer to opened file or pipe
-  bool compressed;    // flag for dump file compression
-  bool binary;        // flag for (native) binary files
+  SafeFilePtr fp;    // pointer to opened file or pipe
+  bool binary;       // flag for (native) binary files
 };
 
 }    // namespace LAMMPS_NS

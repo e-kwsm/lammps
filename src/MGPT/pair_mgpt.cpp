@@ -29,6 +29,8 @@
 #include "error.h"
 #include "force.h"
 #include "memory.h"
+#include "platform.h"
+#include "safe_pointers.h"
 #include "neigh_list.h"
 #include "neigh_request.h"
 #include "neighbor.h"
@@ -38,48 +40,6 @@
 #include <cstring>
 
 using namespace LAMMPS_NS;
-
-//#define TIMING_ON
-
-#ifdef TIMING_ON
-#include <sys/time.h>
-#include <time.h>
-//#include "rdtsc.h"
-#ifdef __bgq__
-#include <hwi/include/bqc/A2_inlines.h>
-#endif
-
-static double gettime(int x = 0) {
-  if (1) {
-    /*
-      struct timeval tv;
-      gettimeofday(&tv,nullptr);
-      return tv.tv_sec + 1e-6 * tv.tv_usec;
-    */
-    /*
-      const double x = 1.0 / CLOCKS_PER_SEC;
-      return clock() * x;
-    */
-
-    //const double invfreq = 1.0 / 2394.108e6;
-    /*
-    const double invfreq = 1.0 / 700e6;
-      unsigned long long int x = rdtsc();
-      return x*invfreq;
-    */
-
-    const double invfreq = 1.0 / 1.6e9;
-    unsigned long long int x = GetTimeBase();
-    return x*invfreq;
-
-
-  } else
-    return 0.0;
-}
-#else
-static double gettime(int /*x*/ = 0) { return 0.0; }
-#endif
-
 
 /* ---------------------------------------------------------------------- */
 
@@ -101,11 +61,10 @@ PairMGPT::~PairMGPT()
 
 /* ---------------------------------------------------------------------- */
 
-
 static double t_make_b2 = 0.0,n_make_b2 = 0.0;
 
 template<typename intype,typename outtype,int ni,int nj> void fmatconv(intype *array) {
-  outtype *cast = (outtype *) array;
+  auto *cast = (outtype *) array;
   for (int i = 0; i<ni; i++)
     for (int j = 0; j<nj; j++)
       cast[i*nj+j] = array[i*nj+j];
@@ -140,7 +99,7 @@ void PairMGPT::make_bond(const double xx[][3],int i,int j,bond_data *bptr) {
     }
 
   if (rij <= rcrit*rcrit) {
-    t0 = gettime();
+    t0 = platform::walltime();
     if (lang == 3) {
       hamltn_5_raw(rrij[0],rrij[1],rrij[2],
                    bptr->H.m ,bptr->Hx.m,
@@ -151,7 +110,7 @@ void PairMGPT::make_bond(const double xx[][3],int i,int j,bond_data *bptr) {
                    bptr->Hy.m,bptr->Hz.m,&bptr->fl_deriv_sum);
     }
 
-    t1 = gettime();
+    t1 = platform::walltime();
     t_make_b2 += t1-t0;
     n_make_b2++;
   } else {
@@ -167,27 +126,6 @@ void PairMGPT::make_bond(const double xx[][3],int i,int j,bond_data *bptr) {
 }
 
 static double t_trace = 0.0,n_trace = 0.0;
-/*
-static inline double mtrace(int n,double A[8][8],double B[8][8]) {
-  double t0,t1;
-  double s;
-
-  t0 = gettime();
-  if (n == 5) s = mtrace_5(A,B);
-  else if (n == 7) s = mtrace_7(A,B);
-  else {
-    s = 0.0;
-    for (int i = 1; i<=n; i++)
-      for (int j = 1; j<=n; j++)
-        s = s + A[i][j]*B[i][j];
-  }
-  t1 = gettime();
-  t_trace += t1-t0;
-  n_trace++;
-
-  return s;
-}
-*/
 
 void PairMGPT::make_triplet(bond_data *ij_bond,bond_data *ik_bond,
                              triplet_data *triptr) {
@@ -225,7 +163,7 @@ PairMGPT::triplet_data *PairMGPT::get_triplet(const double xx[][3],int i,int j,i
   bond_data *bij = nullptr,*bik = nullptr;
   triplet_data *tptr = nullptr;
 
-  t0 = gettime();
+  t0 = platform::walltime();
   if (recompute == 0) {
     bij = bhash->Lookup(Doublet(i,j));
     bik = bhash->Lookup(Doublet(i,k));
@@ -252,10 +190,10 @@ PairMGPT::triplet_data *PairMGPT::get_triplet(const double xx[][3],int i,int j,i
     else
       make_bond(xx,k,i,bik);
   }
-  t1 = gettime();
+  t1 = platform::walltime();
   t_make_b += t1-t0;
 
-  t0 = gettime();
+  t0 = platform::walltime();
   if (bij != nullptr && bik != nullptr) {
     tptr = twork;
     make_triplet(bij,bik,tptr);
@@ -265,7 +203,7 @@ PairMGPT::triplet_data *PairMGPT::get_triplet(const double xx[][3],int i,int j,i
     *dvir_ij_p = 0.0;
     *dvir_ik_p = 0.0;
   }
-  t1 = gettime();
+  t1 = platform::walltime();
   t_make_t += t1-t0;
   n_make++;
   return tptr;
@@ -471,17 +409,6 @@ void PairMGPT::force_debug_4(double xx[][3],
   }
 }
 
-
-
-/*
-#define trd_update_4(T12,T45,coord)                   \
-  do {                                                \
-    trd1 = transtrace(T12->H1##coord##H2,T45->H1H2 ); \
-    trd2 = transtrace(T12->H1H2##coord,T45->H1H2   ); \
-    trd3 = transtrace(T12->H1H2 ,T45->H1##coord##H2); \
-    trd4 = transtrace(T12->H1H2 ,T45->H1H2##coord  ); \
-  } while (0)
-*/
 #define trd_update_4(T12,T45) \
   do {                                         \
     tr_trace3(&(T45->H1H2.m[1][0]),            \
@@ -563,61 +490,38 @@ void PairMGPT::force_debug_4(double xx[][3],
     fmz = fmz + dfmz*(w);    \
   } while (0)
 
-
-
-#define restrict __restrict__
-#ifdef __bg__
-#define const
-#endif
-static int ntr_calls = 0;
-static trtrace3_fun tr_internal;
-static void tr_count(const double * restrict A,
-                     const double * restrict B1,double * restrict t1,
-                     const double * restrict B2,double * restrict t2,
-                     const double * restrict B3,double * restrict t3) {
-  tr_internal(A,B1,t1,B2,t2,B3,t3);
-  ntr_calls++;
-}
-#ifdef __bg__
-#undef const
-#endif
-#undef restrict
-
-
 int PairMGPT::Matrix::sz;
 void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                           double *e_s,double *e_p,double *e_t,double *e_q,
                           int evflag,int newton_pair) {
   Hash<bond_data,Doublet> bond_hash(100000);
-  int i,j,k,m,ix,jx,kx,mx,itag,jtag,p;
-
+  int i,j,k,m,ix,jx,kx,p;
   double e_single,e_pair,e_triplet,e_triplet_c,e_quad;
   double volvir2;
-
+#ifdef TIMING_ON
   double nbc = 0.0,tbl = 0.0,tbm = 0.0;
-  const int lmax_local = lmax;
-
-  //if(evflag) printf("##### ev flag is set... wasting cycles...\n");
-
+#endif
   *e_s = -99.0;
   *e_p = -99.0;
   *e_t = -99.0;
   *e_q = -99.0;
 
-  double t0,t1;
-
-  t0 = gettime(1);
+#ifdef TIMING_ON
+  double t0 = platform::walltime();
+#endif
   e_single = e_pair = e_triplet = e_triplet_c = e_quad = 0.0;
   volvir2 = 0.0;
 
   t_make_t = t_make_b = t_make_b2 = t_trace = 0.0;
   n_make = n_make_b2 = n_trace =  0.0;
 
-  double tx0,tx1,tsort = 0.0,tpair = 0.0,tlookup = 0.0;
+#ifdef TIMING_ON
+  double tsort = 0.0, tpair = 0.0,tlookup = 0.0;
   double ttriplet = 0.0,tquad = 0.0,tmem = 0.0;
   double ntsort = 0.0,ntpair = 0.0,ntlookup = 0.0;
   double nttriplet = 0.0,ntquad = 0.0,ntmem = 0.0,ntquaditer = 0.0;
   double mcount = 0.0,mcount2 = 0.0, qcount = 0.0;
+#endif
 
   double fix,fjx,fkx,fmx,dfix,dfjx,dfkx,dfmx;
   double fiy,fjy,fky,fmy,dfiy,dfjy,dfky,dfmy;
@@ -671,8 +575,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
   double trd1y,trd2y,trd3y,trd4y;
   double trd1z,trd2z,trd3z,trd4z;
 
-
-  tx0 = gettime();
+#ifdef TIMING_ON
+  double tx0 = platform::walltime();
+#endif
 
   double rhoinv;
   {
@@ -752,9 +657,11 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
   first = (int *) memory->smalloc(sizeof(int) * (ntot+1),"mgpt: first");
   nlist_short = (int *) memory->smalloc(sizeof(int) * nneitot,"mgpt: nlist_short");
 
-  tx1 = gettime();
+#ifdef TIMING_ON
+  double tx1 = platform::walltime();
   tmem += tx1-tx0;
   ntmem++;
+#endif
 
   //printf("[%3d] Starting calculation...\n",comm->me);
 
@@ -763,7 +670,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
   fiy = fjy = fky = fmy = 0.0;
   fiz = fjz = fkz = fmz = 0.0;
 
+#ifdef TIMING_ON
   int c_p = 0, c_t = 0, c_q = 0;
+#endif
 
   if (false)
     if (domain->triclinic) {
@@ -787,7 +696,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
 
     const int c1 = c1_outside(ss[i],triclinic,alpha);
 
-    tx0 = gettime();
+#ifdef TIMING_ON
+    tx0 = platform::walltime();
+#endif
     for (jx = 0; jx<nnei[i]; jx++) {
       fjx = fjy = fjz = 0.0;
 
@@ -815,8 +726,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
 
             if (pair_energies == 0) de_pair = 0.0;
             e_pair = e_pair + de_pair;
+#ifdef TIMING_ON
             c_p++;
-
+#endif
             if (pair_forces == 0) df = 0.0;
 
             if (volpres_flag && pair_energies) {
@@ -886,9 +798,11 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
     ff[i][1] += fiy * e_scale;
     ff[i][2] += fiz * e_scale;
 
-    tx1 = gettime();
+#ifdef TIMING_ON
+    tx1 = platform::walltime();
     tpair += tx1-tx0;
     ntpair += nnei[i];
+#endif
   }
 
   for (i = 0; i<ntot; i++) {
@@ -951,7 +865,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
             c_jk = 0;
           }
 
-          tx0 = gettime();
+#ifdef TIMING_ON
+          tx0 = platform::walltime();
+#endif
 
           w3 = get_weight(triclinic,ss[i],ss[j],ss[k]);
 
@@ -990,8 +906,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                 vir3t = vir3t + dvir;
                 xvir3t = xvir3t + dvir;
               }
+#ifdef TIMING_ON
               mcount2++;
-
+#endif
               {
                 const double vc = splinepot.vc;
                 tr_trace3(&(bki->H.m[1][0]),
@@ -1043,8 +960,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
             }
 
             if (T12 != nullptr) {
-              //printf("T12 i,j,k = %d,%d,%d\n",i,j,k);
+#ifdef TIMING_ON
               mcount++;
+#endif
               if (three_body_energies && evflag) {
                 tr1 = transtrace(T12->H1H2,T12->H1H2);
                 double dvir = (2.0*(dvir_ij + dvir_jk)*splinepot.vd +
@@ -1099,8 +1017,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
             }
 
             if (T23 != nullptr) {
-              //printf("T23 i,j,k = %d,%d,%d\n",i,j,k);
+#ifdef TIMING_ON
               mcount++;
+#endif
               if (three_body_energies && evflag) {
                 tr2 = transtrace(T23->H1H2,T23->H1H2);
                 double dvir = (2.0*(dvir_jk + dvir_ki)*splinepot.vd +
@@ -1155,8 +1074,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
             }
 
             if (T31 != nullptr) {
-              //printf("T31 i,j,k = %d,%d,%d\n",i,j,k);
+#ifdef TIMING_ON
               mcount++;
+#endif
               if (three_body_energies && evflag) {
                 tr3 = transtrace(T31->H1H2,T31->H1H2);
                 double dvir = (2.0*(dvir_ki + dvir_ij)*splinepot.vd +
@@ -1215,8 +1135,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
             double de_triplet = (splinepot.vc*v33 + splinepot.vd*v43) * e_scale * w3;
             e_triplet = e_triplet + de_triplet;
             e_triplet_c = e_triplet_c + splinepot.vc*v33 * e_scale * w3;
+#ifdef TIMING_ON
             c_t++;
-
+#endif
             //printf("xxxx %6d %6d %6d :: %20.10e\n",1,2,3,de_triplet);
 
             if (evflag) {
@@ -1247,16 +1168,20 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
               fkx = fkx+fsave[2][0]; fky = fky+fsave[2][1]; fkz = fkz+fsave[2][2];
             }
 
-            tx1 = gettime();
+#ifdef TIMING_ON
+            tx1 = platform::walltime();
             ttriplet += tx1 - tx0;
             nttriplet++;
+#endif
           } else {
             triplet_defer = 1;
           }
 
           if (four_body_energies || four_body_forces)
             if (j < i) { /* Search for quadruplet */
-              tx0 = gettime();
+#ifdef TIMING_ON
+              tx0 = platform::walltime();
+#endif
 
               mj = first[j];
               mk = first[k];
@@ -1343,8 +1268,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                           vir4 = vir4 + dvir;
                           xvir4 = xvir4 + dvir;
                         }
+#ifdef TIMING_ON
                         qcount++;
-
+#endif
                         {
                           const double ve = splinepot.ve;
 
@@ -1372,8 +1298,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                           vir4 = vir4 + dvir;
                           xvir4 = xvir4 + dvir;
                         }
+#ifdef TIMING_ON
                         qcount++;
-
+#endif
                         {
                           const double ve = splinepot.ve;
 
@@ -1402,8 +1329,9 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                           vir4 = vir4 + dvir;
                           xvir4 = xvir4 + dvir;
                         }
+#ifdef TIMING_ON
                         qcount++;
-
+#endif
                         {
                           const double ve = splinepot.ve;
 
@@ -1426,11 +1354,13 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
 
                       double de_quad = splinepot.ve*(tr1 + tr2 + tr3)/anorm4 * e_scale * w4;
                       e_quad = e_quad + de_quad;
+#ifdef TIMING_ON
                       if ((T12 && T45) ||
                          (T23 && T56) ||
                          (T31 && T64)) {
                         c_q++;
                       }
+#endif
 
                       if (evflag) {
                         double drim[3],drjm[3],drkm[3];
@@ -1480,10 +1410,12 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
                 }
 
               }
-              tx1 = gettime();
+#ifdef TIMING_ON
+              tx1 = platform::walltime();
               tquad += tx1 - tx0;
               ntquad++;
               ntquaditer++;
+#endif
             }
 
 
@@ -1515,12 +1447,12 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
         for (int pp = 0; pp<3; pp++)
           vatom[i][pp] = vatom[i][pp] - rhoinv*splinepot.devol0*e_scale;
       }
-
     }
-
   }
 
-  tx0 = gettime();
+#ifdef TIMING_ON
+  tx0 = platform::walltime();
+#endif
   for (i = 0; i<ntot; i++)
     for (p = 0; p<3; p++)
       atom->f[i][p] = atom->f[i][p] + ff[i][p];
@@ -1530,20 +1462,16 @@ void PairMGPT::compute_x(const int *nnei,const int * const *nlist,
   if (ss != xx) memory->sfree(ss);
   memory->sfree(ff);
   memory->sfree(xx);
-  tx1 = gettime();
+#ifdef TIMING_ON
+  tx1 = platform::walltime();
   tmem += tx1-tx0;
   ntmem++;
 
-  t1 = gettime(1);
+  double t1 = platform::walltime();
 
-  //printf("compute_x: c_p = %d    c_t = %d    c_q = %d\n",c_p,c_t,c_q);
-
-
-#ifdef TIMING_ON
   if (comm->me == 0) {
     double tsum = (tmem+tsort+tpair+tlookup+ttriplet+tquad);
     double nsum = (ntmem+ntsort+ntpair+ntlookup+nttriplet+ntquad);
-    //double adj = ((t1-t0)-tsum)/nsum;
     /* Use adj = 6ns for RDTSC, and 58ns for gettimeofday,
        on monkfish.llnl.gov, 2.4GHz Intel
 
@@ -1697,10 +1625,10 @@ void PairMGPT::compute(int eflag, int vflag)
       if (i > nmax) nmax = i;
     }
     nmax++;
-    double *ffwork = new double[3*nmax];
-    double *ffloc = new double[3*listfull->inum];
-    double *ffloc2 = new double[3*listfull->inum];
-    double **ffptr = new double *[nmax];
+    auto *ffwork = new double[3*nmax];
+    auto *ffloc = new double[3*listfull->inum];
+    auto *ffloc2 = new double[3*listfull->inum];
+    auto **ffptr = new double *[nmax];
     for (ii = 0; ii<listfull->inum + listfull->gnum; ii++)
       ffptr[ii] = &ffwork[3*ii];
 
@@ -1823,38 +1751,33 @@ void PairMGPT::coeff(int narg, char **arg)
 
   // Make sure I,J args are * *
   if (strcmp(arg[0],"*") != 0 || strcmp(arg[1],"*") != 0)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
-  double vol;
-  if (sscanf(arg[4], "%lg", &vol) != 1 || vol <= 0.0)
-    error->all(FLERR,"Invalid volume in mgpt (MGPT) pair coefficients.");
+  double vol = utils::numeric(FLERR, arg[4], false, lmp);
+  if (vol <= 0.0) error->all(FLERR,"Invalid volume in mgpt (MGPT) pair coefficients.");
 
   volpres_flag = 1;
   single_precision = 0;
 
   /* Parse arguments */ {
-    int volpres_tag = 0,precision_tag = 0,nbody_tag = 0;
+    int nbody_tag = 0;
 
     int iarg = 5;
     while (iarg < narg) {
       if (strcmp(arg[iarg],"volpress") == 0) { /* Volumetric pressure flag */
         if (iarg+2 > narg)
-          error->all(FLERR,"Incorrect args for pair coefficients");
+          error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
         if (strcmp(arg[iarg+1],"yes") == 0) volpres_flag = 1;
         else if (strcmp(arg[iarg+1],"no") == 0) volpres_flag = 0;
-        else {
-          char line[1024];
-          sprintf(line,"(In %s:%d) Invalid value for volumetric pressure argument.\n"
-                  "It should be \"volpress yes\" or \"volpress no\".\n"
-                  "The value is \"%s\".\n",FLERR,arg[iarg+1]);
-          error->all(FLERR,line);
-        }
-        volpres_tag = 1;
+        else
+          error->all(FLERR,iarg+1,"Invalid value for volumetric pressure argument.\n"
+                     "It should be \"volpress yes\" or \"volpress no\".\n"
+                     "The value is \"{}\".",arg[iarg+1]);
         iarg += 2;
         if (comm->me == 0) printf("* volpress: volpres_flag = %d [%s %s]\n",volpres_flag,arg[iarg-2],arg[iarg-1]);
       } else if (strcmp(arg[iarg],"nbody") == 0) {
         if (iarg+2 > narg)
-          error->all(FLERR,"Incorrect args for pair coefficients");
+          error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
         if (strspn(arg[iarg+1],"1234") == strlen(arg[iarg+1])) {
           nbody_flag = 0;
           for (int i = 0; i<4; i++)
@@ -1863,39 +1786,31 @@ void PairMGPT::coeff(int narg, char **arg)
               if (comm->me == 0) printf("Explicitly adding %d-tuple forces.\n",i+1);
             }
         } else {
-          char line[1024];
-          sprintf(line,"(In %s:%d) Invalid value for nbody flag.\n"
-                  "It should be e.g. \"nbody=1234\" (for single, pair, triple, and quad forces/energiers)\n"
-                  "For e.g. only pair and triple forces/energies, use \"nbody=23\".\n"
-                  "The default is \"nbody=1234\".\n"
-                  "The current value is \"%s\".\n",FLERR,arg[iarg+1]);
-          error->all(FLERR,line);
+          error->all(FLERR,iarg+1,"Invalid value for nbody flag.\n"
+                     "It should be e.g. \"nbody=1234\" (for single, pair, triple, and quad forces/energies)\n"
+                     "For e.g. only pair and triple forces/energies, use \"nbody=23\".\n"
+                     "The default is \"nbody=1234\".\n"
+                     "The current value is \"{}\".",arg[iarg+1]);
         }
         nbody_tag = 1;
         iarg += 2;
       } else if (strcmp(arg[iarg],"precision") == 0) {
         if (iarg+2 > narg)
-          error->all(FLERR,"Incorrect args for pair coefficients");
+          error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
         if (strcmp(arg[iarg+1],"single") == 0) single_precision = 1;
         else if (strcmp(arg[iarg+1],"double") == 0) single_precision = 0;
-        else {
-          char line[1024];
-          sprintf(line,"(In %s:%d) Invalid value for precision argument.\n"
-                  "It should be \"precision single\" or \"precision double\".\n"
-                  "The value is \"%s\".\n",FLERR,arg[iarg+1]);
-          error->all(FLERR,line);
-        }
-        precision_tag = 1;
+        else
+          error->all(FLERR,iarg+1,"Invalid value for precision argument.\n"
+                     "It should be \"precision single\" or \"precision double\".\n"
+                     "The value is \"{}\".",arg[iarg+1]);
         iarg += 2;
         if (comm->me == 0) printf("* precision: single_flag = %d [%s %s]\n",single_precision,arg[iarg-2],arg[iarg-1]);
       } else {
-        char line[1024];
-        sprintf(line,"(In %s:%d) Invalid argument. Allowed arguments are:\n"
-                "    volpress {yes|no} , default = yes\n"
-                "    precision {single|double} , default = double\n"
-                "    nbody {[1234,]*} , default = whichever terms potential require\n"
-                "The invalid argument is \"%s\".\n",FLERR,arg[iarg]);
-        error->all(FLERR,line);
+        error->all(FLERR,iarg,"Invalid argument. Allowed arguments are:\n"
+                   "    volpress {{yes|no}} , default = yes\n"
+                   "    precision {{single|double}} , default = double\n"
+                   "    nbody {{[1234,]*}} , default = whichever terms potential require\n"
+                   "The invalid argument is \"{}\".",arg[iarg]);
       }
     }
 
@@ -1903,15 +1818,12 @@ void PairMGPT::coeff(int narg, char **arg)
       printf("Volumetric pressure is %s.\n",volpres_flag ? "on" : "off");
 
     if (comm->me == 0) {
-      FILE *parmin_fp = utils::open_potential(arg[2],lmp,nullptr);
-      FILE *potin_fp = utils::open_potential(arg[3],lmp,nullptr);
-      if (parmin_fp == nullptr || potin_fp == nullptr) {
-        char str[128];
-        sprintf(str,"Cannot open MGPT potential files %s %s",arg[2],arg[3]);
-        error->one(FLERR,str);
+      {
+        SafeFilePtr parmin_fp = utils::open_potential(arg[2],lmp,nullptr);
+        SafeFilePtr potin_fp = utils::open_potential(arg[3],lmp,nullptr);
+        if (!parmin_fp || !potin_fp)
+          error->one(FLERR,"Cannot open MGPT potential files {} {}",arg[2],arg[3]);
       }
-      fclose(parmin_fp);
-      fclose(potin_fp);
 
       splinepot.readpot(arg[2],arg[3],vol);
       printf("evol0 = %.10e\n",splinepot.evol0);

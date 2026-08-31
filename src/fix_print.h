@@ -21,6 +21,7 @@ FixStyle(print,FixPrint);
 #define LMP_FIX_PRINT_H
 
 #include "fix.h"
+#include "safe_pointers.h"
 
 namespace LAMMPS_NS {
 
@@ -34,8 +35,8 @@ class FixPrint : public Fix {
   void end_of_step() override;
 
  private:
-  int me, screenflag;
-  FILE *fp;
+  int screenflag;
+  SafeFilePtr fp;
   char *text, *copy, *work;
   int maxcopy, maxwork;
   char *var_print;

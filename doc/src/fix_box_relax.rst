@@ -6,7 +6,7 @@ fix box/relax command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID box/relax keyword value ...
 
@@ -118,7 +118,7 @@ displaced by the same amount, different on each iteration.
    all.  Also note that if the box shape tilts to an extreme shape,
    LAMMPS will run less efficiently, due to the large volume of
    communication needed to acquire ghost atoms around a processor's
-   irregular-shaped sub-domain.  For extreme values of tilt, LAMMPS may
+   irregular-shaped subdomain.  For extreme values of tilt, LAMMPS may
    also lose atoms and generate an error.
 
 .. note::
@@ -159,10 +159,7 @@ these 4 keywords:
 
 .. parsed-literal::
 
-   x Ptarget
-   y Ptarget
-   z Ptarget
-   couple xyz
+   x Ptarget y Ptarget z Ptarget couple xyz
 
 The keyword *aniso* means *x*, *y*, and *z* dimensions are controlled
 independently using the *Pxx*, *Pyy*, and *Pzz* components of the
@@ -172,10 +169,7 @@ keywords:
 
 .. parsed-literal::
 
-   x Ptarget
-   y Ptarget
-   z Ptarget
-   couple none
+   x Ptarget y Ptarget z Ptarget couple none
 
 The keyword *tri* means *x*, *y*, *z*, *xy*, *xz*, and *yz* dimensions
 are controlled independently using their individual stress components
@@ -185,13 +179,7 @@ these 7 keywords:
 
 .. parsed-literal::
 
-   x Ptarget
-   y Ptarget
-   z Ptarget
-   xy 0.0
-   yz 0.0
-   xz 0.0
-   couple none
+   x Ptarget y Ptarget z Ptarget xy 0.0 yz 0.0 xz 0.0 couple none
 
 ----------
 
@@ -218,7 +206,7 @@ function then is:
 where *U* is the system potential energy, :math:`P_t` is the desired
 hydrostatic pressure, :math:`V` and :math:`V_0` are the system and reference
 volumes, respectively.  :math:`E_{strain}` is the strain energy expression
-proposed by Parrinello and Rahman :ref:`(Parrinello1981) <Parrinello1981>`.
+proposed by Parrinello and Rahman :ref:`(Parrinello) <Parrinello1981>`.
 Taking derivatives of *E* w.r.t. the box dimensions, and setting these
 to zero, we find that at the minimum of the objective function, the
 global system stress tensor **P** will satisfy the relation:
@@ -390,4 +378,4 @@ The keyword defaults are dilate = all, vmax = 0.0001, nreset = 0.
 
 .. _Parrinello1981:
 
-**(Parrinello1981)** Parrinello and Rahman, J Appl Phys, 52, 7182 (1981).
+**(Parrinello)** Parrinello and Rahman, J Appl Phys, 52, 7182 (1981).

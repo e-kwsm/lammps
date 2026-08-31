@@ -6,7 +6,7 @@ fix langevin/eff command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID langevin/eff Tstart Tstop damp seed keyword values ...
 
@@ -102,7 +102,7 @@ This fix is not invoked during :doc:`energy minimization <minimize>`.
 
 Restrictions
 """"""""""""
- none
+none
 
 This fix is part of the EFF package.  It is only enabled if
 LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.

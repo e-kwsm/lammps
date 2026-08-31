@@ -35,6 +35,7 @@ FixOneWay::FixOneWay(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), region(nullptr), idregion(nullptr)
 {
   direction = NONE;
+  dynamic_group_allow = 1;
 
   if (narg < 6) error->all(FLERR, "Illegal fix oneway command");
 
@@ -65,6 +66,7 @@ FixOneWay::FixOneWay(LAMMPS *lmp, int narg, char **arg) :
 
 FixOneWay::~FixOneWay()
 {
+  if (copymode) return;
   delete[] idregion;
 }
 

@@ -12,21 +12,38 @@
 ------------------------------------------------------------------------- */
 
 #include "atom_vec_body.h"
-#include "style_body.h"    // IWYU pragma: keep
 
 #include "atom.h"
 #include "body.h"
+#include "domain.h"
 #include "error.h"
 #include "fix.h"
+#include "math_extra.h"
 #include "memory.h"
 #include "modify.h"
 #include "my_pool_chunk.h"
 
+#include <cstring>
+
 using namespace LAMMPS_NS;
+
+/* ----------------------------------------------------------------------
+   process-global registry of body style factory functions.  Shared by all
+   LAMMPS instances and persistent across the "clear" command.  Built-in styles
+   are registered once by the generated register_body_styles().
+------------------------------------------------------------------------- */
+
+CreatorRegistry<AtomVecBody::BodyCreator> &AtomVecBody::body_styles()
+{
+  static CreatorRegistry<AtomVecBody::BodyCreator> registry;
+  return registry;
+}
 
 /* ---------------------------------------------------------------------- */
 
-AtomVecBody::AtomVecBody(LAMMPS *lmp) : AtomVec(lmp)
+AtomVecBody::AtomVecBody(LAMMPS *lmp) :
+    AtomVec(lmp), body(nullptr), rmass(nullptr), radius(nullptr), angmom(nullptr),
+    quat_hold(nullptr), icp(nullptr), dcp(nullptr)
 {
   molecular = Atom::ATOMIC;
   bonus_flag = 1;
@@ -98,26 +115,12 @@ AtomVecBody::~AtomVecBody()
 
 void AtomVecBody::process_args(int narg, char **arg)
 {
-  // suppress unused parameter warning dependent on style_body.h
-
-  (void) (arg);
-
   if (narg < 1) error->all(FLERR, "Invalid atom_style body command");
 
-  if (false) {    // NOLINT
-    bptr = nullptr;
-
-#define BODY_CLASS
-#define BodyStyle(key, Class)         \
-  }                                   \
-  else if (strcmp(arg[0], #key) == 0) \
-  {                                   \
-    bptr = new Class(lmp, narg, arg);
-#include "style_body.h"    // IWYU pragma: keep
-#undef BodyStyle
-#undef BODY_CLASS
-
-  } else
+  BodyCreator body_creator = body_styles().find(arg[0]);
+  if (body_creator)
+    bptr = body_creator(lmp, narg, arg);
+  else
     error->all(FLERR, utils::check_packages_for_style("body", arg[0], lmp));
 
   bptr->avec = this;
@@ -551,7 +554,8 @@ void AtomVecBody::data_atom_post(int ilocal)
 
 void AtomVecBody::data_body(int m, int ninteger, int ndouble, int *ivalues, double *dvalues)
 {
-  if (body[m]) error->one(FLERR, "Assigning body parameters to non-body atom");
+  if (body[m])
+    error->one(FLERR, "Assigning body parameters to atom {} that already has them", tag[m]);
   if (nlocal_bonus == nmax_bonus) grow_bonus();
   bonus[nlocal_bonus].ilocal = m;
   bptr->data_body(nlocal_bonus, ninteger, ndouble, ivalues, dvalues);
@@ -594,6 +598,15 @@ void AtomVecBody::pack_data_pre(int ilocal)
 }
 
 /* ----------------------------------------------------------------------
+   unmodify values packed by AtomVec::pack_data()
+------------------------------------------------------------------------- */
+
+void AtomVecBody::pack_data_post(int ilocal)
+{
+  body[ilocal] = body_flag;
+}
+
+/* ----------------------------------------------------------------------
    pack bonus body info for writing to data file
    if buf is nullptr, just return buffer size
 ------------------------------------------------------------------------- */
@@ -602,7 +615,6 @@ int AtomVecBody::pack_data_bonus(double *buf, int /*flag*/)
 {
   int i;
 
-  tagint *tag = atom->tag;
   int nlocal = atom->nlocal;
 
   int m = 0;
@@ -627,12 +639,80 @@ void AtomVecBody::write_data_bonus(FILE *fp, int n, double *buf, int /*flag*/)
 }
 
 /* ----------------------------------------------------------------------
-   unmodify values packed by AtomVec::pack_data()
+   convert read_data file info from general to restricted triclinic
+   parent class operates on data from Velocities section of data file
+   child class operates on body quaternion
 ------------------------------------------------------------------------- */
 
-void AtomVecBody::pack_data_post(int ilocal)
+void AtomVecBody::read_data_general_to_restricted(int nlocal_previous, int nlocal)
 {
-  body[ilocal] = body_flag;
+  int j;
+
+  AtomVec::read_data_general_to_restricted(nlocal_previous, nlocal);
+
+  // quat_g2r = quat that rotates from general to restricted triclinic
+  // quat_new = body quat converted to restricted triclinic
+
+  double quat_g2r[4],quat_new[4];
+  MathExtra::mat_to_quat(domain->rotate_g2r,quat_g2r);
+
+  for (int i = nlocal_previous; i < nlocal; i++) {
+    if (body[i] < 0) continue;
+    j = body[i];
+    MathExtra::quatquat(quat_g2r,bonus[j].quat,quat_new);
+    bonus[j].quat[0] = quat_new[0];
+    bonus[j].quat[1] = quat_new[1];
+    bonus[j].quat[2] = quat_new[2];
+    bonus[j].quat[3] = quat_new[3];
+  }
+}
+
+/* ----------------------------------------------------------------------
+   convert info output by write_data from restricted to general triclinic
+   parent class operates on x and data from Velocities section of data file
+   child class operates on body quaternion
+------------------------------------------------------------------------- */
+
+void AtomVecBody::write_data_restricted_to_general()
+{
+  AtomVec::write_data_restricted_to_general();
+
+  memory->create(quat_hold,nlocal_bonus,4,"atomvec:quat_hold");
+
+  for (int i = 0; i < nlocal_bonus; i++)
+    memcpy(quat_hold[i],bonus[i].quat,4*sizeof(double));
+
+  // quat_r2g = quat that rotates from restricted to general triclinic
+  // quat_new = ellipsoid quat converted to general triclinic
+
+  double quat_r2g[4],quat_new[4];
+  MathExtra::mat_to_quat(domain->rotate_r2g,quat_r2g);
+
+  for (int i = 0; i < nlocal_bonus; i++) {
+    MathExtra::quatquat(quat_r2g,bonus[i].quat,quat_new);
+    bonus[i].quat[0] = quat_new[0];
+    bonus[i].quat[1] = quat_new[1];
+    bonus[i].quat[2] = quat_new[2];
+    bonus[i].quat[3] = quat_new[3];
+  }
+}
+
+/* ----------------------------------------------------------------------
+   restore info output by write_data to restricted triclinic
+   original data is in "hold" arrays
+   parent class operates on x and data from Velocities section of data file
+   child class operates on body quaternion
+------------------------------------------------------------------------- */
+
+void AtomVecBody::write_data_restore_restricted()
+{
+  AtomVec::write_data_restore_restricted();
+
+  for (int i = 0; i < nlocal_bonus; i++)
+    memcpy(bonus[i].quat,quat_hold[i],4*sizeof(double));
+
+  memory->destroy(quat_hold);
+  quat_hold = nullptr;
 }
 
 /* ----------------------------------------------------------------------

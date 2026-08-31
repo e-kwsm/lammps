@@ -41,7 +41,6 @@ class FixShake : public Fix {
   void post_force_respa(int, int, int) override;
   void min_pre_reverse(int, int) override;
   void min_post_force(int) override;
-  void post_run() override;
 
   double memory_usage() override;
   void grow_arrays(int) override;
@@ -59,7 +58,7 @@ class FixShake : public Fix {
   virtual void correct_coordinates(int vflag);
   virtual void correct_velocities();
 
-  int dof(int) override;
+  bigint dof(int) override;
   void reset_dt() override;
   void *extract(const char *, int &) override;
   double compute_scalar() override;
@@ -84,6 +83,10 @@ class FixShake : public Fix {
   double *bond_distance, *angle_distance;    // constraint distances
   double kbond;                              // force constant for restraint
   double ebond;                              // energy of bond restraints
+
+  int store_flag;               // store per-atom constraint/restraint forces if true
+  int maxstore;                 // current size of fstore array
+  double **fstore;              // constraint/restraint force
 
   class FixRespa *fix_respa;    // rRESPA fix needed by SHAKE
   int nlevels_respa;            // copies of needed rRESPA variables
@@ -113,13 +116,14 @@ class FixShake : public Fix {
   double dtf_inner, dtf_innerhalf;    // timesteps for rRESPA trial move
 
   int *list;             // list of clusters to SHAKE
+  int **closest_list;    // list of closest atom indices in SHAKE clusters
   int nlist, maxlist;    // size and max-size of list
 
   // stat quantities
-  int *b_count, *b_count_all;                   // counts for each bond type, atoms in bond cluster
+  bigint *b_count, *b_count_all;                // counts for each bond type, atoms in bond cluster
   double *b_ave, *b_max, *b_min;                // ave/max/min dist for each bond type
   double *b_ave_all, *b_max_all, *b_min_all;    // MPI summing arrays
-  int *a_count, *a_count_all;                   // ditto for angle types
+  bigint *a_count, *a_count_all;                // ditto for angle types
   double *a_ave, *a_max, *a_min;
   double *a_ave_all, *a_max_all, *a_min_all;
 
@@ -140,8 +144,8 @@ class FixShake : public Fix {
   void shake3(int);
   void shake4(int);
   void shake3angle(int);
-  void bond_force(tagint, tagint, double);
-  void stats();
+  double bond_force(int, int, double);
+  virtual void stats();
   int bondtype_findset(int, tagint, tagint, int);
   int angletype_findset(int, tagint, tagint, int);
 

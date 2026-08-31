@@ -1,50 +1,16 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_EXPERIMENTAL_CXX20_MODULES
+import kokkos.core;
+#else
 #include <Kokkos_Core.hpp>
+#endif
 
-namespace TestAtomic {
+#include <Kokkos_TypeInfo.hpp>
+
+namespace {
 
 // Struct for testing arbitrary size atomics.
 
@@ -56,43 +22,6 @@ struct SuperScalar {
   SuperScalar() {
     for (int i = 0; i < N; i++) {
       val[i] = 0.0;
-    }
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  SuperScalar(const SuperScalar& src) {
-    for (int i = 0; i < N; i++) {
-      val[i] = src.val[i];
-    }
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  SuperScalar(const volatile SuperScalar& src) {
-    for (int i = 0; i < N; i++) {
-      val[i] = src.val[i];
-    }
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  SuperScalar& operator=(const SuperScalar& src) {
-    for (int i = 0; i < N; i++) {
-      val[i] = src.val[i];
-    }
-    return *this;
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  SuperScalar& operator=(const volatile SuperScalar& src) {
-    for (int i = 0; i < N; i++) {
-      val[i] = src.val[i];
-    }
-    return *this;
-  }
-
-  KOKKOS_INLINE_FUNCTION
-  void operator=(const SuperScalar& src) volatile {
-    for (int i = 0; i < N; i++) {
-      val[i] = src.val[i];
     }
   }
 
@@ -162,7 +91,7 @@ template <class T, class DEVICE_TYPE>
 struct ZeroFunctor {
   using execution_space = DEVICE_TYPE;
   using type            = typename Kokkos::View<T, execution_space>;
-  using h_type          = typename Kokkos::View<T, execution_space>::HostMirror;
+  using h_type = typename Kokkos::View<T, execution_space>::host_mirror_type;
 
   type data;
 
@@ -185,17 +114,6 @@ struct AddFunctor {
   void operator()(int) const { Kokkos::atomic_fetch_add(&data(), (T)1); }
 };
 
-template <class T, class DEVICE_TYPE>
-struct AddFunctorReduce {
-  using execution_space = DEVICE_TYPE;
-  using type            = Kokkos::View<T, execution_space>;
-
-  type data;
-
-  KOKKOS_INLINE_FUNCTION
-  void operator()(int, int&) const { Kokkos::atomic_fetch_add(&data(), (T)1); }
-};
-
 template <class T, class execution_space>
 T AddLoop(int loop) {
   struct ZeroFunctor<T, execution_space> f_zero;
@@ -215,12 +133,6 @@ T AddLoop(int loop) {
 
   Kokkos::deep_copy(h_data, data);
   T val = h_data();
-
-  struct AddFunctorReduce<T, execution_space> f_add_red;
-  f_add_red.data = data;
-  int dummy_result;
-  Kokkos::parallel_reduce(loop, f_add_red, dummy_result);
-  execution_space().fence();
 
   return val;
 }
@@ -264,26 +176,6 @@ struct CASFunctor {
   }
 };
 
-template <class T, class DEVICE_TYPE>
-struct CASFunctorReduce {
-  using execution_space = DEVICE_TYPE;
-  using type            = Kokkos::View<T, execution_space>;
-
-  type data;
-
-  KOKKOS_INLINE_FUNCTION
-  void operator()(int, int&) const {
-    T old = data();
-    T newval, assumed;
-
-    do {
-      assumed = old;
-      newval  = assumed + (T)1;
-      old     = Kokkos::atomic_compare_exchange(&data(), assumed, newval);
-    } while (old != assumed);
-  }
-};
-
 template <class T, class execution_space>
 T CASLoop(int loop) {
   struct ZeroFunctor<T, execution_space> f_zero;
@@ -301,12 +193,6 @@ T CASLoop(int loop) {
 
   Kokkos::deep_copy(h_data, data);
   T val = h_data();
-
-  struct CASFunctorReduce<T, execution_space> f_cas_red;
-  f_cas_red.data = data;
-  int dummy_result;
-  Kokkos::parallel_reduce(loop, f_cas_red, dummy_result);
-  execution_space().fence();
 
   return val;
 }
@@ -353,20 +239,6 @@ struct ExchFunctor {
   }
 };
 
-template <class T, class DEVICE_TYPE>
-struct ExchFunctorReduce {
-  using execution_space = DEVICE_TYPE;
-  using type            = Kokkos::View<T, execution_space>;
-
-  type data, data2;
-
-  KOKKOS_INLINE_FUNCTION
-  void operator()(int i, int&) const {
-    T old = Kokkos::atomic_exchange(&data(), (T)i);
-    Kokkos::atomic_fetch_add(&data2(), old);
-  }
-};
-
 template <class T, class execution_space>
 T ExchLoop(int loop) {
   struct ZeroFunctor<T, execution_space> f_zero;
@@ -394,20 +266,13 @@ T ExchLoop(int loop) {
   Kokkos::deep_copy(h_data2, data2);
   T val = h_data() + h_data2();
 
-  struct ExchFunctorReduce<T, execution_space> f_exch_red;
-  f_exch_red.data  = data;
-  f_exch_red.data2 = data2;
-  int dummy_result;
-  Kokkos::parallel_reduce(loop, f_exch_red, dummy_result);
-  execution_space().fence();
-
   return val;
 }
 
 template <class T>
-T ExchLoopSerial(std::conditional_t<
-                 !std::is_same<T, Kokkos::complex<double> >::value, int, void>
-                     loop) {
+T ExchLoopSerial(
+    std::conditional_t<!std::is_same_v<T, Kokkos::complex<double> >, int, void>
+        loop) {
   T* data  = new T[1];
   T* data2 = new T[1];
   data[0]  = 0;
@@ -427,9 +292,9 @@ T ExchLoopSerial(std::conditional_t<
 }
 
 template <class T>
-T ExchLoopSerial(std::conditional_t<
-                 std::is_same<T, Kokkos::complex<double> >::value, int, void>
-                     loop) {
+T ExchLoopSerial(
+    std::conditional_t<std::is_same_v<T, Kokkos::complex<double> >, int, void>
+        loop) {
   T* data  = new T[1];
   T* data2 = new T[1];
   data[0]  = 0;
@@ -455,8 +320,10 @@ T LoopVariant(int loop, int test) {
     case 1: return AddLoop<T, DeviceType>(loop);
     case 2: return CASLoop<T, DeviceType>(loop);
     case 3: return ExchLoop<T, DeviceType>(loop);
+    default: Kokkos::abort("unreachable");
   }
 
+  Kokkos::abort("unreachable");
   return 0;
 }
 
@@ -466,105 +333,127 @@ T LoopVariantSerial(int loop, int test) {
     case 1: return AddLoopSerial<T>(loop);
     case 2: return CASLoopSerial<T>(loop);
     case 3: return ExchLoopSerial<T>(loop);
+    default: Kokkos::abort("unreachable");
   }
 
+  Kokkos::abort("unreachable");
   return 0;
 }
 
 template <class T, class DeviceType>
-bool Loop(int loop, int test) {
+void Loop(int loop, int test) {
   T res       = LoopVariant<T, DeviceType>(loop, test);
   T resSerial = LoopVariantSerial<T>(loop, test);
 
-  bool passed = true;
-
-  if (resSerial != res) {
-    passed = false;
-
-    std::cout << "Loop<" << typeid(T).name() << ">( test = " << test
-              << " FAILED : " << resSerial << " != " << res << std::endl;
-  }
-
-  return passed;
+  ASSERT_EQ(res, resSerial) << "Loop<" << Kokkos::Impl::TypeInfo<T>::name()
+                            << ">(loop=" << loop << ",test=" << test << ")";
 }
-
-}  // namespace TestAtomic
-
-namespace Test {
 
 TEST(TEST_CATEGORY, atomics) {
   const int loop_count = 1e4;
 
-  ASSERT_TRUE((TestAtomic::Loop<int, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<int, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<int, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<int, TEST_EXECSPACE>(loop_count, 1);
+  Loop<int, TEST_EXECSPACE>(loop_count, 2);
+  Loop<int, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE((TestAtomic::Loop<unsigned int, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<unsigned int, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<unsigned int, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<unsigned int, TEST_EXECSPACE>(loop_count, 1);
+  Loop<unsigned int, TEST_EXECSPACE>(loop_count, 2);
+  Loop<unsigned int, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE((TestAtomic::Loop<long int, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<long int, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<long int, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<long int, TEST_EXECSPACE>(loop_count, 1);
+  Loop<long int, TEST_EXECSPACE>(loop_count, 2);
+  Loop<long int, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE(
-      (TestAtomic::Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 1);
+  Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 2);
+  Loop<unsigned long int, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE((TestAtomic::Loop<long long int, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<long long int, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<long long int, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<long long int, TEST_EXECSPACE>(loop_count, 1);
+  Loop<long long int, TEST_EXECSPACE>(loop_count, 2);
+  Loop<long long int, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE((TestAtomic::Loop<double, TEST_EXECSPACE>(loop_count, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<double, TEST_EXECSPACE>(loop_count, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<double, TEST_EXECSPACE>(loop_count, 3)));
+  Loop<double, TEST_EXECSPACE>(loop_count, 1);
+  Loop<double, TEST_EXECSPACE>(loop_count, 2);
+  Loop<double, TEST_EXECSPACE>(loop_count, 3);
 
-  ASSERT_TRUE((TestAtomic::Loop<float, TEST_EXECSPACE>(100, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<float, TEST_EXECSPACE>(100, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<float, TEST_EXECSPACE>(100, 3)));
+  Loop<float, TEST_EXECSPACE>(100, 1);
+  Loop<float, TEST_EXECSPACE>(100, 2);
+  Loop<float, TEST_EXECSPACE>(100, 3);
 
-#ifndef KOKKOS_ENABLE_OPENMPTARGET
-  ASSERT_TRUE((TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 1)));
-  ASSERT_TRUE((TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 2)));
-  ASSERT_TRUE((TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 3)));
+  // FIXME_OPENACC: atomic operations on composite types are not supported.
+#if !defined(KOKKOS_ENABLE_OPENACC)
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 1);
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 2);
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(1, 3);
 
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 1)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 2)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 3)));
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 1);
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 2);
+  Loop<Kokkos::complex<float>, TEST_EXECSPACE>(100, 3);
 
-// FIXME_SYCL atomics for large types to be implemented
-#ifndef KOKKOS_ENABLE_SYCL
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 1)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 2)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 3)));
+// FIXME_SYCL Replace macro by SYCL_EXT_ONEAPI_DEVICE_GLOBAL or remove
+// condition alltogether when possible.
+#if defined(KOKKOS_ENABLE_SYCL) && \
+    !defined(KOKKOS_IMPL_SYCL_DEVICE_GLOBAL_SUPPORTED)
+  if (std::is_same_v<TEST_EXECSPACE, Kokkos::SYCL>) return;
+#endif
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 1);
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 2);
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(1, 3);
 
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 1)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 2)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 3)));
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 1);
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 2);
+  Loop<Kokkos::complex<double>, TEST_EXECSPACE>(100, 3);
 
 // WORKAROUND MSVC
 #ifndef _WIN32
-  ASSERT_TRUE(
-      (TestAtomic::Loop<TestAtomic::SuperScalar<4>, TEST_EXECSPACE>(100, 1)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<TestAtomic::SuperScalar<4>, TEST_EXECSPACE>(100, 2)));
-  ASSERT_TRUE(
-      (TestAtomic::Loop<TestAtomic::SuperScalar<4>, TEST_EXECSPACE>(100, 3)));
-#endif
+  Loop<SuperScalar<4>, TEST_EXECSPACE>(100, 1);
+  Loop<SuperScalar<4>, TEST_EXECSPACE>(100, 2);
+  Loop<SuperScalar<4>, TEST_EXECSPACE>(100, 3);
 #endif
 #endif
 }
 
-}  // namespace Test
+// see https://github.com/trilinos/Trilinos/pull/11506
+struct TpetraUseCase {
+  template <class Scalar>
+  struct AbsMaxHelper {
+    Scalar value;
+
+    KOKKOS_FUNCTION AbsMaxHelper& operator+=(AbsMaxHelper const& rhs) {
+      Scalar lhs_abs_value = Kokkos::abs(value);
+      Scalar rhs_abs_value = Kokkos::abs(rhs.value);
+      value = lhs_abs_value > rhs_abs_value ? lhs_abs_value : rhs_abs_value;
+      return *this;
+    }
+
+    KOKKOS_FUNCTION AbsMaxHelper operator+(AbsMaxHelper const& rhs) const {
+      AbsMaxHelper ret = *this;
+      ret += rhs;
+      return ret;
+    }
+  };
+
+  using T = int;
+  Kokkos::View<T, TEST_EXECSPACE> d_{"lbl"};
+  KOKKOS_FUNCTION void operator()(int i) const {
+    // 0, -1, 2, -3, ...
+    auto v_i = static_cast<T>(i);
+    if (i % 2 == 1) v_i = -v_i;
+    Kokkos::atomic_add(reinterpret_cast<AbsMaxHelper<T>*>(&d_()),
+                       AbsMaxHelper<T>{v_i});
+  }
+
+  TpetraUseCase() {
+    Kokkos::parallel_for(Kokkos::RangePolicy<TEST_EXECSPACE>(0, 10), *this);
+  }
+
+  void check() {
+    T v;
+    Kokkos::deep_copy(v, d_);
+    ASSERT_EQ(v, 9);
+  }
+};
+
+TEST(TEST_CATEGORY, atomics_tpetra_max_abs) { TpetraUseCase().check(); }
+
+}  // namespace

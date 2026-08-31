@@ -22,6 +22,8 @@
 #include "update.h"
 #include "variable.h"
 
+#include <cstring>
+
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
@@ -33,12 +35,17 @@ FixVector::FixVector(LAMMPS *lmp, int narg, char **arg) :
   if (narg < 5) utils::missing_cmd_args(FLERR, "fix vector", error);
 
   nevery = utils::inumeric(FLERR, arg[3], false, lmp);
-  if (nevery <= 0) error->all(FLERR, "Invalid fix vector every argument: {}", nevery);
+  if (nevery <= 0) error->all(FLERR, 3, "Invalid fix vector every argument: {}", nevery);
+
+  nmaxval = MAXSMALLINT;
+  nindex = 0;
 
   // parse values
 
+  int iarg = 4;
   values.clear();
-  for (int iarg = 4; iarg < narg; iarg++) {
+
+  while (iarg < narg) {
     ArgInfo argi(arg[iarg]);
 
     value_t val;
@@ -47,10 +54,25 @@ FixVector::FixVector(LAMMPS *lmp, int narg, char **arg) :
     val.id = argi.get_name();
     val.val.c = nullptr;
 
-    if ((val.which == ArgInfo::UNKNOWN) || (val.which == ArgInfo::NONE) || (argi.get_dim() > 1))
+    if ((val.which == ArgInfo::UNKNOWN) || (argi.get_dim() > 1))
       error->all(FLERR, "Invalid fix vector argument: {}", arg[iarg]);
 
+    if (val.which == ArgInfo::NONE) break;
+
     values.push_back(val);
+    ++iarg;
+  }
+
+  while (iarg < narg) {
+
+    if (strcmp(arg[iarg], "nmax") == 0) {
+      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "fix vector nmax", error);
+      nmaxval = utils::bnumeric(FLERR, arg[iarg + 1], false, lmp);
+      if ((nmaxval < 1) || (nmaxval > MAXSMALLINT)) error->all(FLERR, "Invalid nmax value");
+      iarg += 2;
+    } else {
+      error->all(FLERR, "Unknown fix vector keyword: {}", arg[iarg]);
+    }
   }
 
   // setup and error check
@@ -58,18 +80,19 @@ FixVector::FixVector(LAMMPS *lmp, int narg, char **arg) :
   // this fix produces either a global vector or array
   // intensive/extensive flags set by compute,fix,variable that produces value
 
-  int value, finalvalue;
+  int value = 0, finalvalue;
   bool first = true;
   for (auto &val : values) {
     if (val.which == ArgInfo::COMPUTE) {
-      auto icompute = modify->get_compute_by_id(val.id);
+      auto *icompute = modify->get_compute_by_id(val.id);
       if (!icompute) error->all(FLERR, "Compute ID {} for fix vector does not exist", val.id);
       if (val.argindex == 0 && icompute->scalar_flag == 0)
         error->all(FLERR, "Fix vector compute {} does not calculate a scalar", val.id);
       if (val.argindex && icompute->vector_flag == 0)
         error->all(FLERR, "Fix vector compute {} does not calculate a vector", val.id);
       if (val.argindex && (val.argindex > icompute->size_vector))
-        error->all(FLERR, "Fix vector compute {} vector is accessed out-of-range", val.id);
+        error->all(FLERR, "Fix vector compute {} vector is accessed out-of-range{}",
+                   val.id, utils::errorurl(20));
 
       if (val.argindex == 0)
         value = icompute->extscalar;
@@ -80,21 +103,25 @@ FixVector::FixVector(LAMMPS *lmp, int narg, char **arg) :
       val.val.c = icompute;
 
     } else if (val.which == ArgInfo::FIX) {
-      auto ifix = modify->get_fix_by_id(val.id);
+      auto *ifix = modify->get_fix_by_id(val.id);
       if (!ifix) error->all(FLERR, "Fix ID {} for fix vector does not exist", val.id);
       if (val.argindex == 0 && ifix->scalar_flag == 0)
         error->all(FLERR, "Fix vector fix {} does not calculate a scalar", val.id);
       if (val.argindex && ifix->vector_flag == 0)
         error->all(FLERR, "Fix vector fix {} does not calculate a vector", val.id);
       if (val.argindex && val.argindex > ifix->size_vector)
-        error->all(FLERR, "Fix vector fix {} vector is accessed out-of-range", val.id);
+        error->all(FLERR, "Fix vector fix {} vector is accessed out-of-range{}",
+                   val.id, utils::errorurl(20));
       if (nevery % ifix->global_freq)
-        error->all(FLERR, "Fix for fix {} vector not computed at compatible time", val.id);
+        error->all(FLERR, "Fix for fix {} vector not computed at compatible time{}",
+                   val.id, utils::errorurl(7));
 
       if (val.argindex == 0)
+        value = ifix->extscalar;
+      else if (ifix->extvector >= 0)
         value = ifix->extvector;
       else
-        value = ifix->extarray;
+        value = ifix->extlist[val.argindex - 1];
       val.val.f = ifix;
 
     } else if (val.which == ArgInfo::VARIABLE) {
@@ -132,7 +159,8 @@ FixVector::FixVector(LAMMPS *lmp, int narg, char **arg) :
 
   vector = nullptr;
   array = nullptr;
-  ncount = ncountmax = 0;
+  ncount = nindex = 0;
+  ncountmax = 1;
   if (values.size() == 1)
     size_vector = 0;
   else
@@ -198,11 +226,22 @@ void FixVector::init()
 
   bigint finalstep = update->endstep / nevery * nevery;
   if (finalstep > update->endstep) finalstep -= nevery;
+  const bigint oldmax = (vector || array) ? ncountmax : 0;
   ncountmax = (finalstep - initialstep) / nevery + 1;
-  if (values.size() == 1)
+  if (ncountmax <= 0) ncountmax = 1;
+  if (ncountmax > nmaxval) ncountmax = nmaxval;
+
+  // zero out only newly added storage: init() runs before every run and
+  // values stored in previous runs must be kept
+
+  if (values.size() == 1) {
     memory->grow(vector, ncountmax, "vector:vector");
-  else
+    if (ncountmax > oldmax) memset(&vector[oldmax], 0, (ncountmax-oldmax)*sizeof(double));
+  } else {
     memory->grow(array, ncountmax, values.size(), "vector:array");
+    if (ncountmax > oldmax)
+      memset(&array[oldmax][0], 0, (ncountmax-oldmax)*values.size()*sizeof(double));
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -221,16 +260,18 @@ void FixVector::end_of_step()
   // skip if not step which requires doing something
 
   if (update->ntimestep != nextstep) return;
-  if (ncount == ncountmax) error->all(FLERR, "Overflow of allocated fix vector storage");
+
+  // wrap around when vector/array is full
+  nindex = ncount % ncountmax;
 
   // accumulate results of computes,fixes,variables to local copy
   // compute/fix/variable may invoke computes so wrap with clear/add
 
   double *result;
   if (values.size() == 1)
-    result = &vector[ncount];
+    result = &vector[nindex];
   else
-    result = array[ncount];
+    result = array[nindex];
 
   modify->clearstep_compute();
 
@@ -290,9 +331,9 @@ void FixVector::end_of_step()
 
   ncount++;
   if (values.size() == 1)
-    size_vector++;
+    size_vector = MIN(size_vector + 1, ncountmax);
   else
-    size_array_rows++;
+    size_array_rows = MIN(size_array_rows + 1, ncountmax);
 }
 
 /* ----------------------------------------------------------------------
@@ -301,7 +342,9 @@ void FixVector::end_of_step()
 
 double FixVector::compute_vector(int i)
 {
-  return vector[i];
+  int idx = i;
+  if (ncount >= ncountmax) idx = (i + ncount) % ncountmax;
+  return vector[idx];
 }
 
 /* ----------------------------------------------------------------------
@@ -310,5 +353,7 @@ double FixVector::compute_vector(int i)
 
 double FixVector::compute_array(int i, int j)
 {
-  return array[i][j];
+  int idx = i;
+  if (ncount >= ncountmax) idx = (i + ncount) % ncountmax;
+  return array[idx][j];
 }

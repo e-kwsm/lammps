@@ -1,10 +1,11 @@
 .. index:: pair_style coul/diel
+.. index:: pair_style coul/diel/kk
 .. index:: pair_style coul/diel/omp
 
 pair_style coul/diel command
 ============================
 
-Accelerator Variants: *coul/diel/omp*
+Accelerator Variants: *coul/diel/kk*, *coul/diel/omp*
 
 Syntax
 """"""
@@ -28,7 +29,7 @@ Description
 
 Style *coul/diel* computes a Coulomb correction for implicit solvent
 ion interactions in which the dielectric permittivity is distance dependent.
-The dielectric permittivity epsilon_D(r) connects to limiting regimes:
+The dielectric permittivity :math:`\epsilon_D(r)` connects to limiting regimes:
 One limit is defined by a small dielectric permittivity (close to vacuum)
 at or close to contact separation between the ions. At larger separations
 the dielectric permittivity reaches a bulk value used in the regular Coulomb
@@ -45,7 +46,7 @@ where :math:`r_{me}` is the inflection point of :math:`\epsilon_D(r)` and :math:
 defining length scale. C is the same Coulomb conversion factor as in the
 pair_styles coul/cut, coul/long, and coul/debye. In this way the Coulomb
 interaction between ions is corrected at small distances r. The lower
-limit of epsilon_D(r->0)=5.2 due to dielectric saturation :ref:`(Stiles) <Stiles>`
+limit of :math:`\epsilon_D(r \to 0) = 5.2` due to dielectric saturation :ref:`(Stiles) <Stiles>`
 while the Coulomb interaction reaches its bulk limit by setting
 :math:`\epsilon_D(r \to \infty) = \epsilon`, the bulk value of the solvent which is 78
 for water at 298K.
@@ -68,6 +69,10 @@ commands:
 * :math:`\sigma_e` (distance units)
 
 The global cutoff (:math:`r_c`) specified in the pair_style command is used.
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 
@@ -113,12 +118,12 @@ none
 
 .. _Stiles:
 
-**(Stiles)** Stiles , Hubbard, and Kayser, J Chem Phys, 77,
+**(Stiles)** Stiles, Hubbard, and Kayser, J Chem Phys, 77,
 6189 (1982).
 
 .. _Lenart1:
 
-**(Lenart)** Lenart , Jusufi, and Panagiotopoulos, J Chem Phys, 126,
+**(Lenart)** Lenart, Jusufi, and Panagiotopoulos, J Chem Phys, 126,
 044509 (2007).
 
 .. _Jusufi1:

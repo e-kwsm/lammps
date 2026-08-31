@@ -20,13 +20,11 @@ KSpaceStyle(pppm/disp,PPPMDisp);
 #ifndef LMP_PPPM_DISP_H
 #define LMP_PPPM_DISP_H
 
+#include "ewald_const.h"
 #include "kspace.h"
 #include "lmpfftsettings.h"
 
 namespace LAMMPS_NS {
-
-#define EWALD_MAXORDER 6
-#define EWALD_FUNCS 4
 
 class PPPMDisp : public KSpace {
  public:
@@ -34,7 +32,7 @@ class PPPMDisp : public KSpace {
   ~PPPMDisp() override;
   void init() override;
   void setup() override;
-  void setup_grid() override;
+  void reset_grid() override;
   void settings(int, char **) override;
   void compute(int, int) override;
   int timing_1d(int, double &) override;
@@ -59,24 +57,24 @@ class PPPMDisp : public KSpace {
 
   int nsplit;
   int nsplit_alloc;
-  int function[EWALD_FUNCS];
+  int termflag[EwaldConst::EWALD_NTERMS];
 
   double delxinv, delyinv, delzinv, delvolinv;
   double delxinv_6, delyinv_6, delzinv_6, delvolinv_6;
 
-  double shift, shiftone;
+  double shift, shiftone, shiftatom_lo, shiftatom_hi;
   int nxlo_in, nylo_in, nzlo_in, nxhi_in, nyhi_in, nzhi_in;
   int nxlo_out, nylo_out, nzlo_out, nxhi_out, nyhi_out, nzhi_out;
   int nxlo_fft, nylo_fft, nzlo_fft, nxhi_fft, nyhi_fft, nzhi_fft;
   int nlower, nupper;
-  int ngrid, nfft, nfft_both;
+  int ngrid, nfft_brick, nfft, nfft_both;
 
-  double shift_6, shiftone_6;
+  double shift_6, shiftone_6, shiftatom_lo_6, shiftatom_hi_6;
   int nxlo_in_6, nylo_in_6, nzlo_in_6, nxhi_in_6, nyhi_in_6, nzhi_in_6;
   int nxlo_out_6, nylo_out_6, nzlo_out_6, nxhi_out_6, nyhi_out_6, nzhi_out_6;
   int nxlo_fft_6, nylo_fft_6, nzlo_fft_6, nxhi_fft_6, nyhi_fft_6, nzhi_fft_6;
   int nlower_6, nupper_6;
-  int ngrid_6, nfft_6, nfft_both_6;
+  int ngrid_6, nfft_brick_6, nfft_6, nfft_both_6;
 
   // the following variables are needed for every structure factor
 
@@ -149,7 +147,8 @@ class PPPMDisp : public KSpace {
   FFT_SCALAR ****v0_brick_none, ****v1_brick_none, ****v2_brick_none, ****v3_brick_none,
       ****v4_brick_none, ****v5_brick_none;
 
-  //// needed for each interaction type
+  // needed for each interaction type
+
   double *greensfn;
   double **vg;
   double **vg2;
@@ -178,7 +177,7 @@ class PPPMDisp : public KSpace {
   class FFT3d *fft1, *fft2;
   class FFT3d *fft1_6, *fft2_6;
   class Remap *remap, *remap_6;
-  class GridComm *gc, *gc6;
+  class Grid3d *gc, *gc6;
 
   FFT_SCALAR *gc_buf1, *gc_buf2, *gc6_buf1, *gc6_buf2;
   int ngc_buf1, ngc_buf2, npergrid;
@@ -190,7 +189,9 @@ class PPPMDisp : public KSpace {
 
   int triclinic;    // domain settings, orthog or triclinic
   double *boxlo;
+
   // TIP4P settings
+
   int typeH, typeO;    // atom types of TIP4P water H and O atoms
   double qdist;        // distance from O site to negative charge
   double alpha;        // geometric factor
@@ -202,15 +203,16 @@ class PPPMDisp : public KSpace {
   void mmult(double **, double **, double **, int);
   int check_convergence(double **, double **, double **, double **, double **, double **, int);
 
-  void set_grid();
-  void set_grid_6();
+  void set_grid_global();
+  void set_grid_global_6();
+  void set_grid_local(int, int, int, int, double &, double &, double &, double &, int &, int &,
+                      int &, int &, int &, int &, int &, int &);
   void set_init_g6();
-  void set_fft_parameters(int &, int &, int &, int &, int &, int &, int &, int &, int &, int &,
-                          int &, int &, int &, int &, int &, int &, int &, int &, int &, int &,
-                          int &, int &, int &, int &, int &, int &, double &, double &, int &);
   void set_n_pppm_6();
+
   void adjust_gewald();
   void adjust_gewald_6();
+
   double f();
   double derivf();
   double f_6();
@@ -218,6 +220,7 @@ class PPPMDisp : public KSpace {
   double final_accuracy();
   void final_accuracy_6(double &, double &, double &);
   double lj_rspace_error();
+
   double compute_qopt();
   double compute_qopt_6();
   double compute_qopt_ik();
@@ -231,6 +234,7 @@ class PPPMDisp : public KSpace {
   virtual void allocate_peratom();
   virtual void deallocate();
   virtual void deallocate_peratom();
+
   int factorable(int);
   double rms(double, double, bigint, double, double **);
   double diffpr(double, double, double, double, double **);
@@ -239,10 +243,15 @@ class PPPMDisp : public KSpace {
 
   void compute_sf_precoeff(int, int, int, int, int, int, int, int, int, int, double *, double *,
                            double *, double *, double *, double *);
-  void compute_gf();
+  virtual void compute_gf();
   void compute_sf_coeff();
-  void compute_gf_6();
+  virtual void compute_gf_6();
   void compute_sf_coeff_6();
+
+  // triclinic (non-orthogonal box) support, ik differentiation only
+  void setup_triclinic();
+  void compute_gf_triclinic();
+  void compute_gf_6_triclinic();
 
   virtual void particle_map(double, double, double, double, int **, int, int, int, int, int, int,
                             int, int);
@@ -314,7 +323,7 @@ class PPPMDisp : public KSpace {
   virtual void fieldforce_none_ik();
   virtual void fieldforce_none_ad();
   virtual void fieldforce_none_peratom();
-  void procs2grid2d(int, int, int, int *, int *);
+  void procs2grid2d(int, int, int, int &, int &);
   void compute_rho1d(const FFT_SCALAR &, const FFT_SCALAR &, const FFT_SCALAR &, int, FFT_SCALAR **,
                      FFT_SCALAR **);
   void compute_drho1d(const FFT_SCALAR &, const FFT_SCALAR &, const FFT_SCALAR &, int,
@@ -322,6 +331,7 @@ class PPPMDisp : public KSpace {
   void compute_rho_coeff(FFT_SCALAR **, FFT_SCALAR **, int);
   virtual void slabcorr(int);
 
+ public:
   // grid communication
 
   void pack_forward_grid(int, void *, int, int *) override;

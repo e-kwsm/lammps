@@ -11,6 +11,7 @@ This section documents the following functions:
 - :cpp:func:`lammps_mpi_finalize`
 - :cpp:func:`lammps_kokkos_finalize`
 - :cpp:func:`lammps_python_finalize`
+- :cpp:func:`lammps_plugin_finalize`
 - :cpp:func:`lammps_error`
 
 --------------------
@@ -22,7 +23,7 @@ as the "handle" argument in subsequent function calls until that
 instance is destroyed by calling :cpp:func:`lammps_close`.  Here is a
 simple example demonstrating its use:
 
-.. code-block:: C
+.. code-block:: c
 
    #include "library.h"
    #include <stdio.h>
@@ -115,6 +116,11 @@ calling program.
 -----------------------
 
 .. doxygenfunction:: lammps_python_finalize
+   :project: progguide
+
+-----------------------
+
+.. doxygenfunction:: lammps_plugin_finalize
    :project: progguide
 
 -----------------------

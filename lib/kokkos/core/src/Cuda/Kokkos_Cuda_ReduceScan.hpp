@@ -1,46 +1,5 @@
-/*
-//@HEADER
-// ************************************************************************
-//
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
-//               Solutions of Sandia, LLC (NTESS).
-//
-// Under the terms of Contract DE-NA0003525 with NTESS,
-// the U.S. Government retains certain rights in this software.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
-//@HEADER
-*/
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
 
 #ifndef KOKKOS_CUDA_REDUCESCAN_HPP
 #define KOKKOS_CUDA_REDUCESCAN_HPP
@@ -90,32 +49,33 @@ template <class ValueType, class ReducerType>
 __device__ inline void cuda_inter_warp_reduction(
     ValueType& value, const ReducerType& reducer,
     const int max_active_thread = blockDim.y) {
-#define STEP_WIDTH 4
-  // Depending on the ValueType _shared__ memory must be aligned up to 8byte
-  // boundaries The reason not to use ValueType directly is that for types with
+  constexpr int step_width = 4;
+  // Depending on the ValueType, __shared__ memory must be aligned up to 8byte
+  // boundaries. The reason not to use ValueType directly is that for types with
   // constructors it could lead to race conditions
   alignas(alignof(ValueType) > alignof(double) ? alignof(ValueType)
                                                : alignof(double))
-      __shared__ double sh_result[(sizeof(ValueType) + 7) / 8 * STEP_WIDTH];
+      __shared__ double sh_result[(sizeof(ValueType) + 7) / 8 * step_width];
   ValueType* result = (ValueType*)&sh_result;
   const int step    = 32 / blockDim.x;
-  int shift         = STEP_WIDTH;
+  int shift         = step_width;
   const int id      = threadIdx.y % step == 0 ? threadIdx.y / step : 65000;
-  if (id < STEP_WIDTH) {
+  if (id < step_width) {
     result[id] = value;
   }
   __syncthreads();
   while (shift <= max_active_thread / step) {
-    if (shift <= id && shift + STEP_WIDTH > id && threadIdx.x == 0) {
-      reducer.join(&result[id % STEP_WIDTH], &value);
+    if (shift <= id && shift + step_width > id && threadIdx.x == 0) {
+      reducer.join(&result[id % step_width], &value);
     }
     __syncthreads();
-    shift += STEP_WIDTH;
+    shift += step_width;
   }
 
   value = result[0];
-  for (int i = 1; (i * step < max_active_thread) && i < STEP_WIDTH; i++)
+  for (int i = 1; (i * step < max_active_thread) && i < step_width; i++)
     reducer.join(&value, &result[i]);
+  __syncthreads();
 }
 
 template <class ValueType, class ReducerType>
@@ -130,7 +90,7 @@ template <class FunctorType>
 __device__ bool cuda_inter_block_reduction(
     typename FunctorType::reference_type value,
     typename FunctorType::reference_type neutral, const FunctorType& reducer,
-    Cuda::size_type* const m_scratch_space,
+    typename FunctorType::pointer_type const m_scratch_space,
     typename FunctorType::pointer_type const /*result*/,
     Cuda::size_type* const m_scratch_flags,
     const int max_active_thread = blockDim.y) {
@@ -144,7 +104,7 @@ __device__ bool cuda_inter_block_reduction(
 
   // One thread in the block writes block result to global scratch_memory
   if (id == 0) {
-    pointer_type global = ((pointer_type)m_scratch_space) + blockIdx.x;
+    pointer_type global = m_scratch_space + blockIdx.x;
     *global             = value;
   }
 
@@ -167,7 +127,7 @@ __device__ bool cuda_inter_block_reduction(
       last_block = true;
       value      = neutral;
 
-      pointer_type const volatile global = (pointer_type)m_scratch_space;
+      pointer_type const volatile global = m_scratch_space;
 
       // Reduce all global values with splitting work over threads in one warp
       const int step_size =
@@ -242,14 +202,19 @@ struct CudaReductionsFunctor<FunctorType, false, true> {
 
   __device__ static inline void scalar_intra_block_reduction(
       const FunctorType& functor, Scalar value, const bool skip,
-      Scalar* my_global_team_buffer_element, const int shared_elements,
+      Scalar* my_global_team_buffer_element, const unsigned int shared_elements,
       Scalar* shared_team_buffer_element) {
-    const int warp_id = (threadIdx.y * blockDim.x) / 32;
+    const unsigned int warp_id     = (threadIdx.y * blockDim.x) / 32u;
+    const unsigned int num_threads = blockDim.x * blockDim.y;
     Scalar* const my_shared_team_buffer_element =
         shared_team_buffer_element + warp_id % shared_elements;
 
+    const unsigned int num_active_threads_in_warp0 =
+        Kokkos::min(32u, num_threads);
+
     // Warp Level Reduction, ignoring Kokkos vector entries
-    scalar_intra_warp_reduction(functor, value, skip, 32, value);
+    scalar_intra_warp_reduction(functor, value, skip,
+                                num_active_threads_in_warp0, value);
 
     if (warp_id < shared_elements) {
       *my_shared_team_buffer_element = value;
@@ -258,21 +223,27 @@ struct CudaReductionsFunctor<FunctorType, false, true> {
     // warp reduction
     __syncthreads();
 
-    const int num_warps = blockDim.x * blockDim.y / 32;
-    for (int w = shared_elements; w < num_warps; w += shared_elements) {
+    const unsigned int num_warps = num_threads / 32u;
+    for (unsigned int w = shared_elements; w < num_warps;
+         w += shared_elements) {
       if (warp_id >= w && warp_id < w + shared_elements) {
-        if ((threadIdx.y * blockDim.x + threadIdx.x) % 32 == 0)
+        if ((threadIdx.y * blockDim.x + threadIdx.x) % 32u == 0u)
           functor.join(my_shared_team_buffer_element, &value);
       }
       __syncthreads();
     }
 
-    if (warp_id == 0) {
+    if (warp_id == 0u) {
       functor.init(&value);
+
+      // We can increment by WarpSize rather than num_active_threads_in_warp0
+      // because if the first warp is not complete, we won't enter the loop
       for (unsigned int i = threadIdx.y * blockDim.x + threadIdx.x;
-           i < blockDim.y * blockDim.x / 32; i += 32)
+           i < num_warps; i += 32u)
         functor.join(&value, &shared_team_buffer_element[i]);
-      scalar_intra_warp_reduction(functor, value, false, 32,
+
+      scalar_intra_warp_reduction(functor, value, false,
+                                  num_active_threads_in_warp0,
                                   *my_global_team_buffer_element);
     }
   }
@@ -285,9 +256,9 @@ struct CudaReductionsFunctor<FunctorType, false, true> {
     Scalar* const my_global_team_buffer_element =
         global_team_buffer_element + blockIdx.x;
     Scalar* shared_team_buffer_elements = ((Scalar*)shared_data);
-    Scalar value        = shared_team_buffer_elements[threadIdx.y];
-    int shared_elements = blockDim.x * blockDim.y / 32;
-    int global_elements = block_count;
+    Scalar value                 = shared_team_buffer_elements[threadIdx.y];
+    unsigned int shared_elements = blockDim.x * blockDim.y / 32u;
+    unsigned int global_elements = block_count;
     __syncthreads();
 
     scalar_intra_block_reduction(functor, value, true,
@@ -295,21 +266,21 @@ struct CudaReductionsFunctor<FunctorType, false, true> {
                                  shared_team_buffer_elements);
     __threadfence();
     __syncthreads();
-    unsigned int num_teams_done = 0;
+    unsigned int num_teams_done = 0u;
     // The cast in the atomic call is necessary to find matching call with
     // MSVC/NVCC
-    if (threadIdx.x + threadIdx.y == 0) {
+    if (threadIdx.x + threadIdx.y == 0u) {
       num_teams_done =
           Kokkos::atomic_fetch_add(global_flags, static_cast<unsigned int>(1)) +
-          1;
+          1u;
     }
     bool is_last_block = false;
     if (__syncthreads_or(num_teams_done == gridDim.x)) {
       is_last_block = true;
-      *global_flags = 0;
+      *global_flags = 0u;
       functor.init(&value);
-      for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < global_elements;
-           i += blockDim.x * blockDim.y) {
+      for (unsigned int i = threadIdx.y * blockDim.x + threadIdx.x;
+           i < global_elements; i += blockDim.x * blockDim.y) {
         functor.join(&value, &global_team_buffer_element[i]);
       }
       scalar_intra_block_reduction(
@@ -342,7 +313,7 @@ struct CudaReductionsFunctor<FunctorType, false, false> {
     __syncwarp(mask);
 
     for (int delta = skip_vector ? blockDim.x : 1; delta < width; delta *= 2) {
-      if (lane_id + delta < 32) {
+      if ((lane_id + delta < width) && (lane_id % (delta * 2) == 0)) {
         functor.join(value, value + delta);
       }
       __syncwarp(mask);
@@ -355,24 +326,25 @@ struct CudaReductionsFunctor<FunctorType, false, false> {
   __device__ static inline void scalar_intra_block_reduction(
       const FunctorType& functor, Scalar value, const bool skip, Scalar* result,
       const int /*shared_elements*/, Scalar* shared_team_buffer_element) {
-    const int warp_id = (threadIdx.y * blockDim.x) / 32;
+    const int warp_id              = (threadIdx.y * blockDim.x) / 32;
+    const unsigned int num_threads = blockDim.x * blockDim.y;
     Scalar* const my_shared_team_buffer_element =
         shared_team_buffer_element + threadIdx.y * blockDim.x + threadIdx.x;
     *my_shared_team_buffer_element = value;
     // Warp Level Reduction, ignoring Kokkos vector entries
     scalar_intra_warp_reduction(functor, my_shared_team_buffer_element, skip,
-                                32);
+                                Kokkos::min(32u, num_threads));
     // Wait for every warp to be done before using one warp to do final cross
     // warp reduction
     __syncthreads();
 
     if (warp_id == 0) {
       const unsigned int delta = (threadIdx.y * blockDim.x + threadIdx.x) * 32;
-      if (delta < blockDim.x * blockDim.y)
+      if (delta < num_threads)
         *my_shared_team_buffer_element = shared_team_buffer_element[delta];
       __syncwarp(0xffffffff);
       scalar_intra_warp_reduction(functor, my_shared_team_buffer_element, false,
-                                  blockDim.x * blockDim.y / 32);
+                                  num_threads / 32);
       if (threadIdx.x + threadIdx.y == 0) *result = *shared_team_buffer_element;
     }
   }
@@ -427,11 +399,6 @@ struct CudaReductionsFunctor<FunctorType, false, false> {
 //   __launch_bounds__(maxThreadsPerBlock,minBlocksPerMultiprocessor)
 // function qualifier which could be used to improve performance.
 //----------------------------------------------------------------------------
-// Maximize shared memory and minimize L1 cache:
-//   cudaFuncSetCacheConfig(MyKernel, cudaFuncCachePreferShared );
-// For 2.0 capability: 48 KB shared and 16 KB L1
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
 /*
  *  Algorithmic constraints:
  *   (a) blockDim.y <= 1024
@@ -446,7 +413,7 @@ __device__ void cuda_intra_block_reduce_scan(
 
   const unsigned value_count = functor.length();
   const unsigned not_less_power_of_two =
-      (1 << (Impl::int_log2(blockDim.y - 1) + 1));
+      Kokkos::Experimental::bit_ceil_builtin(blockDim.y);
   const unsigned BlockSizeMask = not_less_power_of_two - 1;
   // There is at most one warp that is neither completely full or empty.
   // For that warp, we shift all indices logically to the end and ignore join
@@ -616,11 +583,13 @@ __device__ bool cuda_single_inter_block_reduce_scan2(
         "blockDim");
   }
 
+  // NOLINTBEGIN(bugprone-sizeof-expression)
   const integral_nonzero_constant<
-      size_type, std::is_pointer<typename FunctorType::reference_type>::value
+      size_type, std::is_pointer_v<typename FunctorType::reference_type>
                      ? 0
                      : sizeof(value_type) / sizeof(size_type)>
       word_count((sizeof(value_type) * functor.length()) / sizeof(size_type));
+  // NOLINTEND(bugprone-sizeof-expression)
 
   // Reduce the accumulation for the entire block.
   cuda_intra_block_reduce_scan<false>(functor, pointer_type(shared_data));
@@ -693,7 +662,7 @@ __device__ bool cuda_single_inter_block_reduce_scan(
     const FunctorType& functor, const Cuda::size_type block_id,
     const Cuda::size_type block_count, SizeType* const shared_data,
     SizeType* const global_data, Cuda::size_type* const global_flags) {
-  if (!DoScan && !std::is_pointer<typename FunctorType::reference_type>::value)
+  if (!DoScan && !std::is_pointer_v<typename FunctorType::reference_type>)
     return Kokkos::Impl::CudaReductionsFunctor<
         FunctorType, false, (sizeof(typename FunctorType::value_type) > 16)>::
         scalar_inter_block_reduction(functor, block_id, block_count,
@@ -704,37 +673,37 @@ __device__ bool cuda_single_inter_block_reduce_scan(
 }
 
 // Size in bytes required for inter block reduce or scan
-template <bool DoScan, class FunctorType, class ArgTag>
+template <bool DoScan, class ArgTag, class ValueType, class FunctorType>
 inline std::enable_if_t<DoScan, unsigned>
 cuda_single_inter_block_reduce_scan_shmem(const FunctorType& functor,
                                           const unsigned BlockSize) {
   using Analysis =
       Impl::FunctorAnalysis<Impl::FunctorPatternInterface::SCAN,
-                            RangePolicy<Cuda, ArgTag>, FunctorType>;
+                            RangePolicy<Cuda, ArgTag>, FunctorType, ValueType>;
 
   return (BlockSize + 2) * Analysis::value_size(functor);
 }
 
-template <bool DoScan, class FunctorType, class ArgTag>
+template <bool DoScan, class ArgTag, class ValueType, class FunctorType>
 inline std::enable_if_t<!DoScan, unsigned>
 cuda_single_inter_block_reduce_scan_shmem(const FunctorType& functor,
                                           const unsigned BlockSize) {
   using Analysis =
       Impl::FunctorAnalysis<Impl::FunctorPatternInterface::REDUCE,
-                            RangePolicy<Cuda, ArgTag>, FunctorType>;
+                            RangePolicy<Cuda, ArgTag>, FunctorType, ValueType>;
 
   return (BlockSize + 2) * Analysis::value_size(functor);
 }
 
-template <typename WorkTag, typename Policy, typename FunctorType>
+template <typename WorkTag, typename ValueType, typename Policy,
+          typename FunctorType>
 inline void check_reduced_view_shmem_size(const Policy& policy,
                                           const FunctorType& functor) {
-  size_t minBlockSize = CudaTraits::WarpSize * 1;
+  size_t minBlockSize = static_cast<size_t>(CudaTraits::WarpSize) * 1;
   unsigned reqShmemSize =
-      cuda_single_inter_block_reduce_scan_shmem<false, FunctorType, WorkTag>(
+      cuda_single_inter_block_reduce_scan_shmem<false, WorkTag, ValueType>(
           functor, minBlockSize);
-  size_t maxShmemPerBlock =
-      policy.space().impl_internal_space_instance()->m_maxShmemPerBlock;
+  size_t maxShmemPerBlock = policy.space().cuda_device_prop().sharedMemPerBlock;
 
   if (reqShmemSize > maxShmemPerBlock) {
     Kokkos::Impl::throw_runtime_exception(

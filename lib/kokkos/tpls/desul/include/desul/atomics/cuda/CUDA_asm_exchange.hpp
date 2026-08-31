@@ -1,8 +1,12 @@
-#include<limits>
+#include <limits>
+
 namespace desul {
-#if defined(__CUDA_ARCH__)  || (defined(__clang__) && !defined(__NVCC__))
+namespace Impl {
 
-#include<desul/atomics/cuda/cuda_cc7_asm_exchange.inc>
+#include <desul/atomics/cuda/cuda_cc7_asm_exchange.inc>
 
+#ifdef DESUL_HAVE_16BYTE_LOCK_FREE_ATOMICS_DEVICE
+#include <desul/atomics/cuda/cuda_cc9_asm_exchange.inc>
 #endif
-}
+}  // namespace Impl
+}  // namespace desul

@@ -18,12 +18,16 @@ It documents the following functions:
 - :cpp:func:`lammps_scatter_atoms`
 - :cpp:func:`lammps_scatter_atoms_subset`
 - :cpp:func:`lammps_gather_bonds`
+- :cpp:func:`lammps_gather_angles`
+- :cpp:func:`lammps_gather_dihedrals`
+- :cpp:func:`lammps_gather_impropers`
 - :cpp:func:`lammps_gather`
 - :cpp:func:`lammps_gather_concat`
 - :cpp:func:`lammps_gather_subset`
 - :cpp:func:`lammps_scatter`
 - :cpp:func:`lammps_scatter_subset`
 - :cpp:func:`lammps_create_atoms`
+- :cpp:func:`lammps_create_molecule`
 
 -----------------------
 
@@ -57,6 +61,21 @@ It documents the following functions:
 
 -----------------------
 
+.. doxygenfunction:: lammps_gather_angles
+   :project: progguide
+
+-----------------------
+
+.. doxygenfunction:: lammps_gather_dihedrals
+   :project: progguide
+
+-----------------------
+
+.. doxygenfunction:: lammps_gather_impropers
+   :project: progguide
+
+-----------------------
+
 .. doxygenfunction:: lammps_gather
    :project: progguide
 
@@ -85,4 +104,8 @@ It documents the following functions:
 .. doxygenfunction:: lammps_create_atoms(void *handle, int n, const int *id, const int *type, const double *x, const double *v, const int *image, int bexpand)
    :project: progguide
 
+-----------------------
+
+.. doxygenfunction:: lammps_create_molecule
+   :project: progguide
 

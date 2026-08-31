@@ -16,13 +16,11 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
-#include "force.h"
 #include "memory.h"
 #include "modify.h"
 #include "sna.h"
 #include "update.h"
 
-#include <cmath>
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -33,14 +31,13 @@ ComputeSNAGrid::ComputeSNAGrid(LAMMPS *lmp, int narg, char **arg) :
   // skip over arguments used by base class
   // so that argument positions are identical to
   // regular per-atom compute
-
   arg += nargbase;
   narg -= nargbase;
 
   // begin code common to all SNAP computes
 
-  double rfac0, rmin0;
-  int twojmax, switchflag, bzeroflag, bnormflag, wselfallflag;
+  //double rfac0, rmin0;
+  //int twojmax, switchflag, bzeroflag, bnormflag, wselfallflag;
 
   int ntypes = atom->ntypes;
   int nargmin = 6 + 2 * ntypes;
@@ -58,6 +55,8 @@ ComputeSNAGrid::ComputeSNAGrid(LAMMPS *lmp, int narg, char **arg) :
   wselfallflag = 0;
   switchinnerflag = 0;
   nelements = 1;
+  chunksize = 32768;
+  parallel_thresh = 8192;
 
   // process required arguments
 
@@ -69,8 +68,9 @@ ComputeSNAGrid::ComputeSNAGrid(LAMMPS *lmp, int narg, char **arg) :
   twojmax = utils::inumeric(FLERR, arg[5], false, lmp);
 
   for (int i = 0; i < ntypes; i++) radelem[i + 1] = utils::numeric(FLERR, arg[6 + i], false, lmp);
-  for (int i = 0; i < ntypes; i++)
+  for (int i = 0; i < ntypes; i++) {
     wjelem[i + 1] = utils::numeric(FLERR, arg[6 + ntypes + i], false, lmp);
+  }
 
   // construct cutsq
 
@@ -183,11 +183,12 @@ ComputeSNAGrid::ComputeSNAGrid(LAMMPS *lmp, int narg, char **arg) :
 
 ComputeSNAGrid::~ComputeSNAGrid()
 {
+  if (copymode) return;
+
   memory->destroy(radelem);
   memory->destroy(wjelem);
   memory->destroy(cutsq);
   delete snaptr;
-
   if (chemflag) memory->destroy(map);
 }
 
@@ -204,6 +205,7 @@ void ComputeSNAGrid::init()
 
 void ComputeSNAGrid::compute_array()
 {
+
   invoked_array = update->ntimestep;
 
   // compute sna for each gridpoint
@@ -213,7 +215,7 @@ void ComputeSNAGrid::compute_array()
   int *const type = atom->type;
   const int ntotal = atom->nlocal + atom->nghost;
 
-  // insure rij, inside, and typej are of size jnum
+  // ensure rij, inside, and typej are of size jnum
 
   snaptr->grow_rij(ntotal);
 

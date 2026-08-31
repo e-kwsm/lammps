@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
+
 // This file is needed in order to get the linker language
 // for the header only submodule.
 // While we set the language properties in our normal cmake

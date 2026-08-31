@@ -17,13 +17,11 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
-#include "neigh_list.h"
-#include "neigh_request.h"
 #include "neighbor.h"
 
 using namespace LAMMPS_NS;
 
-#define BIG 1.0e20
+static constexpr double BIG = 1.0e20;
 
 /* -------------------------------------------------------------------- */
 

@@ -28,17 +28,16 @@ class Comm : protected Pointers {
   int layout;    // LAYOUT_UNIFORM = equal-sized bricks
                  // LAYOUT_NONUNIFORM = logical bricks, but diff sizes via LB
                  // LAYOUT_TILED = general tiling, due to RCB LB
-  enum { SINGLE, MULTI, MULTIOLD };
+  enum { SINGLE, MULTI };
   int mode;    // SINGLE = single cutoff
                // MULTI = multi-collection cutoff
-               // MULTIOLD = multiold-type cutoff
+  enum { BUFEXTRA = 1024 };     // standard communication buffer size for fixed size per-atom-data
 
   int me, nprocs;               // proc info
   int ghost_velocity;           // 1 if ghost atoms have velocity, 0 if not
   double cutghost[3];           // cutoffs used for acquiring ghost atoms
   double cutghostuser;          // user-specified ghost cutoff (mode == SINGLE)
   double *cutusermulti;         // per collection user ghost cutoff (mode == MULTI)
-  double *cutusermultiold;      // per type user ghost cutoff (mode == MULTIOLD)
   int ncollections;             // # of collections known by comm, used to test if # has changed
   int ncollections_cutoff;      // # of collections stored b cutoff/multi
   int recv_from_partition;      // recv proc layout from this partition
@@ -51,11 +50,11 @@ class Comm : protected Pointers {
 
   // public settings specific to layout = UNIFORM, NONUNIFORM
 
-  int procgrid[3];                     // procs assigned in each dim of 3d grid
-  int user_procgrid[3];                // user request for procs in each dim
-  int myloc[3];                        // which proc I am in each dim
+  int procgrid[3];                     // proc count assigned to each dim of 3d grid
+  int user_procgrid[3];                // user request for proc counts in each dim
+  int myloc[3];                        // which proc I am in each dim, 0 to N-1
   int procneigh[3][2];                 // my 6 neighboring procs, 0/1 = left/right
-  double *xsplit, *ysplit, *zsplit;    // fractional (0-1) sub-domain sizes
+  double *xsplit, *ysplit, *zsplit;    // fractional (0-1) sub-domain sizes, includes 0/1
   int ***grid2proc;                    // which proc owns i,j,k loc in 3d grid
 
   // public settings specific to layout = TILED
@@ -87,33 +86,26 @@ class Comm : protected Pointers {
 
   // forward/reverse comm from a Pair, Bond, Fix, Compute, Dump
 
-  virtual void forward_comm(class Pair *) = 0;
-  virtual void reverse_comm(class Pair *) = 0;
-  virtual void forward_comm(class Bond *) = 0;
-  virtual void reverse_comm(class Bond *) = 0;
+  virtual void forward_comm(class Pair *, int size = 0) = 0;
+  virtual void reverse_comm(class Pair *, int size = 0) = 0;
+  virtual void forward_comm(class Bond *, int size = 0) = 0;
+  virtual void reverse_comm(class Bond *, int size = 0) = 0;
   virtual void forward_comm(class Fix *, int size = 0) = 0;
   virtual void reverse_comm(class Fix *, int size = 0) = 0;
   virtual void reverse_comm_variable(class Fix *) = 0;
-  virtual void forward_comm(class Compute *) = 0;
-  virtual void reverse_comm(class Compute *) = 0;
-  virtual void forward_comm(class Dump *) = 0;
-  virtual void reverse_comm(class Dump *) = 0;
+  virtual void forward_comm(class Compute *, int size = 0) = 0;
+  virtual void reverse_comm(class Compute *, int size = 0) = 0;
+  virtual void forward_comm(class Dump *, int size = 0) = 0;
+  virtual void reverse_comm(class Dump *, int size = 0) = 0;
 
   // forward comm of an array
-  // exchange of info on neigh stencil
-  // set processor mapping options
 
   virtual void forward_comm_array(int, double **) = 0;
-  virtual int exchange_variable(int, double *, double *&) = 0;
 
   // map a point to a processor, based on current decomposition
 
   virtual void coord2proc_setup() {}
   virtual int coord2proc(double *, int &, int &, int &);
-
-  // partition a global regular grid by proc sub-domains
-
-  void partition_grid(int, int, int, double, int &, int &, int &, int &, int &, int &);
 
   // memory usage
 
@@ -147,12 +139,14 @@ class Comm : protected Pointers {
   int maxexchange_fix;            // static contribution to maxexchange from Fixes
   int maxexchange_fix_dynamic;    // 1 if a fix has a dynamic contribution
   int bufextra;                   // augment send buf size for an exchange atom
+  int bufextra_max;
 
   int gridflag;        // option for creating 3d grid
   int mapflag;         // option for mapping procs to 3d grid
   char xyz[4];         // xyz mapping of procs to 3d grid
   char *customfile;    // file with custom proc map
   char *outfile;       // proc grid/map output file
+  int numa_nodes;      // Number of numa domains per socket for 3d grid
 
   int otherflag;            // 1 if this partition dependent on another
   int other_style;          // style of dependency

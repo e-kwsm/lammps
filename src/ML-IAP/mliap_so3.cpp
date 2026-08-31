@@ -29,9 +29,10 @@
 using namespace SO3Math;
 using namespace LAMMPS_NS;
 using namespace MathConst;
-using namespace MathSpecial;
+using MathSpecial::powsign;
+using MathSpecial::powint;
 
-#define SMALL 1.0e-8
+static constexpr double SMALL = 1.0e-8;
 
 /* ---------------------------------------------------------------------- */
 
@@ -261,7 +262,7 @@ void MLIAP_SO3::init()
 
   for (i = 0; i < m_ldim; i++) m_idxu_block[i] = 0;
 
-  totali = square(m_lmax + 2);
+  totali = (m_lmax + 2) * (m_lmax + 2);
   memory->destroy(m_idxylm);
   memory->create(m_idxylm, totali, "MLIAP_SO3:idxylm");
   alloc_init += totali * sizeof(double);
@@ -361,22 +362,22 @@ void MLIAP_SO3::compute_W(int nmax, double *arr)
     for (beta = 1; beta < alpha + 1; beta++) {
       temp2 = (2 * beta + 5) * (2 * beta + 6) * (2 * beta + 7);
       arr[(alpha - 1) * nmax + beta - 1] =
-          sqrt(temp1 * temp2) / (5 + alpha + beta) / (6 + alpha + beta) / (7 + alpha + beta);
+          sqrt((double)temp1 * temp2) / (5 + alpha + beta) / (6 + alpha + beta) / (7 + alpha + beta);
       arr[(beta - 1) * nmax + alpha - 1] = arr[(alpha - 1) * nmax + beta - 1];
     }
   }
 
   int i, j, k, n = nmax;
-  auto outeig = new double[n];
-  auto outeigvec = new double[n * n];
-  auto arrinv = new double[n * n];
+  auto *outeig = new double[n];
+  auto *outeigvec = new double[n * n];
+  auto *arrinv = new double[n * n];
 
-  auto sqrtD = new double[n * n];
-  auto tempM = new double[n * n];
+  auto *sqrtD = new double[n * n];
+  auto *tempM = new double[n * n];
 
-  auto temparr = new double *[n];
-  auto tempvl = new double *[n];
-  auto tempout = new double[n];
+  auto *temparr = new double *[n];
+  auto *tempvl = new double *[n];
+  auto *tempout = new double[n];
 
   int info;
 
@@ -814,7 +815,8 @@ void MLIAP_SO3::spectrum(int nlocal, int *numneighs, int *jelems, double *wjelem
   bigint totaln = 0;
   bigint totali;
   double Ylm_r, Ylm_i;
-  int weight, neighbor;
+  int neighbor;
+  double weight;
   double x, y, z, r;
   double r_int;
   int twolmax = 2 * (lmax + 1);
@@ -909,8 +911,8 @@ void MLIAP_SO3::spectrum(int nlocal, int *numneighs, int *jelems, double *wjelem
 
       totali = (bigint) nmax * m_numYlms;
       for (bigint tn = 0; tn < totali; tn++) {
-        m_clist_r[tn] = m_clist_r[tn] * double(weight);
-        m_clist_i[tn] = m_clist_i[tn] * double(weight);
+        m_clist_r[tn] = m_clist_r[tn] * weight;
+        m_clist_i[tn] = m_clist_i[tn] * weight;
       }
 
       for (bigint tn = 0; tn < totali; tn++) {
@@ -946,7 +948,8 @@ void MLIAP_SO3::spectrum_dxdr(int nlocal, int *numneighs, int *jelems, double *w
   int findex;
   bigint gindex;
 
-  int numps, weight, neighbor;
+  int numps, neighbor;
+  double weight;
 
   double x, y, z, r;
 
@@ -1044,8 +1047,8 @@ void MLIAP_SO3::spectrum_dxdr(int nlocal, int *numneighs, int *jelems, double *w
 
       totali = (bigint) nmax * m_numYlms;
       for (bigint tn = 0; tn < totali; tn++) {
-        m_clist_r[tn] = m_clist_r[tn] * double(weight);
-        m_clist_i[tn] = m_clist_i[tn] * double(weight);
+        m_clist_r[tn] = m_clist_r[tn] * weight;
+        m_clist_i[tn] = m_clist_i[tn] * weight;
       }
 
       for (bigint tn = 0; tn < totali; tn++) {
@@ -1211,8 +1214,8 @@ void MLIAP_SO3::spectrum_dxdr(int nlocal, int *numneighs, int *jelems, double *w
 
       totali = (bigint) nmax * m_numYlms * 3;
       for (bigint tn = 0; tn < totali; tn++) {
-        m_dclist_r[tn] = m_dclist_r[tn] * double(weight);
-        m_dclist_i[tn] = m_dclist_i[tn] * double(weight);
+        m_dclist_r[tn] = m_dclist_r[tn] * weight;
+        m_dclist_i[tn] = m_dclist_i[tn] * weight;
       }
 
       totali = (bigint) numps * 3;

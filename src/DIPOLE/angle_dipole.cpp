@@ -27,9 +27,12 @@
 #include "neighbor.h"
 
 #include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
+
+static constexpr double SMALL = 1.0e-100;
 
 /* ---------------------------------------------------------------------- */
 
@@ -43,6 +46,8 @@ AngleDipole::AngleDipole(LAMMPS *lmp) : Angle(lmp)
 
 AngleDipole::~AngleDipole()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(k);
@@ -72,7 +77,7 @@ void AngleDipole::compute(int eflag, int vflag)
 
   double **f = atom->f;
   double delTx, delTy, delTz;
-  double fx, fy, fz, fmod, fmod_sqrtff;
+  double fx, fy, fz, fmod, fmod_len, len;
 
   if (!newton_bond) error->all(FLERR, "'newton' flag for bonded interactions must be 'on'");
 
@@ -87,6 +92,7 @@ void AngleDipole::compute(int eflag, int vflag)
     delz = x[iRef][2] - x[iDip][2];
 
     r = sqrt(delx * delx + dely * dely + delz * delz);
+    if (r < SMALL) continue;
 
     rmu = r * mu[iDip][3];
     cosGamma = (mu[iDip][0] * delx + mu[iDip][1] * dely + mu[iDip][2] * delz) / rmu;
@@ -111,11 +117,13 @@ void AngleDipole::compute(int eflag, int vflag)
     fz = delx * delTy - dely * delTx;
 
     fmod = sqrt(delTx * delTx + delTy * delTy + delTz * delTz) / r;    // magnitude
-    fmod_sqrtff = fmod / sqrt(fx * fx + fy * fy + fz * fz);
+    len = sqrt(fx * fx + fy * fy + fz * fz);
+    if (len < SMALL) continue;
+    fmod_len = fmod / len;
 
-    fi[0] = fx * fmod_sqrtff;
-    fi[1] = fy * fmod_sqrtff;
-    fi[2] = fz * fmod_sqrtff;
+    fi[0] = fx * fmod_len;
+    fi[1] = fy * fmod_len;
+    fi[2] = fz * fmod_len;
 
     fj[0] = -fi[0];
     fj[1] = -fi[1];
@@ -155,7 +163,7 @@ void AngleDipole::allocate()
 
 void AngleDipole::coeff(int narg, char **arg)
 {
-  if (narg != 3) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (narg != 3) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -174,7 +182,7 @@ void AngleDipole::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients");
+  if (count == 0) error->all(FLERR, "Incorrect args for angle coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -246,13 +254,27 @@ double AngleDipole::single(int type, int iRef, int iDip, int /*iDummy*/)
   double dely = x[iRef][1] - x[iDip][1];
   double delz = x[iRef][2] - x[iDip][2];
 
-  domain->minimum_image(delx, dely, delz);
+  domain->minimum_image(FLERR, delx, dely, delz);
 
   double r = sqrt(delx * delx + dely * dely + delz * delz);
+  if (r < SMALL) return 0.0;
+
   double rmu = r * mu[iDip][3];
   double cosGamma = (mu[iDip][0] * delx + mu[iDip][1] * dely + mu[iDip][2] * delz) / rmu;
   double deltaGamma = cosGamma - cos(gamma0[type]);
   double kdg = k[type] * deltaGamma;
 
   return kdg * deltaGamma;    // energy
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *AngleDipole::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k;
+  if (strcmp(str, "gamma0") == 0) return (void *) gamma0;
+  return nullptr;
 }

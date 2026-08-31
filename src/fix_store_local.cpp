@@ -14,7 +14,6 @@
 #include "fix_store_local.h"
 
 #include "atom.h"
-#include "comm.h"
 #include "error.h"
 #include "memory.h"
 #include "update.h"
@@ -22,7 +21,7 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
-#define DELTA 1024
+static constexpr int DELTA = 1024;
 
 /* ---------------------------------------------------------------------- */
 
@@ -31,6 +30,7 @@ FixStoreLocal::FixStoreLocal(LAMMPS *lmp, int narg, char **arg) :
 {
   if (narg != 5) error->all(FLERR, "Illegal fix STORE/LOCAL command");
   local_flag = 1;
+  dynamic_group_allow = 1;
 
   nreset = utils::inumeric(FLERR, arg[3], false, lmp);
   if (nreset <= 0) error->all(FLERR, "Illegal fix STORE/LOCAL command");

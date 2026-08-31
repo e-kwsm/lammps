@@ -19,9 +19,8 @@
 
 #include "comm.h"
 #include "dump.h"
-#include "dump_cfg.h"
-#include "dump_image.h"
 #include "error.h"
+#include "exceptions.h"
 #include "output.h"
 #include "update.h"
 
@@ -43,33 +42,57 @@ void WriteDump::command(int narg, char **arg)
     if (strcmp(arg[modindex], "modify") == 0) break;
 
   // create the Dump instance
-  // create dump command line with extra required args
+  // create dump command-line with extra required args
 
-  auto dumpargs = new char *[modindex + 2];
-  dumpargs[0] = (char *) "WRITE_DUMP";                                       // dump id
-  dumpargs[1] = arg[0];                                                      // group
-  dumpargs[2] = arg[1];                                                      // dump style
-  dumpargs[3] = utils::strdup(std::to_string(MAX(update->ntimestep, 1)));    // dump frequency
+  // work around "fix not computed at compatible times" errors.
 
-  for (int i = 2; i < modindex; ++i) dumpargs[i + 2] = arg[i];
+  int dumpfreq = MAX(1, update->nsteps);
+  dumpfreq += update->ntimestep % dumpfreq;
 
-  Dump *dump = output->add_dump(modindex + 2, dumpargs);
-  if (modindex < narg) dump->modify_params(narg - modindex - 1, &arg[modindex + 1]);
+  std::string dump_id = "WRITE_DUMP";
+  auto *dumpargs = new char *[modindex + 2];
+  dumpargs[0] = utils::strdup(dump_id);                     // dump id
+  dumpargs[1] = arg[0];                                     // group
+  dumpargs[2] = arg[1];                                     // dump style
+  dumpargs[3] = utils::strdup(std::to_string(dumpfreq));    // dump frequency
+
+  // copy arguments up to modify, but skip over "noinit" if present
+
+  int noinitwarn = 0;
+  for (int i = 2; i < modindex; ++i) {
+    if (strcmp(arg[i], "noinit") == 0) {
+      noinitwarn = 1;
+    } else {
+      dumpargs[i + 2 - noinitwarn] = arg[i];
+    }
+  }
+
+  auto *dump = output->add_dump(modindex + 2 - noinitwarn, dumpargs);
+
+  try {
+    if (modindex < narg) dump->modify_params(narg - modindex - 1, &arg[modindex + 1]);
+  } catch (LAMMPSException &e) {
+    // delete dump after error and then rethrow the exception to avoid re-use of dump-ID error
+    dump = output->get_dump_by_id(dump_id);
+    if (dump) output->delete_dump(dump_id);
+    throw e;
+  }
 
   // write out one frame and then delete the dump again
   // set multifile_override for DumpImage so that filename needs no "*"
 
-  if (strcmp(arg[1], "image") == 0) (dynamic_cast<DumpImage *>(dump))->multifile_override = 1;
-  if (strcmp(arg[1], "cfg") == 0) (dynamic_cast<DumpCFG *>(dump))->multifile_override = 1;
-  if ((update->first_update == 0) && (comm->me == 0))
-    error->warning(FLERR, "Calling write_dump before a full system init.");
+  if (strcmp(arg[1], "image") == 0) dump->multifile_override = 1;
+  if (strcmp(arg[1], "cfg") == 0) dump->multifile_override = 1;
+  if ((update->first_update == 0) && (comm->me == 0) && (noinitwarn == 0))
+    error->warning(FLERR, "Calling write_dump before a full system init");
 
   dump->init();
   dump->write();
 
   // delete the Dump instance and local storage
 
-  output->delete_dump(dumpargs[0]);
+  output->delete_dump(dump_id);
   delete[] dumpargs[3];
+  delete[] dumpargs[0];
   delete[] dumpargs;
 }

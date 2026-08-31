@@ -22,8 +22,10 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "kspace.h"
 #include "math_const.h"
+#include "math_special.h"
 #include "memory.h"
 #include "neigh_list.h"
 #include "neighbor.h"
@@ -34,19 +36,24 @@
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
+using MathSpecial::mdftaper;
 
-#define DELTA 4
-#define PGDELTA 1
-#define MAXNEIGH 24
+static constexpr int DELTA = 4;
+static constexpr int MAXNEIGH = 24;
 
 /* ---------------------------------------------------------------------- */
 
-PairCoulStreitz::PairCoulStreitz(LAMMPS *lmp) : Pair(lmp)
+PairCoulStreitz::PairCoulStreitz(LAMMPS *lmp) :
+    Pair(lmp), scale(nullptr), qeq_x(nullptr), qeq_j(nullptr), qeq_g(nullptr), qeq_z(nullptr),
+    qeq_c(nullptr)
 {
   single_enable = 0;
   restartinfo = 0;
   one_coeff = 1;
   nmax = 0;
+  drtap = 0.0;
+  dsfflag = 0;
+  dsfflag = 0;
 
   params = nullptr;
 }
@@ -102,14 +109,23 @@ void PairCoulStreitz::settings(int narg, char **arg)
   cut_coul = utils::numeric(FLERR,arg[0],false,lmp);
 
   if (strcmp(arg[1],"wolf") == 0) {
+    if (narg < 3) utils::missing_cmd_args(FLERR, "pair_style coul/streitz wolf", error);
     kspacetype = 1;
     g_wolf = utils::numeric(FLERR,arg[2],false,lmp);
+    if (narg > 3)
+      drtap = utils::numeric(FLERR,arg[3],false,lmp);
+  } else if (strcmp(arg[1],"dsf") == 0){
+    if (narg < 3) utils::missing_cmd_args(FLERR, "pair_style coul/streitz dsf", error);
+    kspacetype = 1;
+    dsfflag = 1;
+    g_wolf = utils::numeric(FLERR,arg[2],false,lmp);
+    if (narg > 3)
+      drtap = utils::numeric(FLERR,arg[3],false,lmp);
   } else if (strcmp(arg[1],"ewald") == 0) {
     ewaldflag = pppmflag = 1;
     kspacetype = 2;
-  } else {
-    error->all(FLERR,"Illegal pair_style command");
-  }
+  } else
+    error->all(FLERR, "Unknown pair_style keyword: {}", arg[1]);
 }
 
 /* ----------------------------------------------------------------------
@@ -146,7 +162,7 @@ void PairCoulStreitz::init_style()
 
   cut_coulsq = cut_coul * cut_coul;
 
-  // insure use of KSpace long-range solver when ewald specified, set g_ewald
+  // ensure use of KSpace long-range solver when ewald specified, set g_ewald
 
   if (ewaldflag) {
     if (force->kspace == nullptr)
@@ -163,7 +179,9 @@ double PairCoulStreitz::init_one(int i, int j)
 {
   scale[j][i] = scale[i][j];
 
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
   return cut_coul;
 }
 
@@ -356,10 +374,14 @@ void PairCoulStreitz::compute(int eflag, int vflag)
 
       coulomb_integral_wolf(zei, zej, r, ci_jfi, dci_jfi, ci_fifj, dci_fifj);
 
-      // Wolf Sum
+      // Wolf-Fennell Sum
 
-      wolf_sum(qi, qj, zj, r, ci_jfi, dci_jfi, ci_fifj, dci_fifj,
-               ecoul, forcecoul);
+      if (dsfflag == 1)
+        fennell_sum(qi, qj, zj, r, ci_jfi, dci_jfi, ci_fifj, dci_fifj,
+                    ecoul, forcecoul);
+      else
+        wolf_sum(qi, qj, zj, r, ci_jfi, dci_jfi, ci_fifj, dci_fifj,
+                 ecoul, forcecoul);
 
       // Forces
 
@@ -556,20 +578,71 @@ void PairCoulStreitz::wolf_sum(double qi, double qj, double zj, double r,
   double etmp1, etmp2, etmp3;
   double ftmp1, ftmp2, ftmp3;
 
+  double ftap, dftap;
+
   etmp = etmp1 = etmp2 = etmp3 = 0.0;
   ftmp = ftmp1 = ftmp2 = ftmp3 = 0.0;
 
+  mdftaper(r, rc-drtap, rc, ftap, dftap);
+
   etmp1 = erfcr/r - erfcrc/rc;
-  etmp2 = qi * zj * (ci_jfi - ci_fifj);
-  etmp3 = qi * qj * 0.50 * (etmp1 + ci_fifj);
+  etmp2 = qi * zj * (ci_jfi - ci_fifj) * ftap;
+  etmp3 = qi * qj * 0.50 * (etmp1 + ci_fifj*ftap);
 
   ftmp1 = -erfcr/r/r - 2.0*a/MY_PIS*derfcr/r - dwoself;
-  ftmp2 = qi * zj * (dci_jfi - dci_fifj);
-  ftmp3 = qi * qj * 0.50 * (ftmp1 + dci_fifj);
+  ftmp2 = qi * zj * (dci_jfi*ftap + ci_jfi*dftap - dci_fifj*ftap - ci_fifj*dftap);
+  ftmp3 = qi * qj * 0.50 * (ftmp1 + dci_fifj*ftap + ci_fifj*dftap);
 
   etmp = qqrd2e * (etmp2 + etmp3);
   ftmp = qqrd2e * (ftmp2 + ftmp3);
+}
 
+/* ----------------------------------------------------------------------
+   zi*zj terms commented out, because they are contained in the potential (pair, EAM, Tersoff, ...)
+*/
+
+void PairCoulStreitz::fennell_sum(double qi, double qj, double zj, double r,
+                double ci_jfi, double dci_jfi, double ci_fifj,
+                double dci_fifj, double &etmp, double &ftmp)
+{
+  double a = g_wolf;
+  double rc = cut_coul;
+  double qqrd2e = force->qqrd2e;
+
+  double r2 = r*r, rc2 = rc*rc, a2 = a*a;
+  double erfcr = erfc(a*r);
+  double derfcr = exp(-a2*r2);
+  double derfcrc = exp(-a2*rc2);
+  double erfcrc = erfc(a*rc);
+
+  double etmp0, /*etmp1,*/ etmp2, etmp3;
+  double ftmp0, /*ftmp1,*/ ftmp2, ftmp3;
+
+  double con = 2.0*a/MY_PIS;
+  double ftap, dftap;
+
+  if (r >= rc) {
+    etmp = 0.0;
+    ftmp = 0.0;
+    return;
+  }
+
+  mdftaper(r, rc-drtap, rc, ftap, dftap);
+
+  etmp0 = erfcr/r - erfcrc/rc + (erfcrc/rc2 + con*derfcrc/rc)*(r-rc);
+//  etmp1 = zi * zj * 0.5 * (ci_fifj*ftap - ci_ifj*ftap - ci_jfi*ftap);
+  etmp2 = qi * zj * (ci_jfi - ci_fifj) * ftap;
+  etmp3 = qi * qj * 0.5 * (etmp0 + ci_fifj*ftap);
+
+  ftmp0 = -erfcr/r2 - con*derfcr/r + (erfcrc/rc2 + con*derfcrc/rc);
+  ftmp0 = ftmp0 - dwoself;
+//  ftmp1 = zi * zj * 0.5 * (dci_fifj*ftap + ci_fifj*dftap - dci_ifj*ftap - ci_ifj*dftap -
+//    dci_jfi*ftap - ci_jfi*dftap);
+  ftmp2 = qi * zj * (dci_jfi*ftap + ci_jfi*dftap - dci_fifj*ftap - ci_fifj*dftap);
+  ftmp3 = qi * qj * 0.5 * (ftmp0 + dci_fifj*ftap + ci_fifj*dftap);
+
+  etmp = qqrd2e * (/*etmp1 +*/ etmp2 + etmp3);
+  ftmp = qqrd2e * (/*ftmp1 +*/ ftmp2 + ftmp3);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -691,6 +764,7 @@ void *PairCoulStreitz::extract(const char *str, int &dim)
   }
   if (strcmp(str,"chi") == 0 && qeq_x) {
     dim = 1;
+    qeq_x[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) qeq_x[i] = params[map[i]].chi;
       else qeq_x[i] = 0.0;
@@ -698,6 +772,7 @@ void *PairCoulStreitz::extract(const char *str, int &dim)
   }
   if (strcmp(str,"eta") == 0 && qeq_j) {
     dim = 1;
+    qeq_j[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) qeq_j[i] = params[map[i]].eta;
       else qeq_j[i] = 0.0;
@@ -705,6 +780,7 @@ void *PairCoulStreitz::extract(const char *str, int &dim)
   }
   if (strcmp(str,"gamma") == 0 && qeq_g) {
     dim = 1;
+    qeq_g[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) qeq_g[i] = params[map[i]].gamma;
       else qeq_g[i] = 0.0;
@@ -712,6 +788,7 @@ void *PairCoulStreitz::extract(const char *str, int &dim)
   }
   if (strcmp(str,"zeta") == 0 && qeq_z) {
     dim = 1;
+    qeq_z[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) qeq_z[i] = params[map[i]].zeta;
       else qeq_z[i] = 0.0;
@@ -719,6 +796,7 @@ void *PairCoulStreitz::extract(const char *str, int &dim)
   }
   if (strcmp(str,"zcore") == 0 && qeq_c) {
     dim = 1;
+    qeq_c[0] = 0.0;
     for (int i = 1; i <= atom->ntypes; i++)
       if (map[i] >= 0) qeq_c[i] = params[map[i]].zcore;
       else qeq_c[i] = 0.0;
